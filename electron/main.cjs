@@ -323,6 +323,10 @@ function createTranscriptOverlayWindow() {
   }));
   guardNavigation(transcriptOverlayWindow);
   transcriptOverlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  // Use native Acrylic where supported; CSS glass remains the fallback.
+  if (process.platform === 'win32' && typeof transcriptOverlayWindow.setBackgroundMaterial === 'function') {
+    try { transcriptOverlayWindow.setBackgroundMaterial('acrylic'); } catch {}
+  }
   transcriptOverlayWindow.setIgnoreMouseEvents(true, { forward: true });
   positionTranscriptOverlayWindow();
   transcriptOverlayWindow.on('closed', () => { transcriptOverlayWindow = null; });
