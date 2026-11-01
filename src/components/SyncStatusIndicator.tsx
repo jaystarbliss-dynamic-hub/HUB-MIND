@@ -1,54 +1,47 @@
 import React, { useState, useEffect } from 'react';
 import { Wifi, WifiOff, RefreshCw, CheckCircle2, Cloud, AlertCircle, Database } from 'lucide-react';
-import { flushOfflineQueue, getOfflineActionQueue } from '../lib/offlineQueue';
+import { flushOfflineQueue, getOfflineActionQueue, retryFailedOfflineActions } from '../lib/offlineQueue';
 
 export const SyncStatusIndicator: React.FC = () => {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSynced, setLastSynced] = useState<Date>(new Date());
   const [pendingCount, setPendingCount] = useState<number>(() => getOfflineActionQueue().length);
+  const [failedCount, setFailedCount] = useState<number>(() => getOfflineActionQueue().filter(item => item.status === 'failed').length);
   const [showDetails, setShowDetails] = useState<boolean>(false);
 
   useEffect(() => {
-    // Initial check
-    setPendingCount(getOfflineActionQueue().length);
+    const refreshCounts = () => {
+      const queue = getOfflineActionQueue();
+      setPendingCount(queue.length);
+      setFailedCount(queue.filter(item => item.status === 'failed').length);
+    };
+    refreshCounts();
 
     const handleOnline = () => {
       setIsOnline(true);
       void triggerSync();
     };
-
     const handleOffline = () => {
       setIsOnline(false);
-      setPendingCount(getOfflineActionQueue().length);
+      refreshCounts();
     };
-
-    const handleQueueChanged = (e: any) => {
-      if (e.detail?.count !== undefined) {
-        setPendingCount(e.detail.count);
-      } else {
-        setPendingCount(getOfflineActionQueue().length);
-      }
-    };
-
-    const handleSyncStatus = (e: any) => {
-      if (e.detail?.status === 'syncing') {
+    const handleQueueChanged = () => refreshCounts();
+    const handleSyncStatus = (event: any) => {
+      if (event.detail?.status === 'syncing') {
         setIsSyncing(true);
-      } else if (e.detail?.status === 'synced') {
-        setIsSyncing(false);
-        setLastSynced(new Date());
-        setPendingCount(getOfflineActionQueue().length);
-      } else {
-        setIsSyncing(false);
-        setPendingCount(getOfflineActionQueue().length);
+        refreshCounts();
+        return;
       }
+      setIsSyncing(false);
+      refreshCounts();
+      if (event.detail?.status === 'synced') setLastSynced(new Date());
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('hubmind:offline-queue-changed', handleQueueChanged);
     window.addEventListener('hubmind:sync-status', handleSyncStatus);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -67,9 +60,25 @@ export const SyncStatusIndicator: React.FC = () => {
       }
       const res = await flushOfflineQueue();
       setPendingCount(res.remaining);
-      setLastSynced(new Date());
+      setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
+      if (res.remaining === 0) setLastSynced(new Date());
     } catch (e) {
       console.warn('[SyncStatusIndicator] Sync trigger result:', e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const retryFailed = async () => {
+    if (!navigator.onLine || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const res = await retryFailedOfflineActions();
+      setPendingCount(res.remaining);
+      setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
+      if (res.remaining === 0) setLastSynced(new Date());
+    } catch (e) {
+      console.warn('[SyncStatusIndicator] Failed-action retry:', e);
     } finally {
       setIsSyncing(false);
     }
@@ -86,6 +95,8 @@ export const SyncStatusIndicator: React.FC = () => {
             ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
             : isSyncing
             ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+            : failedCount > 0
+            ? 'bg-rose-500/10 text-rose-300 border-rose-500/30'
             : pendingCount > 0
             ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30 hover:bg-cyan-500/20'
             : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
@@ -101,6 +112,11 @@ export const SyncStatusIndicator: React.FC = () => {
           <>
             <RefreshCw className="w-3 h-3 text-blue-400 animate-spin" />
             <span>Syncing ({pendingCount})...</span>
+          </>
+        ) : failedCount > 0 ? (
+          <>
+            <AlertCircle className="w-3 h-3 text-rose-400" />
+            <span>{failedCount} Failed</span>
           </>
         ) : pendingCount > 0 ? (
           <>
@@ -145,11 +161,25 @@ export const SyncStatusIndicator: React.FC = () => {
                 </span>
               </div>
               <div className="flex justify-between">
+                <span>Failed actions:</span>
+                <span className={failedCount > 0 ? 'text-rose-300 font-semibold' : 'text-slate-200'}>{failedCount}</span>
+              </div>
+              <div className="flex justify-between">
                 <span>Last full sync:</span>
                 <span className="text-slate-200">{formattedTime}</span>
               </div>
             </div>
 
+            {failedCount > 0 && (
+              <button
+                onClick={() => { void retryFailed(); setShowDetails(false); }}
+                disabled={!isOnline || isSyncing}
+                className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-50 text-rose-200 rounded-lg font-medium transition-colors"
+              >
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>{isSyncing ? 'Retrying failed actions...' : 'Retry failed actions'}</span>
+              </button>
+            )}
             <button
               onClick={() => {
                 void triggerSync();

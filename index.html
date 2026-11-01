@@ -4,14 +4,20 @@
     <script>
       // Suppress benign [vite] HMR connection notices and mock Vite WebSocket in container environment
       (function() {
-        if (typeof window !== 'undefined' && window.WebSocket) {
+        if (typeof window !== 'undefined' && window.WebSocket && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
           const OrigWebSocket = window.WebSocket;
           const isViteWs = function(url, protocols) {
-            const urlStr = String(url || '').toLowerCase();
-            if (urlStr.includes('vite') || urlStr.includes('hmr') || urlStr.includes('ping') || urlStr.includes('token=') || urlStr.includes('24678')) return true;
-            if (typeof protocols === 'string' && (protocols.includes('vite') || protocols.includes('hmr') || protocols.includes('ping'))) return true;
-            if (Array.isArray(protocols) && protocols.some(function(p) { return String(p).toLowerCase().includes('vite') || String(p).toLowerCase().includes('hmr') || String(p).toLowerCase().includes('ping'); })) return true;
-            return false;
+            // Vite's development socket is local to the current dev server.
+            // Never mock external WebSockets (notably Gemini Live on Google hosts),
+            // even when their authentication URL contains an access_token query.
+            let candidate;
+            try { candidate = new URL(String(url || ''), window.location.href); } catch { return false; }
+            if (!['ws:', 'wss:'].includes(candidate.protocol) || candidate.hostname !== window.location.hostname) return false;
+            const pathname = candidate.pathname.toLowerCase();
+            const hasViteProtocol = typeof protocols === 'string'
+              ? /vite|hmr|ping/i.test(protocols)
+              : Array.isArray(protocols) && protocols.some(protocol => /vite|hmr|ping/i.test(String(protocol)));
+            return pathname === '/' || pathname.includes('vite') || pathname.includes('hmr') || pathname === '/__vite_ping' || hasViteProtocol;
           };
 
           function ViteMockWebSocket(url, protocols) {
@@ -19,16 +25,12 @@
               return new ViteMockWebSocket(url, protocols);
             }
             if (!isViteWs(url, protocols)) {
-              return protocols !== undefined ? new OrigWebSocket(url, protocols) : new OrigWebSocket(url);
+              return new OrigWebSocket(url, protocols);
             }
             const self = this;
-            this.CONNECTING = 0;
-            this.OPEN = 1;
-            this.CLOSING = 2;
-            this.CLOSED = 3;
             this.url = String(url || '');
             this.protocol = typeof protocols === 'string' ? protocols : (Array.isArray(protocols) ? protocols[0] : 'vite-hmr');
-            this.readyState = 1;
+            this.readyState = OrigWebSocket.OPEN || 1;
             this.binaryType = 'blob';
             this.bufferedAmount = 0;
             this.extensions = '';
@@ -51,7 +53,7 @@
             this.dispatchEvent = function(event) {
               const type = event && event.type;
               if (listeners[type]) {
-                listeners[type].slice().forEach(function(fn) {
+                listeners[type].forEach(function(fn) {
                   try { fn.call(self, event); } catch (e) {}
                 });
               }
@@ -82,28 +84,24 @@
             };
 
             this.close = function() {
-              self.readyState = 3;
+              self.readyState = OrigWebSocket.CLOSED || 3;
+              self.dispatchEvent(new CloseEvent('close'));
             };
 
             setTimeout(function() {
-              self.readyState = 1;
+              self.readyState = OrigWebSocket.OPEN || 1;
               self.dispatchEvent(new Event('open'));
               setTimeout(function() {
                 self.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'connected' }) }));
-              }, 10);
-            }, 5);
+              }, 20);
+            }, 10);
           }
 
-          ViteMockWebSocket.CONNECTING = 0;
-          ViteMockWebSocket.OPEN = 1;
-          ViteMockWebSocket.CLOSING = 2;
-          ViteMockWebSocket.CLOSED = 3;
-          ViteMockWebSocket.prototype = {
-            CONNECTING: 0,
-            OPEN: 1,
-            CLOSING: 2,
-            CLOSED: 3
-          };
+          ViteMockWebSocket.CONNECTING = OrigWebSocket.CONNECTING || 0;
+          ViteMockWebSocket.OPEN = OrigWebSocket.OPEN || 1;
+          ViteMockWebSocket.CLOSING = OrigWebSocket.CLOSING || 2;
+          ViteMockWebSocket.CLOSED = OrigWebSocket.CLOSED || 3;
+          ViteMockWebSocket.prototype = OrigWebSocket.prototype;
 
           window.WebSocket = ViteMockWebSocket;
         }
@@ -128,7 +126,6 @@
             const lower = fullText.toLowerCase();
             return (
               lower.includes('[vite]') ||
-              lower.includes('websocket closed without opened') ||
               lower.includes('failed to connect to websocket') ||
               lower.includes('vite:') ||
               lower.includes('/@vite/') ||

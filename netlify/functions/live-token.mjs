@@ -1,6 +1,4 @@
-const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || '';
-const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
-const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || '(default)';
+import { verifyFirebaseUser } from './lib/googleOAuth.mjs';
 const liveTokenRateLimits = new Map();
 
 function isRateLimited(req) {
@@ -24,61 +22,7 @@ function json(body, status = 200) {
   });
 }
 
-async function verifyFirebaseUser(idToken) {
-  const identityPromise = fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(FIREBASE_WEB_API_KEY)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken }),
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
 
-  const identityResponse = await identityPromise;
-
-  if (!identityResponse.ok) {
-    throw new Error('Your Hub-Mind session is no longer valid. Please sign in again.');
-  }
-
-  const identityData = await identityResponse.json();
-  const user = identityData?.users?.[0];
-
-  if (!user || user.disabled) {
-    throw new Error('Your Hub-Mind account is unavailable.');
-  }
-
-  let role = 'staff';
-  try {
-    // The profile check remains non-fatal, but it is deliberately kept after
-    // Firebase identity validation so invalid sessions never trigger a profile
-    // lookup. This is the only additional request required for suspension checks.
-    const profileResponse = await fetch(
-      `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_PROJECT_ID)}/databases/${encodeURIComponent(FIRESTORE_DATABASE_ID)}/documents/users/${encodeURIComponent(user.localId)}`,
-      {
-        headers: { Authorization: `Bearer ${idToken}` },
-      },
-    );
-
-    if (profileResponse.ok) {
-      const profileDocument = await profileResponse.json();
-      const fields = profileDocument?.fields || {};
-      const status = fields.status?.stringValue;
-      role = fields.role?.stringValue || 'staff';
-
-      if (status === 'suspended' || status === 'inactive') {
-        throw new Error('Your Hub-Mind account is currently suspended.');
-      }
-    }
-  } catch (err) {
-    if (err.message && err.message.includes('suspended')) {
-      throw err;
-    }
-    console.warn('Profile fetch non-fatal fallback in live-token:', err);
-  }
-
-  return { ...user, hubMindRole: role };
-}
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
@@ -144,9 +88,10 @@ export default async function handler(req) {
     });
   } catch (error) {
     console.error('Jess live-token function error:', error);
+    const status = [401, 403, 503].includes(Number(error?.status)) ? Number(error.status) : 500;
     return json(
       { error: error?.message || 'Could not initialise Jess Live.' },
-      500,
+      status,
     );
   }
 }

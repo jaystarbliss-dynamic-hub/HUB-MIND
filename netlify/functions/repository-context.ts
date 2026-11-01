@@ -1,4 +1,4 @@
-const REPO = 'Jaystarbliss-studios/HUB-MIND';
+const REPO = 'jaystarbliss-dynamic-hub/HUB-MIND';
 const API = 'https://api.github.com';
 const headers = {
   Accept: 'application/vnd.github+json',

@@ -44,7 +44,7 @@ export interface RepoOverview {
   updatedAt: string;
 }
 
-const GITHUB_REPO = 'Jaystarbliss-studios/HUB-MIND';
+const GITHUB_REPO = 'jaystarbliss-dynamic-hub/HUB-MIND';
 const GITHUB_API_BASE = `https://api.github.com/repos/${GITHUB_REPO}`;
 
 // In-memory cache with 60s TTL
