@@ -2,7 +2,7 @@ const THREE = window.THREE || null;
 
 (() => {
   "use strict";
-  const canvas = document.getElementById("jess-canvas");
+  let canvas = document.getElementById("jess-canvas");
   const visualCanvas = document.getElementById("jess-visualizer");
   const visualCtx = visualCanvas?.getContext("2d", { alpha: true }) || null;
   const speech = document.getElementById("speech");
@@ -347,6 +347,11 @@ const THREE = window.THREE || null;
       try { renderer?.dispose?.(); } catch {}
       renderer = null; scene = null; camera = null; avatar = null;
       leftArm = null; rightArm = null; leftEye = null; rightEye = null; mouth = null; mouthLip = null;
+      // A canvas that has acquired a WebGL context cannot later provide a 2D context.
+      // Replace it with a fresh canvas so the fallback works even after a mid-init error.
+      const fallbackCanvas = canvas.cloneNode(false);
+      canvas.replaceWith(fallbackCanvas);
+      canvas = fallbackCanvas;
       drawFallback2D();
     }
   }
