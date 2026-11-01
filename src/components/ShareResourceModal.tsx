@@ -51,7 +51,7 @@ export function ShareResourceModal({
 
   useEffect(() => {
     if (!isOpen || !resourceId) return;
-    const unsubShares = subscribeToResourceShares(resourceId, setShares);
+    const unsubShares = profile?.id ? subscribeToResourceShares(resourceId, profile.id, setShares) : () => {};
     const unsubUsers = subscribeToUsers(setAllUsers);
     let unsubConn: (() => void) | undefined;
     if (profile) {
