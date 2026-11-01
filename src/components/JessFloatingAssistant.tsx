@@ -275,12 +275,12 @@ export function JessFloatingAssistant() {
     if (!isDesktopShell) return;
     const stateMap: Record<JessState, string> = {
       idle: 'idle',
-      listening: 'idle',
-      thinking: 'think',
-      speaking: 'happy',
-      interrupted: 'think',
-      muted: 'idle',
-      error: 'think',
+      listening: 'listening',
+      thinking: 'thinking',
+      speaking: 'speaking',
+      interrupted: 'interrupted',
+      muted: 'muted',
+      error: 'error',
     };
     const bridge = (window as any).hubMindDesktop;
     void Promise.resolve(bridge?.setJessPetState?.(stateMap[state] || 'idle')).catch(() => {});
