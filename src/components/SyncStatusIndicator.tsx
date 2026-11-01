@@ -11,51 +11,37 @@ export const SyncStatusIndicator: React.FC = () => {
   const [showDetails, setShowDetails] = useState<boolean>(false);
 
   useEffect(() => {
-    // Initial check
-    setPendingCount(getOfflineActionQueue().length);
-      setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
-    setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
+    const refreshCounts = () => {
+      const queue = getOfflineActionQueue();
+      setPendingCount(queue.length);
+      setFailedCount(queue.filter(item => item.status === 'failed').length);
+    };
+    refreshCounts();
 
     const handleOnline = () => {
       setIsOnline(true);
       void triggerSync();
     };
-
     const handleOffline = () => {
       setIsOnline(false);
-      setPendingCount(getOfflineActionQueue().length);
-      setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
+      refreshCounts();
     };
-
-    const handleQueueChanged = (e: any) => {
-      if (e.detail?.count !== undefined) {
-        setPendingCount(e.detail.count);
-      } else {
-        setPendingCount(getOfflineActionQueue().length);
-      setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
-      }
-    };
-
-    const handleSyncStatus = (e: any) => {
-      if (e.detail?.status === 'syncing') {
+    const handleQueueChanged = () => refreshCounts();
+    const handleSyncStatus = (event: any) => {
+      if (event.detail?.status === 'syncing') {
         setIsSyncing(true);
-      } else if (e.detail?.status === 'synced' || e.detail?.status === 'failed') {
-        setIsSyncing(false);
-        setLastSynced(new Date());
-        setPendingCount(getOfflineActionQueue().length);
-      setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
-      } else {
-        setIsSyncing(false);
-        setPendingCount(getOfflineActionQueue().length);
-      setFailedCount(getOfflineActionQueue().filter(item => item.status === 'failed').length);
+        refreshCounts();
+        return;
       }
+      setIsSyncing(false);
+      refreshCounts();
+      if (event.detail?.status === 'synced') setLastSynced(new Date());
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('hubmind:offline-queue-changed', handleQueueChanged);
     window.addEventListener('hubmind:sync-status', handleSyncStatus);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
