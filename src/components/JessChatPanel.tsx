@@ -234,7 +234,7 @@ export function JessChatPanel({ onClose }: { onClose: () => void }) {
     <section className="jess-chat-panel" role="dialog" aria-modal="false" aria-label="Chat with Jess">
       <header className="jess-chat-header">
         <div className="jess-chat-identity">
-          <div className="jess-chat-avatar"><Sparkles size={17}/></div>
+          <div className="jess-chat-avatar overflow-hidden"><img src="/assets/jess-avatar.png" alt="Jess" className="w-full h-full object-cover rounded-xl" /></div>
           <div className="jess-chat-heading"><strong>Jess</strong><span><i/> Hub-Mind thought partner</span></div>
         </div>
         <div className="jess-chat-header-actions">
@@ -262,7 +262,7 @@ export function JessChatPanel({ onClose }: { onClose: () => void }) {
       <div className="jess-chat-messages" ref={listRef} aria-live="polite">
         {messages.map((message, index) => (
           <article key={message.id} className={'jess-chat-message ' + (message.role === 'user' ? 'is-user' : 'is-jess')}>
-            {message.role === 'assistant' && <div className="jess-chat-message-avatar"><Sparkles size={13}/></div>}
+            {message.role === 'assistant' && <div className="jess-chat-message-avatar overflow-hidden p-0"><img src="/assets/jess-avatar.png" alt="Jess" className="w-full h-full object-cover rounded-lg" /></div>}
             <div className="jess-chat-message-body">
               <div className="jess-chat-message-label">{message.role === 'user' ? 'You' : 'Jess'}</div>
               <div className="jess-chat-bubble">{message.text}</div>
@@ -270,7 +270,7 @@ export function JessChatPanel({ onClose }: { onClose: () => void }) {
             </div>
           </article>
         ))}
-        {sending && <div className="jess-chat-typing"><span className="jess-chat-message-avatar"><Sparkles size={13}/></span><span className="jess-chat-typing-dots"><i/><i/><i/></span><span>Jess is thinking</span><LoaderCircle className="jess-chat-spinner" size={13}/></div>}
+        {sending && <div className="jess-chat-typing"><span className="jess-chat-message-avatar overflow-hidden p-0"><img src="/assets/jess-avatar.png" alt="Jess" className="w-full h-full object-cover rounded-lg" /></span><span className="jess-chat-typing-dots"><i/><i/><i/></span><span>Jess is thinking</span><LoaderCircle className="jess-chat-spinner" size={13}/></div>}
         {error && <div className="jess-chat-error" role="alert">{error}<button type="button" onClick={() => void sendMessage(messages[messages.length - 1]?.text || draft, true)}>Try again</button></div>}
       </div>
 
@@ -293,5 +293,10 @@ export function JessChatPanel({ onClose }: { onClose: () => void }) {
 }
 
 export function JessChatLauncher({ onClick }: { onClick: () => void }) {
-  return <button type="button" className="jess-chat-launcher" onClick={onClick} aria-label="Open chat with Jess" title="Chat with Jess"><MessageCircle size={19}/><span>Chat with Jess</span></button>;
+  return (
+    <button type="button" className="jess-chat-launcher" onClick={onClick} aria-label="Open chat with Jess" title="Chat with Jess">
+      <span className="jess-chat-launcher-avatar"><img src="/assets/jess-avatar.png" alt="" /></span>
+      <span>Chat with Jess</span>
+    </button>
+  );
 }

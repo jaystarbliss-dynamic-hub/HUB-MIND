@@ -8,7 +8,7 @@ import { Task, Meeting, Client, DocumentInfo, InboxItem, ActivityLog } from '../
 import { getLocalTasks, getLocalProjects, getLocalMeetings, getLocalClients } from '../lib/localWorkspaceStore';
 import { safeParseISO, safeFormat } from "../lib/dateUtils";
 import { isToday, isBefore, startOfDay, parseISO, format, startOfWeek, endOfWeek } from 'date-fns';
-import { CheckCircle2, Clock, Calendar as CalendarIcon, FileText, Loader2, Bell, Users, Inbox, Activity, Check, Clock3, Sparkles } from 'lucide-react';
+import { CheckCircle2, Clock, Calendar as CalendarIcon, FileText, Loader2, Bell, Users, Inbox, Activity, Check, Clock3, Bot } from 'lucide-react';
 import { setDoc, doc, getDoc, addDoc } from 'firebase/firestore';
 import { getLocalDocsMap, setLocalDocsMap } from '../lib/offlineSync';
 import { Link } from 'react-router-dom';
@@ -781,7 +781,7 @@ export function Dashboard() {
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/10 border border-accent/20 text-accent text-xs font-bold hover:bg-accent/20 disabled:opacity-50 cursor-pointer"
                 title="AI pre-fill from workspace data"
               >
-                <Sparkles className="w-3.5 h-3.5" />
+                <Bot className="w-3.5 h-3.5" />
                 {reportGenerating ? 'Analyzing Workspace…' : 'AI Pre-fill'}
               </button>
             </div>

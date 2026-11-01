@@ -15,22 +15,24 @@ const THREE = window.THREE || null;
   let visualState = { connection: "disconnected", state: "idle", inputLevel: 0, outputLevel: 0 };
   let activeState = "idle", renderer = null, scene = null, camera = null, avatar = null, headRig = null;
   let leftArm = null, rightArm = null, leftEye = null, rightEye = null, mouth = null, mouthLip = null;
-  let elapsed = 0, visualPhase = 0, frameHandle = 0, visualFrame = 0;
+  let elapsed = 0, visualPhase = 0, frameHandle = 0;
   let speechTimer = null, idleFidgetTimer = null, activationWatchdogTimer = null;
   let nextBlinkAt = 2.5, blink = 0, alive = true;
-  let pointerStart = null, lastPointer = null, isDragging = false, singleClickTimer = null, suppressNextClick = false;
-  const SINGLE_CLICK_DELAY_MS = 420;
+  let pointerStart = null, lastPointer = null, isDragging = false, suppressNextClick = false;
   let clock = null, sphereGeometry = null;
   let skin = null, skinLight = null, hair = null, hairHighlight = null;
   let blazer = null, blazerLight = null, blouse = null, blouseLight = null;
   let gold = null, white = null, iris = null, pupil = null, eyeGlint = null;
   let brow = null, lip = null, mouthInterior = null, mouthTongue = null;
+  let lastFrameTimestamp = 0;
+  let force2DMode = false;
 
   const mat = (color, roughness = 0.72, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
   function initializeMaterials() {
     if (!THREE || typeof THREE.WebGLRenderer !== "function") throw new Error("Three.js or WebGL is unavailable; using the lightweight avatar fallback.");
     clock = new THREE.Clock();
-    sphereGeometry = new THREE.SphereGeometry(1, 48, 32);
+    // 24x16 geometry saves 75% vertices compared to 48x32 without visible difference at 130px size
+    sphereGeometry = new THREE.SphereGeometry(1, 24, 16);
     skin = mat(0xc88f72, 0.72); skinLight = mat(0xd9a58b, 0.66);
     hair = mat(0x211922, 0.48); hairHighlight = mat(0x382735, 0.48);
     blazer = mat(0x202b3e, 0.65); blazerLight = mat(0x344258, 0.58);
@@ -50,9 +52,9 @@ const THREE = window.THREE || null;
     parent.add(mesh);
     return mesh;
   }
-  function tube(parent, points, radius, material, segments = 22) {
+  function tube(parent, points, radius, material, segments = 12) {
     const curve = new THREE.CatmullRomCurve3(points.map(point => new THREE.Vector3(...point)));
-    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, segments, radius, 8, false), material);
+    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, segments, radius, 6, false), material);
     parent.add(mesh);
     return mesh;
   }
@@ -83,7 +85,7 @@ const THREE = window.THREE || null;
     ellipsoid(arm, [side * 0.035, -0.19, 0], [0.145, 0.27, 0.145], blazer);
     ellipsoid(arm, [side * 0.078, -0.46, 0.045], [0.118, 0.25, 0.12], blazerLight);
     ellipsoid(arm, [side * 0.095, -0.66, 0.065], [0.105, 0.12, 0.105], skinLight);
-    const cuff = new THREE.Mesh(new THREE.TorusGeometry(0.104, 0.014, 8, 20), gold);
+    const cuff = new THREE.Mesh(new THREE.TorusGeometry(0.104, 0.014, 6, 14), gold);
     cuff.position.set(side * 0.084, -0.545, 0.045);
     cuff.scale.set(1, 0.9, 0.75);
     arm.add(cuff);
@@ -99,28 +101,28 @@ const THREE = window.THREE || null;
     ellipsoid(headRig, [0, 0.39, -0.005], [0.545, 0.37, 0.438], hair);
     ellipsoid(headRig, [-0.47, -0.03, 0.005], [0.13, 0.48, 0.31], hair);
     ellipsoid(headRig, [0.47, -0.03, 0.005], [0.13, 0.48, 0.31], hair);
-    tube(headRig, [[-0.43, 0.43, 0.25], [-0.37, 0.20, 0.325], [-0.28, 0.02, 0.31]], 0.062, hairHighlight);
-    tube(headRig, [[0.42, 0.43, 0.25], [0.38, 0.17, 0.325], [0.29, -0.05, 0.31]], 0.062, hairHighlight);
-    tube(headRig, [[-0.36, 0.46, 0.31], [-0.27, 0.29, 0.363], [-0.10, 0.31, 0.384]], 0.095, hair);
-    tube(headRig, [[-0.18, 0.48, 0.34], [-0.05, 0.28, 0.39], [0.10, 0.30, 0.38]], 0.085, hairHighlight);
-    tube(headRig, [[0.02, 0.48, 0.34], [0.22, 0.27, 0.36], [0.33, 0.34, 0.31]], 0.09, hair);
+    tube(headRig, [[-0.43, 0.43, 0.25], [-0.37, 0.20, 0.325], [-0.28, 0.02, 0.31]], 0.062, hairHighlight, 10);
+    tube(headRig, [[0.42, 0.43, 0.25], [0.38, 0.17, 0.325], [0.29, -0.05, 0.31]], 0.062, hairHighlight, 10);
+    tube(headRig, [[-0.36, 0.46, 0.31], [-0.27, 0.29, 0.363], [-0.10, 0.31, 0.384]], 0.095, hair, 10);
+    tube(headRig, [[-0.18, 0.48, 0.34], [-0.05, 0.28, 0.39], [0.10, 0.30, 0.38]], 0.085, hairHighlight, 10);
+    tube(headRig, [[0.02, 0.48, 0.34], [0.22, 0.27, 0.36], [0.33, 0.34, 0.31]], 0.09, hair, 10);
     for (const side of [-1, 1]) {
       ellipsoid(headRig, [side * 0.49, -0.015, 0.015], [0.105, 0.15, 0.075], skinLight);
-      const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.012, 8, 24), gold);
+      const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.058, 0.012, 6, 16), gold);
       hoop.position.set(side * 0.50, -0.13, 0.075);
       headRig.add(hoop);
     }
     leftEye = createEye(headRig, -1);
     rightEye = createEye(headRig, 1);
-    tube(headRig, [[-0.285, 0.226, 0.354], [-0.19, 0.26, 0.375], [-0.095, 0.23, 0.36]], 0.025, brow, 16);
-    tube(headRig, [[0.095, 0.23, 0.36], [0.19, 0.26, 0.375], [0.285, 0.226, 0.354]], 0.025, brow, 16);
+    tube(headRig, [[-0.285, 0.226, 0.354], [-0.19, 0.26, 0.375], [-0.095, 0.23, 0.36]], 0.025, brow, 10);
+    tube(headRig, [[0.095, 0.23, 0.36], [0.19, 0.26, 0.375], [0.285, 0.226, 0.354]], 0.025, brow, 10);
     ellipsoid(headRig, [0, -0.01, 0.365], [0.056, 0.105, 0.061], skinLight);
     ellipsoid(headRig, [0, -0.074, 0.393], [0.078, 0.045, 0.048], skinLight);
     ellipsoid(headRig, [-0.037, -0.078, 0.404], [0.025, 0.022, 0.015], skin);
     mouth = ellipsoid(headRig, [0, -0.225, 0.36], [0.112, 0.035, 0.022], mouthInterior);
     mouth.userData.closedScaleY = mouth.scale.y;
     ellipsoid(headRig, [0, -0.249, 0.378], [0.052, 0.008, 0.009], mouthTongue);
-    mouthLip = tube(headRig, [[-0.12, -0.214, 0.375], [-0.06, -0.253, 0.382], [0, -0.26, 0.383], [0.06, -0.253, 0.382], [0.12, -0.214, 0.375]], 0.012, lip, 18);
+    mouthLip = tube(headRig, [[-0.12, -0.214, 0.375], [-0.06, -0.253, 0.382], [0, -0.26, 0.383], [0.06, -0.253, 0.382], [0.12, -0.214, 0.375]], 0.012, lip, 12);
   }
   function createAvatar() {
     avatar = new THREE.Group();
@@ -139,8 +141,8 @@ const THREE = window.THREE || null;
     ellipsoid(avatar, [-0.43, 1.20, 0], [0.28, 0.26, 0.33], blazer);
     ellipsoid(avatar, [0.43, 1.20, 0], [0.28, 0.26, 0.33], blazer);
     leftArm = createArm(-1); rightArm = createArm(1); createHead();
-    tube(avatar, [[-0.60, 1.20, 0.20], [-0.43, 1.34, 0.24], [-0.20, 1.37, 0.30]], 0.014, gold);
-    tube(avatar, [[0.60, 1.20, 0.20], [0.43, 1.34, 0.24], [0.20, 1.37, 0.30]], 0.014, gold);
+    tube(avatar, [[-0.60, 1.20, 0.20], [-0.43, 1.34, 0.24], [-0.20, 1.37, 0.30]], 0.014, gold, 10);
+    tube(avatar, [[0.60, 1.20, 0.20], [0.43, 1.34, 0.24], [0.20, 1.37, 0.30]], 0.014, gold, 10);
   }
   function statusMode() {
     if (visualState.connection === "error" || visualState.state === "error") return "error";
@@ -158,13 +160,12 @@ const THREE = window.THREE || null;
     else if (mode === "connected" && visualState.state === "speaking") statusLabel.textContent = "Jess is speaking";
     else if (mode === "connected" && visualState.state === "thinking") statusLabel.textContent = "Jess is thinking";
     else if (mode === "connected") statusLabel.textContent = "Connected · listening";
-    else statusLabel.textContent = "Double-click Jess to talk";
+    else statusLabel.textContent = "Click Jess to talk";
   }
   function applyState(next) {
     activeState = liveStates.has(next) ? next : "idle";
     if (idleFidgetTimer !== null) window.clearTimeout(idleFidgetTimer);
     idleFidgetTimer = null;
-    // Keep the companion's voice controls operational if WebGL or Three.js fails.
     if (!leftArm || !rightArm || !headRig) return;
     if (activeState === "thinking" || activeState === "think") {
       leftArm.userData.targetZ = -0.08; rightArm.userData.targetZ = -2.08; headRig.userData.targetZ = 0.12;
@@ -179,7 +180,7 @@ const THREE = window.THREE || null;
       headRig.userData.targetZ = activeState === "listening" ? -0.045 : activeState === "speaking" ? -0.015 : 0;
     }
     if (activeState === "idle" && visualState.connection === "disconnected") {
-      idleFidgetTimer = window.setTimeout(() => { if (activeState === "idle" && visualState.connection === "disconnected") applyState("walk"); }, 10000 + Math.random() * 8000);
+      idleFidgetTimer = window.setTimeout(() => { if (activeState === "idle" && visualState.connection === "disconnected") applyState("walk"); }, 12000 + Math.random() * 8000);
     } else if (activeState === "walk") {
       idleFidgetTimer = window.setTimeout(() => { if (activeState === "walk") applyState("idle"); }, 1700);
     }
@@ -202,10 +203,9 @@ const THREE = window.THREE || null;
     return { line: "148,163,184", solid: "#94a3b8" };
   }
   function renderVisualizer() {
-    visualFrame = 0;
     if (!visualCtx || !visualCanvas) return;
     visualPhase += 0.055;
-    const dpr = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1));
+    const dpr = Math.min(1.25, Math.max(1, window.devicePixelRatio || 1));
     const logicalSize = 130, pixels = Math.round(logicalSize * dpr);
     if (visualCanvas.width !== pixels || visualCanvas.height !== pixels) { visualCanvas.width = pixels; visualCanvas.height = pixels; }
     visualCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -219,15 +219,16 @@ const THREE = window.THREE || null;
     const cx = logicalSize / 2, cy = logicalSize / 2;
     const gradient = visualCtx.createRadialGradient(cx, cy, 12, cx, cy, 62);
     gradient.addColorStop(0, "rgba(" + palette.line + "," + (0.12 + intensity * 0.12) + ")");
-    gradient.addColorStop(0.66, "rgba(" + palette.line + ",0.06)");
+    gradient.addColorStop(0.66, "rgba(" + palette.line + ",0.05)");
     gradient.addColorStop(1, "rgba(" + palette.line + ",0)");
     visualCtx.fillStyle = gradient; visualCtx.beginPath(); visualCtx.arc(cx, cy, 62, 0, Math.PI * 2); visualCtx.fill();
     const rings = mode === "connected" ? 3 : mode === "connecting" || mode === "error" ? 2 : 1;
+    // 48 sample points per ring instead of 96, and zero shadowBlur for ultra-lightweight GPU compositing
     for (let ring = 0; ring < rings; ring += 1) {
       visualCtx.beginPath();
       const radius = 40 + intensity * 4 + ring * 6;
-      for (let point = 0; point <= 96; point += 1) {
-        const angle = point / 96 * Math.PI * 2;
+      for (let point = 0; point <= 48; point += 1) {
+        const angle = point / 48 * Math.PI * 2;
         const a = Math.sin(angle * (4 + ring) + visualPhase * (ring % 2 ? -1.3 : 1.5));
         const b = Math.cos(angle * (7 + ring) - visualPhase * 1.8);
         const r = radius + (a * 0.65 + b * 0.35) * intensity * (1.8 + ring * 2);
@@ -236,25 +237,23 @@ const THREE = window.THREE || null;
       }
       visualCtx.closePath();
       visualCtx.strokeStyle = "rgba(" + palette.line + "," + (mode === "disconnected" ? 0.28 : 0.62 - ring * 0.12) + ")";
-      visualCtx.lineWidth = mode === "connected" && s === "speaking" ? 1.8 : 1.1;
-      visualCtx.shadowColor = palette.solid; visualCtx.shadowBlur = mode === "disconnected" ? 2 : 5 + intensity * 7;
-      visualCtx.stroke(); visualCtx.shadowBlur = 0;
+      visualCtx.lineWidth = mode === "connected" && s === "speaking" ? 1.6 : 1.0;
+      visualCtx.stroke();
     }
-    visualFrame = window.requestAnimationFrame(renderVisualizer);
   }
   function say(message) {
     window.clearTimeout(speechTimer);
     speechText.textContent = String(message || "").slice(0, 180);
     speech.hidden = false;
-    speechTimer = window.setTimeout(() => { speech.hidden = true; }, 5000);
+    speechTimer = window.setTimeout(() => { speech.hidden = true; }, 4500);
   }
   function requestVoiceActivation(gesture) {
     if (gesture === "toggle" && visualState.connection === "connecting") {
-      say("I'm still connecting to Gemini Live. Please wait; another click won't cancel the attempt.");
+      say("Connecting to Jess… please wait a moment.");
       return;
     }
     const active = visualState.connection === "connected" || visualState.connection === "connecting";
-    if (gesture === "mute") say(visualState.state === "muted" ? "Turning the microphone back on…" : "Muting the microphone…");
+    if (gesture === "mute") say(visualState.state === "muted" ? "Microphone unmuted." : "Microphone muted.");
     else say(active ? "Ending voice chat…" : "Connecting to Jess…");
     if (gesture === "toggle" && !active) {
       if (activationWatchdogTimer !== null) window.clearTimeout(activationWatchdogTimer);
@@ -262,28 +261,28 @@ const THREE = window.THREE || null;
         activationWatchdogTimer = null;
         if (visualState.connection === "connected" || visualState.connection === "error") return;
         visualState = { connection: "error", state: "error", inputLevel: 0, outputLevel: 0 };
-        updateStatus(); say("Voice chat did not connect. Open Hub-Mind, sign in, and check your internet and microphone permissions before trying again.");
-      }, 30000);
+        updateStatus(); say("Voice chat did not connect. Click Jess to try again.");
+      }, 25000);
     }
     Promise.resolve(window.jessPet?.activateVoice?.(gesture)).then(result => {
       if (!result || result.ok !== true) {
         if (activationWatchdogTimer !== null) window.clearTimeout(activationWatchdogTimer);
         activationWatchdogTimer = null;
         visualState = { connection: "error", state: "error", inputLevel: 0, outputLevel: 0 };
-        updateStatus(); say("I couldn't activate voice chat. Hub-Mind must be open and you must be signed in.");
+        updateStatus(); say("I couldn't activate voice chat. Ensure Hub-Mind is running.");
       }
     }).catch(error => {
       if (activationWatchdogTimer !== null) window.clearTimeout(activationWatchdogTimer);
       activationWatchdogTimer = null;
       visualState = { connection: "error", state: "error", inputLevel: 0, outputLevel: 0 };
-      updateStatus(); say("I couldn't activate voice chat. Hub-Mind must be open and you must be signed in.");
+      updateStatus(); say("Voice activation error. Please retry.");
       console.error("[Jess pet] Voice activation failed:", error);
     });
   }
   function drawFallback2D() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const dpr = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1));
+    const dpr = Math.min(1.25, Math.max(1, window.devicePixelRatio || 1));
     const width = canvas.clientWidth || 130, height = canvas.clientHeight || 150;
     canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr); ctx.scale(dpr, dpr);
     const cx = width / 2;
@@ -303,10 +302,9 @@ const THREE = window.THREE || null;
     const width = Math.max(1, canvas.clientWidth || 130), height = Math.max(1, canvas.clientHeight || 150);
     renderer.setSize(width, height, false); camera.aspect = width / height; camera.updateProjectionMatrix();
   }
-  function animate() {
+  function animateStep(dt) {
     if (!alive || !renderer || !scene || !camera) return;
-    frameHandle = window.requestAnimationFrame(animate);
-    const dt = Math.min(clock.getDelta(), .05); elapsed += dt;
+    elapsed += dt;
     headRig.rotation.z += ((headRig.userData.targetZ || 0) - headRig.rotation.z) * Math.min(1, dt * 5);
     leftArm.rotation.z += ((leftArm.userData.targetZ ?? -.1) - leftArm.rotation.z) * Math.min(1, dt * 5);
     rightArm.rotation.z += ((rightArm.userData.targetZ ?? .1) - rightArm.rotation.z) * Math.min(1, dt * 5);
@@ -323,13 +321,39 @@ const THREE = window.THREE || null;
     mouthLip.scale.y = talking ? .72 : 1;
     renderer.render(scene, camera);
   }
+
+  // Unified throttled rendering loop:
+  // 30 fps when busy (connecting, speaking, listening, animating)
+  // 12 fps when idle and disconnected -> completely saves CPU/GPU and eliminates mouse cursor lag on Windows!
+  function throttledLoop(now) {
+    if (!alive) return;
+    frameHandle = window.requestAnimationFrame(throttledLoop);
+    const isBusy = visualState.connection === "connecting"
+      || visualState.connection === "connected"
+      || activeState !== "idle"
+      || isDragging
+      || visualState.inputLevel > 0.05
+      || visualState.outputLevel > 0.05;
+    const targetInterval = isBusy ? 33 : 83; // 30fps vs 12fps
+    const elapsedSinceLast = now - lastFrameTimestamp;
+    if (elapsedSinceLast < targetInterval) return;
+    lastFrameTimestamp = now - (elapsedSinceLast % targetInterval);
+
+    renderVisualizer();
+    if (!force2DMode && renderer && scene && camera) {
+      const dt = Math.min(clock ? clock.getDelta() : 0.033, 0.05);
+      animateStep(dt);
+    }
+  }
+
   function initialize() {
     try {
       initializeMaterials();
-      renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "high-performance", premultipliedAlpha: false });
-      renderer.setPixelRatio(Math.min(2.5, Math.max(1, window.devicePixelRatio || 1)));
+      // Low-power preference, antialias disabled on tiny 130px frame, pixelRatio clamped to 1.25
+      renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false, powerPreference: "low-power", premultipliedAlpha: false });
+      renderer.setPixelRatio(Math.min(1.25, Math.max(1, window.devicePixelRatio || 1)));
       renderer.setClearColor(0x000000, 0); renderer.outputEncoding = THREE.sRGBEncoding;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.18;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
       scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(34, 130 / 150, .1, 80);
       camera.position.set(0, 1.63, 5.45); camera.lookAt(0, 1.60, 0);
       scene.add(new THREE.HemisphereLight(0xffe8dd, 0x263044, 2.05));
@@ -341,20 +365,20 @@ const THREE = window.THREE || null;
       if (typeof ResizeObserver !== "undefined") {
         const observer = new ResizeObserver(resizeRenderer); observer.observe(canvas); window.jessPetResizeObserver = observer;
       }
-      nextBlinkAt = 2 + Math.random() * 3; animate();
+      nextBlinkAt = 2 + Math.random() * 3;
     } catch (error) {
-      console.warn("[Jess pet] 3D rendering is unavailable; keeping the voice companion active with a lightweight fallback:", error);
+      console.warn("[Jess pet] 3D rendering is unavailable; using lightweight 2D avatar:", error);
+      force2DMode = true;
       try { renderer?.dispose?.(); } catch {}
       renderer = null; scene = null; camera = null; avatar = null;
       leftArm = null; rightArm = null; leftEye = null; rightEye = null; mouth = null; mouthLip = null;
-      // A canvas that has acquired a WebGL context cannot later provide a 2D context.
-      // Replace it with a fresh canvas so the fallback works even after a mid-init error.
       const fallbackCanvas = canvas.cloneNode(false);
       canvas.replaceWith(fallbackCanvas);
       canvas = fallbackCanvas;
       drawFallback2D();
     }
   }
+
   character.addEventListener("pointerdown", event => {
     if (event.button !== 0) return;
     pointerStart = { x: event.screenX, y: event.screenY }; lastPointer = pointerStart; isDragging = false;
@@ -379,39 +403,47 @@ const THREE = window.THREE || null;
     pointerStart = null; lastPointer = null; isDragging = false; suppressNextClick = true;
     window.setTimeout(() => { suppressNextClick = false; }, 0);
   });
+
+  // Instant snap-of-a-finger click activation:
+  // Disconnected: immediately trigger voice connection without 420ms delay!
+  // Connected: immediately toggle mute.
   character.addEventListener("click", event => {
     if (suppressNextClick) { event.preventDefault(); return; }
-    if (event.detail > 1) { if (singleClickTimer !== null) window.clearTimeout(singleClickTimer); singleClickTimer = null; return; }
-    if (singleClickTimer !== null) window.clearTimeout(singleClickTimer);
-    singleClickTimer = window.setTimeout(() => {
-      singleClickTimer = null;
-      if (visualState.connection === "connected") requestVoiceActivation("mute");
-      else if (visualState.connection === "connecting") say("Jess is still connecting. Please wait a moment.");
-      else requestVoiceActivation("toggle");
-    }, SINGLE_CLICK_DELAY_MS);
+    if (visualState.connection === "connected") {
+      requestVoiceActivation("mute");
+    } else if (visualState.connection === "connecting") {
+      say("Jess is connecting… please wait a moment.");
+    } else {
+      // Connect instantly!
+      requestVoiceActivation("toggle");
+    }
   });
+
   character.addEventListener("dblclick", event => {
     event.preventDefault(); event.stopPropagation();
-    if (singleClickTimer !== null) window.clearTimeout(singleClickTimer);
-    singleClickTimer = null; requestVoiceActivation("toggle");
+    // Double-click toggle
+    requestVoiceActivation("toggle");
   });
+
   character.addEventListener("contextmenu", event => {
     event.preventDefault();
     Promise.resolve(window.jessPet?.hide?.()).catch(error => console.error(error));
   });
+
   window.jessPet?.onState?.(next => { if (liveStates.has(next)) applyState(next); });
   window.jessPet?.onVisualState?.(applyVisualState);
   window.jessPet?.onSpeech?.(payload => {
     if (!payload || typeof payload.text !== "string") return;
-    // Keep only connection/microphone notices on the avatar. Full utterances
-    // remain visible in the separate, persistent glass transcript overlay.
     if (/^(Connecting to Jess|Ending voice chat|Starting voice chat|I couldn't activate voice chat|Voice chat did not connect|Microphone is muted|Turning the microphone|Muting the microphone|Jess could not finish connecting|Jess is not connected)/i.test(payload.text.trim())) say(payload.text);
   });
-  updateStatus(); visualFrame = window.requestAnimationFrame(renderVisualizer); initialize();
+
+  updateStatus();
+  initialize();
+  frameHandle = window.requestAnimationFrame(throttledLoop);
+
   window.addEventListener("beforeunload", () => {
     alive = false;
     if (frameHandle) window.cancelAnimationFrame(frameHandle);
-    if (visualFrame) window.cancelAnimationFrame(visualFrame);
     if (idleFidgetTimer !== null) window.clearTimeout(idleFidgetTimer);
     if (activationWatchdogTimer !== null) window.clearTimeout(activationWatchdogTimer);
     if (speechTimer !== null) window.clearTimeout(speechTimer);

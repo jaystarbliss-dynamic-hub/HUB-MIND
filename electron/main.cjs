@@ -749,14 +749,16 @@ app.whenReady().then(() => {
     if (jessPreferencesUserId && jessPreferencesUserId !== owner) throw new Error('MCP settings belong to a different signed-in user.');
     return mcpBridge ? mcpBridge.listServers(owner) : [];
   });
-  ipcMain.handle('hubmind:mcp-list-tools', async (event, userId) => {
+  ipcMain.handle('hubmind:mcp-list-tools', (event, userId) => {
     assertTrustedSender(event);
     const owner = requireMcpUser(userId);
     if (!mcpBridge) return [];
     const servers = mcpBridge.listServers(owner);
+    // Connect any enabled disconnected servers in the background asynchronously
+    // without blocking Jess Live voice connection or freezing the event loop.
     for (const server of servers) {
       if (server.enabled && !server.connected) {
-        try { await mcpBridge.connectServer(owner, server.id); } catch { /* Surface connection errors through the server list; Jess can still connect without MCP. */ }
+        Promise.resolve(mcpBridge.connectServer(owner, server.id)).catch(() => {});
       }
     }
     return mcpBridge.listTools(owner).map(tool => ({
@@ -1152,14 +1154,13 @@ app.whenReady().then(() => {
     if (gesture !== 'toggle' && gesture !== 'mute') throw new Error('Unsupported Jess voice activation gesture.');
 
     const request = { requestId: randomUUID(), requestedAt: Date.now(), gesture };
-    // Store the request before waking the workspace. If the renderer is still
-    // loading, it will consume this pending request as soon as its listener mounts.
     pendingJessPetActivation = request;
 
-    // Do not block voice activation on Electron focus settling. showMainVerified()
-    // can wait five seconds (or fail entirely when Windows denies focus); that
-    // was making a normal click feel unresponsive and could discard the request.
-    showMain();
+    // Wake or create the background workspace if not already running.
+    // Do not force showMain() / focus stealing, so the user's active window and mouse never stutter.
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createMainWindow('/workspace');
+    }
 
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
       mainWindow.webContents.send('hubmind:pet-voice-activation', request);

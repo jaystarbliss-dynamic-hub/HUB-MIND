@@ -330,7 +330,8 @@ async function startServer() {
   // Live GitHub Repository Status for Jaystarbliss-studios/HUB-MIND
   app.get("/api/repository-context", async (req, res) => {
     try {
-      const status = await getFullRepositoryStatus();
+      const force = req.query.fresh === 'true';
+      const status = await getFullRepositoryStatus(force);
       res.json(status);
     } catch (err: any) {
       console.error("[Server] /api/repository-context error:", err);

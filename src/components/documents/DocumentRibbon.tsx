@@ -13,7 +13,7 @@ import {
   History, Clock, PaintBucket, Grid, Square, Combine, Split,
   ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Check, X,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
-  ArrowUpDown, Sparkles
+  ArrowUpDown, LayoutTemplate
 } from 'lucide-react';
 import { ImportExportMenu } from './ImportExportMenu';
 import { PaperSizeOption, OrientationOption, MarginOption, PaperThemeOption } from '../../lib/paginationEngine';
@@ -680,7 +680,7 @@ export function DocumentRibbon({
                   }`}
                   title="Insert Pre-Formatted Table Template (Weekly Task Matrix, Expense Log, etc.)"
                 >
-                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  <LayoutTemplate className="w-3 h-3 text-cyan-400" />
                   <span className="text-[11px]">Table Templates</span>
                   <ChevronDown className="w-3 h-3 text-slate-400" />
                 </button>
@@ -810,7 +810,7 @@ export function DocumentRibbon({
                   }`}
                   title="Insert Pre-Formatted Table Template (Weekly Task Matrix, Expense Log, etc.)"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  <LayoutTemplate className="w-3.5 h-3.5 text-cyan-400" />
                   <span>Table Templates</span>
                   <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
                 </button>
@@ -932,7 +932,7 @@ export function DocumentRibbon({
                 }`}
                 title="Insert Pre-Formatted Table Templates (Weekly Task Matrix, Expense Log, etc.)"
               >
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                <LayoutTemplate className="w-3.5 h-3.5 text-cyan-400" />
                 <span>Templates</span>
                 <ChevronDown className="w-3 h-3" />
               </button>
@@ -1632,7 +1632,7 @@ export function DocumentRibbon({
           <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-800">
             <div>
               <span className="font-bold text-xs text-cyan-300 flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                <LayoutTemplate className="w-3.5 h-3.5 text-cyan-400" />
                 Insert Pre-Formatted Table Template
               </span>
               <p className="text-[10px] text-slate-400 mt-0.5">

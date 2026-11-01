@@ -10,8 +10,8 @@ export function PWAPrompt() {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
-    onRegistered(r) {
-      console.log('SW Registered: ' + r);
+    onRegistered() {
+      // Service worker registered
     },
     onRegisterError(error) {
       console.log('SW registration error', error);
@@ -33,14 +33,8 @@ export function PWAPrompt() {
     const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone || document.referrer.includes('android-app://');
     setIsStandalone(isStandaloneMode);
 
-    if (isIosDevice && !isStandaloneMode) {
-      // We will let the second useEffect handle showing the prompt for iOS
-    }
-
     const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
       setDeferredPrompt(e);
-      // We will only show it if the user is authenticated (handled in another effect)
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);

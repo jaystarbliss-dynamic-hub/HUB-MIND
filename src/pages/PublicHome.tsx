@@ -49,7 +49,7 @@ export function PublicHome() {
 
 
   useEffect(() => {
-    const capture = (event: Event) => { event.preventDefault(); setInstallPrompt(event); };
+    const capture = (event: Event) => { setInstallPrompt(event); };
     window.addEventListener('beforeinstallprompt', capture);
     return () => window.removeEventListener('beforeinstallprompt', capture);
   }, []);
@@ -115,7 +115,6 @@ export function PublicHome() {
         <section className="hm-hero">
           <div className="hm-hero-glow hm-glow-one" /><div className="hm-hero-glow hm-glow-two" />
           <div className="hm-hero-copy">
-            <div className="hm-eyebrow"><span className="hm-live-dot" /> YOUR WORKSPACE, WITH A LITTLE MORE CLARITY</div>
             <h1>Welcome to<br/><span>Hub-Mind.</span></h1>
             <p className="hm-hero-description">A quieter place to bring your work together. Plan the day, move projects forward, keep your knowledge close — and let Jess help with the busywork.</p>
             <div className="hm-hero-actions">
@@ -125,17 +124,17 @@ export function PublicHome() {
             <div className="hm-trust-line"><LockKeyhole size={14}/> Private, invitation-based access <span>·</span> Built for focused work</div>
           </div>
           <div className="hm-hero-art" aria-label="Hub-Mind workspace preview">
-            <div className="hm-orbit hm-orbit-outer"/><div className="hm-orbit hm-orbit-inner"/>
-            <div className="hm-glass-card hm-work-card">
-              <div className="hm-card-top"><span className="hm-mini-logo"><img src="/hub-mind%20logo.png" alt=""/></span><span>MONDAY, AT A GLANCE</span><span className="hm-card-dot"/></div>
-              <h3>Good morning.</h3><p className="hm-card-muted">Here's what deserves your attention.</p>
-              <div className="hm-progress-row"><span className="hm-progress-icon teal"><Check size={14}/></span><div><b>Review project milestones</b><small>Website redesign · Today</small></div><span className="hm-check">✓</span></div>
-              <div className="hm-progress-row"><span className="hm-progress-icon purple"><FileText size={14}/></span><div><b>Finish the proposal</b><small>Client work · In progress</small></div><span className="hm-task-dot"/></div>
-              <div className="hm-progress-row"><span className="hm-progress-icon amber"><MessageCircle size={14}/></span><div><b>Prepare for your meeting</b><small>Notes and next steps</small></div><span className="hm-task-dot"/></div>
-              <div className="hm-card-footer"><span>YOUR DAY, IN FOCUS</span><span>03 tasks in view</span></div>
+            <div className="hm-hero-window-wrapper">
+              <div className="hm-hero-window-glow" />
+              <div className="hm-hero-window-card">
+                <img
+                  src="/assets/hubmind-workspace-window.webp"
+                  alt="Hub-Mind Operations Hub Workspace"
+                  className="hm-hero-window-img"
+                  loading="eager"
+                />
+              </div>
             </div>
-            <div className="hm-float-note hm-note-jess"><span className="hm-jess-orb"><Sparkles size={17}/></span><span><b>Jess is ready</b><small>What shall we work on?</small></span><span className="hm-note-arrow">↗</span></div>
-            <div className="hm-float-note hm-note-sync"><span className="hm-sync-check"><Check size={13}/></span><span><b>Everything together</b><small>Tasks · Docs · Projects</small></span></div>
           </div>
           <div className="hm-scroll-cue"><span/> A calmer way to work</div>
         </section>
@@ -148,7 +147,16 @@ export function PublicHome() {
         </section>
 
         <section id="jess" className="hm-jess-section hm-reveal">
-          <div className="hm-jess-visual"><div className="hm-jess-ring ring-a"/><div className="hm-jess-ring ring-b"/><div className="hm-jess-core"><div className="hm-jess-core-inner"><Sparkles size={32}/></div></div><div className="hm-jess-caption">YOUR THOUGHT PARTNER</div></div>
+          <div className="hm-jess-visual">
+            <div className="hm-jess-ring ring-a"/>
+            <div className="hm-jess-ring ring-b"/>
+            <div className="hm-jess-core">
+              <div className="hm-jess-core-inner">
+                <img src="/assets/jess-avatar.png" alt="Jess" className="hm-jess-core-avatar" />
+              </div>
+            </div>
+            <div className="hm-jess-caption">YOUR THOUGHT PARTNER</div>
+          </div>
           <div className="hm-jess-copy"><div className="hm-eyebrow">MEET JESS</div><h2>A little help.<br/><span>Right when you need it.</span></h2><p>Jess is Hub-Mind's AI assistant, designed to help you think things through, find information, draft and refine ideas, and turn conversations into clear next steps — while keeping you in control.</p><ul><li><Check size={16}/> Research with source-aware answers</li><li><Check size={16}/> Help with writing, planning and follow-through</li><li><Check size={16}/> Voice interaction and a floating assistant</li></ul><button className="hm-text-link" onClick={openWorkspace}>Meet Jess in your workspace <ArrowRight size={16}/></button><p className="hm-credit">Jess was designed and programmed by Jaystarbliss, founder of Jaystarbliss Studios. Her underlying AI model is provided by Google.</p></div>
         </section>
 
@@ -163,7 +171,23 @@ export function PublicHome() {
           </div>
           {release && <small className="hm-release-name">{release.name}</small>}
           </div>
-          <div className="hm-desktop-art"><div className="hm-monitor"><div className="hm-monitor-top"><span/><span/><span/><small>HUB-MIND / WORKSPACE</small></div><div className="hm-monitor-content"><div className="hm-monitor-sidebar"><i/><i/><i/><i/></div><div className="hm-monitor-main"><div className="hm-monitor-kicker">YOUR WORKSPACE</div><div className="hm-monitor-title">Make today count.</div><div className="hm-monitor-bars"><i/><i/><i/></div><div className="hm-monitor-bottom"><span/><span/><span/></div></div></div></div><div className="hm-monitor-stand"/><div className="hm-monitor-base"/><div className="hm-desktop-orb"><Sparkles size={20}/></div></div>
+          <div className="hm-desktop-art">
+            <div className="hm-monitor">
+              <div className="hm-monitor-top"><span/><span/><span/><small>HUB-MIND / WORKSPACE</small></div>
+              <div className="hm-monitor-content">
+                <img
+                  src="/assets/hubmind-real-workspace.webp"
+                  alt="Hub-Mind Application Window"
+                  className="hm-monitor-window-preview"
+                />
+              </div>
+            </div>
+            <div className="hm-monitor-stand"/>
+            <div className="hm-monitor-base"/>
+            <div className="hm-desktop-orb" aria-label="Jess companion">
+              <img src="/assets/jess-avatar.png" alt="Jess" className="hm-desktop-orb-img" />
+            </div>
+          </div>
         </section>
 
         <section id="getting-started" className="hm-desktop-section hm-getting-started hm-reveal">

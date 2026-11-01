@@ -10,7 +10,6 @@ import {
   Check, 
   AlertCircle, 
   Loader2, 
-  Sparkles, 
   Lock, 
   Globe, 
   Users,
@@ -307,7 +306,7 @@ export function UserProfileModal({ isOpen, onClose }: UserProfileModalProps) {
             {/* Preferred Name for Jess */}
             <div className="p-3.5 rounded-2xl bg-amber-500/5 border border-amber-500/20 space-y-2">
               <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
-                <Sparkles className="w-4 h-4 text-amber-400" />
+                <img src="/assets/jess-avatar.png" alt="Jess" className="w-4 h-4 rounded-full object-cover shrink-0 border border-amber-400/40" />
                 Preferred Name for Jess (AI Assistant)
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">

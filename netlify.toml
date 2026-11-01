@@ -37,6 +37,26 @@
   status = 200
 
 [[redirects]]
+  from = "/api/github/releases"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/github/commits"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/github/codebase"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
+  from = "/api/web-search"
+  to = "/.netlify/functions/repository-context"
+  status = 200
+
+[[redirects]]
   from = "/api/live-token"
   to = "/.netlify/functions/live-token"
   status = 200
@@ -65,6 +85,11 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
 
 [[headers]]
   for = "/sw.js"

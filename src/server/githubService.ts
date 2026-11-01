@@ -342,10 +342,10 @@ export async function inspectCodebase(targetPath = '', branch = 'main'): Promise
 }
 
 /** Server-side repository snapshot: release notes, recent commits and repository metadata. */
-export async function getFullRepositoryStatus() {
+export async function getFullRepositoryStatus(forceFresh = false) {
   const [releases, commits, overview, pulls] = await Promise.all([
-    fetchHubMindReleases(),
-    fetchHubMindCommits(10),
+    fetchHubMindReleases(forceFresh),
+    fetchHubMindCommits(10, forceFresh),
     fetchHubMindOverview(),
     fetchHubMindPulls(5),
   ]);

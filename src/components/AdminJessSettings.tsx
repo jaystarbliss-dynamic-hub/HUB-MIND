@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
-import { Brain, Check, Loader2, Monitor, ShieldCheck, Sparkles, Volume2 } from 'lucide-react';
+import { Brain, Check, Loader2, Mic, Monitor, ShieldCheck, Volume2 } from 'lucide-react';
 
 type AdminJessConfig = {
   memoryEnabled: boolean;
@@ -76,7 +76,7 @@ export function AdminJessSettings() {
     { key: 'memoryEnabled', icon: Brain, title: 'Personal memory', description: 'Allow Jess to load and save user-specific memories. Conversation history remains available separately.' },
     { key: 'screenSharingEnabled', icon: Monitor, title: 'Screen sharing in chat', description: 'Allow users to deliberately share a screen snapshot with Jess while a chat is open.' },
     { key: 'automaticVoiceModesEnabled', icon: Volume2, title: 'Automatic voice-mode switching', description: 'Enable the planned intent router for dictation, live conversation, and voice commands.' },
-    { key: 'offlineVoiceControlEnabled', icon: Sparkles, title: 'Local voice control', description: 'Permit the Wheelhouse integration work for offline speech recognition and deterministic desktop commands.' },
+    { key: 'offlineVoiceControlEnabled', icon: Mic, title: 'Local voice control', description: 'Permit the Wheelhouse integration work for offline speech recognition and deterministic desktop commands.' },
     { key: 'confirmDestructiveActions', icon: ShieldCheck, title: 'Confirm destructive actions', description: 'Require an explicit confirmation before Jess deletes data or changes important account access.' },
   ];
 

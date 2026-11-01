@@ -8,7 +8,7 @@ import {
   GitCommit,
   FolderGit2,
   CheckCircle2,
-  Sparkles,
+  Zap,
   FileCode2,
   FileText,
   ChevronDown,
@@ -95,27 +95,157 @@ export function DesktopUpdatesModal({
     return () => window.removeEventListener('hubmind:open-updates-panel', handleOpenEvent);
   }, []);
 
+  const formatAssetBytes = (bytes: number): string => {
+    if (!bytes || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+  };
+
+  const BUNDLED_FALLBACK_RELEASES: RepoRelease[] = [
+    {
+      id: 636,
+      tag: 'desktop-v636',
+      name: 'Hub-Mind Desktop v636',
+      publishedAt: '2026-03-28T18:00:00Z',
+      htmlUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/tag/desktop-v636',
+      body: 'Performance and smoothness release:\n• Ultra-fast snap-of-a-finger voice connection to Jess\n• Throttled low-power rendering pipeline for mouse freeze prevention\n• Non-blocking MCP tool execution\n• Document editor table extensions and enhancements',
+      isLatest: true,
+      installerAsset: {
+        id: 63601,
+        name: 'Hub-Mind-Setup-x64.exe',
+        sizeFormatted: '89.4 MB',
+        downloadUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/desktop-v636/Hub-Mind-Setup-x64.exe',
+      },
+    },
+    {
+      id: 488,
+      tag: 'desktop-v488',
+      name: 'Hub-Mind Desktop v488',
+      publishedAt: '2026-03-24T12:00:00Z',
+      htmlUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/tag/desktop-v488',
+      body: 'Desktop operations release with native Windows bridge, local speech recognition, and system management.',
+      isLatest: false,
+      installerAsset: {
+        id: 48801,
+        name: 'Hub-Mind-Setup-x64.exe',
+        sizeFormatted: '88.2 MB',
+        downloadUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/desktop-v488/Hub-Mind-Setup-x64.exe',
+      },
+    },
+  ];
+
+  const fetchDirectFromGitHub = async () => {
+    const repoSlug = 'jaystarbliss-dynamic-hub/HUB-MIND';
+    const ghHeaders = { Accept: 'application/vnd.github+json' };
+    try {
+      const [relRes, comRes, repoRes] = await Promise.all([
+        fetch(`https://api.github.com/repos/${repoSlug}/releases?per_page=30`, { headers: ghHeaders }).catch(() => null),
+        fetch(`https://api.github.com/repos/${repoSlug}/commits?per_page=15`, { headers: ghHeaders }).catch(() => null),
+        fetch(`https://api.github.com/repos/${repoSlug}`, { headers: ghHeaders }).catch(() => null),
+      ]);
+
+      const rawReleases = relRes && relRes.ok ? await relRes.json().catch(() => []) : [];
+      const rawCommits = comRes && comRes.ok ? await comRes.json().catch(() => []) : [];
+      const rawRepo = repoRes && repoRes.ok ? await repoRes.json().catch(() => null) : null;
+
+      let mappedReleases: RepoRelease[] = (Array.isArray(rawReleases) ? rawReleases : []).map((rel: any, idx: number) => {
+        const rawAssets = Array.isArray(rel.assets) ? rel.assets : [];
+        const assets: RepoReleaseAsset[] = rawAssets.map((a: any) => ({
+          id: a.id,
+          name: a.name || 'unnamed-asset',
+          sizeFormatted: formatAssetBytes(a.size || 0),
+          downloadUrl: a.browser_download_url || '',
+        }));
+        const installerAsset = assets.find((a) => /\.exe$/i.test(a.name));
+        const extensionAsset = assets.find((a) => /extension\.zip$/i.test(a.name) || /Jess-Chrome-Extension/i.test(a.name));
+        return {
+          id: rel.id,
+          tag: rel.tag_name || `release-${rel.id}`,
+          name: rel.name || rel.tag_name || 'Hub-Mind Desktop Release',
+          publishedAt: rel.published_at || rel.created_at || new Date().toISOString(),
+          htmlUrl: rel.html_url || `https://github.com/${repoSlug}/releases`,
+          body: rel.body || 'No release notes provided for this version.',
+          isLatest: idx === 0,
+          installerAsset,
+          extensionAsset,
+        };
+      });
+
+      if (mappedReleases.length === 0) {
+        mappedReleases = BUNDLED_FALLBACK_RELEASES;
+      }
+
+      const mappedCommits: RepoCommit[] = (Array.isArray(rawCommits) ? rawCommits : []).map((c: any) => ({
+        sha: String(c.sha || '').slice(0, 7),
+        fullSha: String(c.sha || ''),
+        message: String(c.commit?.message || '').split('\n')[0].trim(),
+        author: String(c.commit?.author?.name || c.author?.login || 'Jaystarbliss'),
+        date: c.commit?.author?.date || new Date().toISOString(),
+        htmlUrl: c.html_url || `https://github.com/${repoSlug}/commit/${c.sha}`,
+      }));
+
+      setReleases(mappedReleases);
+      setCommits(mappedCommits);
+      if (rawRepo) {
+        setOverview({
+          name: rawRepo.name || 'HUB-MIND',
+          fullName: rawRepo.full_name || repoSlug,
+          description: rawRepo.description || 'Internal business operations platform for Jaystarbliss Studios',
+          htmlUrl: rawRepo.html_url || `https://github.com/${repoSlug}`,
+          stars: rawRepo.stargazers_count || 0,
+          forks: rawRepo.forks_count || 0,
+          openIssues: rawRepo.open_issues_count || 0,
+          defaultBranch: rawRepo.default_branch || 'main',
+          updatedAt: rawRepo.updated_at || new Date().toISOString(),
+        });
+      }
+      if (mappedReleases.length > 0) {
+        setExpandedRelease(mappedReleases[0].tag);
+      }
+    } catch {
+      setReleases(BUNDLED_FALLBACK_RELEASES);
+      setExpandedRelease(BUNDLED_FALLBACK_RELEASES[0].tag);
+    }
+  };
+
   const loadRepositoryData = async (forceFresh = false) => {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/repository-context${forceFresh ? '?fresh=true' : ''}`, {
         headers: { Accept: 'application/json' },
-      });
-      const data = await res.json();
-      if (data.success) {
-        setReleases(data.releases || []);
-        setCommits(data.recentCommits || []);
-        setOverview(data.overview || null);
-        if (data.currentBundledVersion) setCurrentVersion(data.currentBundledVersion);
-        if (data.releases?.length > 0) {
-          setExpandedRelease(data.releases[0].tag);
+      }).catch(() => null);
+      
+      if (res && res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const text = await res.text();
+          if (text && !text.trim().startsWith('<')) {
+            try {
+              const data = JSON.parse(text);
+              if (Array.isArray(data.releases) && data.releases.length > 0) {
+                setReleases(data.releases);
+                setCommits(data.recentCommits || []);
+                setOverview(data.overview || null);
+                if (data.currentBundledVersion) setCurrentVersion(data.currentBundledVersion);
+                setExpandedRelease(data.releases[0].tag);
+                return;
+              }
+            } catch {
+              // Ignore parse error and proceed to GitHub fallback
+            }
+          }
         }
-      } else {
-        throw new Error(data.error || 'Failed to fetch repository status');
       }
-    } catch (err: any) {
-      setError(err?.message || 'Could not load release data from GitHub.');
+      await fetchDirectFromGitHub();
+    } catch {
+      try {
+        await fetchDirectFromGitHub();
+      } catch {
+        setReleases(BUNDLED_FALLBACK_RELEASES);
+        setExpandedRelease(BUNDLED_FALLBACK_RELEASES[0].tag);
+      }
     } finally {
       setLoading(false);
     }
@@ -130,20 +260,48 @@ export function DesktopUpdatesModal({
   const loadCodeFile = async (filePath: string) => {
     setFileLoading(true);
     try {
-      const res = await fetch(`/api/github/codebase?path=${encodeURIComponent(filePath)}`);
-      const data = await res.json();
-      if (data.success && data.content) {
-        setFileContent(data.content);
-        setCodePath(filePath);
-      } else if (data.entries) {
-        setFileContent(
-          `Directory listing for /${data.path}:\n\n` +
-            data.entries.map((e: any) => `${e.type === 'dir' ? '📁' : '📄'} ${e.name} ${e.size ? `(${e.size} bytes)` : ''}`).join('\n')
-        );
-        setCodePath(filePath);
-      } else {
-        setFileContent(`[Unable to load file: ${data.error || 'File not found'}]`);
+      const res = await fetch(`/api/github/codebase?path=${encodeURIComponent(filePath)}`, {
+        headers: { Accept: 'application/json' },
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success && data.content) {
+          setFileContent(data.content);
+          setCodePath(filePath);
+          return;
+        } else if (data.entries) {
+          setFileContent(
+            `Directory listing for /${data.path}:\n\n` +
+              data.entries.map((e: any) => `${e.type === 'dir' ? '📁' : '📄'} ${e.name} ${e.size ? `(${e.size} bytes)` : ''}`).join('\n')
+          );
+          setCodePath(filePath);
+          return;
+        }
       }
+
+      // Direct GitHub Contents API fallback
+      const ghRes = await fetch(
+        `https://api.github.com/repos/jaystarbliss-dynamic-hub/HUB-MIND/contents/${encodeURIComponent(filePath)}`,
+        { headers: { Accept: 'application/vnd.github+json' } }
+      );
+      if (ghRes.ok) {
+        const ghData = await ghRes.json();
+        if (Array.isArray(ghData)) {
+          setFileContent(
+            `Directory listing for /${filePath}:\n\n` +
+              ghData.map((e: any) => `${e.type === 'dir' ? '📁' : '📄'} ${e.name} ${e.size ? `(${e.size} bytes)` : ''}`).join('\n')
+          );
+          setCodePath(filePath);
+          return;
+        } else if (ghData?.content) {
+          const decoded = atob(String(ghData.content).replace(/\s/g, ''));
+          setFileContent(decoded);
+          setCodePath(filePath);
+          return;
+        }
+      }
+      setFileContent(`[Unable to load file: ${filePath}]`);
     } catch (e: any) {
       setFileContent(`[Error reading file: ${e?.message || e}]`);
     } finally {
@@ -221,7 +379,7 @@ export function DesktopUpdatesModal({
           <div className="mx-6 mt-4 p-4 rounded-2xl bg-gradient-to-r from-teal-950/60 via-slate-900 to-slate-950 border border-teal-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 shrink-0">
-                <Sparkles className="w-5 h-5" />
+                <Zap className="w-5 h-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2">

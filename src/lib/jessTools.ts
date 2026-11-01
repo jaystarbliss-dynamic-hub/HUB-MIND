@@ -916,13 +916,46 @@ export async function executeJessTool(
       }
 
       case 'get_desktop_version_history': {
-        const response = await fetch('/api/github/releases', { method: 'GET', headers: { Accept: 'application/json' } });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.releases) {
-          return { result: { success: false, error: String(payload.error || 'Could not retrieve desktop releases from GitHub.') } };
+        const response = await fetch('/api/github/releases', { method: 'GET', headers: { Accept: 'application/json' } }).catch(() => null);
+        let rawReleasesList: any[] | null = null;
+        if (response && response.ok && (response.headers.get('content-type') || '').includes('application/json')) {
+          const payload = await response.json().catch(() => ({}));
+          if (Array.isArray(payload.releases)) rawReleasesList = payload.releases;
+        }
+        if (!rawReleasesList) {
+          const ghRes = await fetch('https://api.github.com/repos/jaystarbliss-dynamic-hub/HUB-MIND/releases?per_page=30', {
+            headers: { Accept: 'application/vnd.github+json' },
+          }).catch(() => null);
+          if (ghRes && ghRes.ok) {
+            const ghData = await ghRes.json().catch(() => []);
+            if (Array.isArray(ghData)) {
+              rawReleasesList = ghData.map((rel: any, idx: number) => {
+                const assets = Array.isArray(rel.assets) ? rel.assets : [];
+                const exe = assets.find((a: any) => /\.exe$/i.test(a.name));
+                return {
+                  id: rel.id,
+                  tag: rel.tag_name || `release-${rel.id}`,
+                  name: rel.name || rel.tag_name || 'Hub-Mind Desktop Release',
+                  publishedAt: rel.published_at || rel.created_at || new Date().toISOString(),
+                  body: rel.body || '',
+                  isLatest: idx === 0,
+                  installerAsset: exe
+                    ? {
+                        name: exe.name,
+                        sizeFormatted: `${((exe.size || 0) / (1024 * 1024)).toFixed(1)} MB`,
+                        downloadUrl: exe.browser_download_url || '',
+                      }
+                    : undefined,
+                };
+              });
+            }
+          }
+        }
+        if (!rawReleasesList) {
+          return { result: { success: false, error: 'Could not retrieve desktop releases from GitHub.' } };
         }
         const limit = Math.min(Number(args?.limit) || 10, 30);
-        const releases = payload.releases.slice(0, limit);
+        const releases = rawReleasesList.slice(0, limit);
         const latest = releases[0] || null;
         const formattedList = releases.map((r: any) => ({
           tag: r.tag,
@@ -933,13 +966,13 @@ export async function executeJessTool(
         }));
 
         const spokenSummary = latest
-          ? `The latest released desktop app is ${latest.name} (${latest.tag}), published ${new Date(latest.publishedAt).toLocaleDateString()}.${latest.installerAsset ? ` Installer file: ${latest.installerAsset.name} (${latest.installerAsset.sizeFormatted}).` : ''} There are ${payload.releases.length} desktop releases in total, including ${releases.slice(1, 4).map((r: any) => r.tag).join(', ')}.`
+          ? `The latest released desktop app is ${latest.name} (${latest.tag}), published ${new Date(latest.publishedAt).toLocaleDateString()}.${latest.installerAsset ? ` Installer file: ${latest.installerAsset.name} (${latest.installerAsset.sizeFormatted}).` : ''} There are ${rawReleasesList.length} desktop releases in total, including ${releases.slice(1, 4).map((r: any) => r.tag).join(', ')}.`
           : 'No releases found on GitHub.';
 
         return {
           result: {
             success: true,
-            totalReleases: payload.releases.length,
+            totalReleases: rawReleasesList.length,
             latestRelease: latest,
             releases: formattedList,
             spokenSummary,
@@ -951,12 +984,40 @@ export async function executeJessTool(
         const targetPath = String(args?.path || '').trim();
         const branch = String(args?.branch || 'main').trim();
         const url = `/api/github/codebase?path=${encodeURIComponent(targetPath)}&branch=${encodeURIComponent(branch)}`;
-        const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload.error) {
-          return { result: { success: false, error: String(payload.error || `Could not inspect codebase at "${targetPath}".`) } };
+        const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } }).catch(() => null);
+        if (response && response.ok && (response.headers.get('content-type') || '').includes('application/json')) {
+          const payload = await response.json().catch(() => ({}));
+          if (!payload.error) {
+            return { result: { success: true, ...payload } };
+          }
         }
-        return { result: { success: true, ...payload } };
+        const ghRes = await fetch(
+          `https://api.github.com/repos/jaystarbliss-dynamic-hub/HUB-MIND/contents/${encodeURIComponent(targetPath)}?ref=${encodeURIComponent(branch)}`,
+          { headers: { Accept: 'application/vnd.github+json' } }
+        ).catch(() => null);
+        if (ghRes && ghRes.ok) {
+          const ghData = await ghRes.json().catch(() => null);
+          if (Array.isArray(ghData)) {
+            return {
+              result: {
+                success: true,
+                path: targetPath || '/',
+                type: 'directory',
+                entries: ghData.map((item: any) => ({ name: item.name, type: item.type === 'dir' ? 'dir' : 'file', size: item.size, path: item.path })),
+              },
+            };
+          } else if (ghData?.content) {
+            return {
+              result: {
+                success: true,
+                path: targetPath,
+                type: 'file',
+                content: atob(String(ghData.content).replace(/\s/g, '')).slice(0, 25000),
+              },
+            };
+          }
+        }
+        return { result: { success: false, error: `Could not inspect codebase at "${targetPath}".` } };
       }
 
       case 'open_visual_updates_panel': {

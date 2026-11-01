@@ -41,7 +41,7 @@ export function scanCurrentPageContext(pathname: string): ContextActionSuggestio
         description: 'Improve tone, formatting, and grammar',
         prompt: 'Review the document text on screen, polish the grammar, refine the professional tone, and enhance readability.',
         category: 'document',
-        icon: 'Sparkles',
+        icon: 'Wand2',
       },
       {
         id: 'doc_share_team',
@@ -117,7 +117,7 @@ export function scanCurrentPageContext(pathname: string): ContextActionSuggestio
         description: 'Propose direct answers or drafting',
         prompt: 'Review the task details on screen and propose a complete solution or draft the required deliverables.',
         category: 'task',
-        icon: 'Sparkles',
+        icon: 'Bot',
       },
       {
         id: 'task_due_reminder',
@@ -155,7 +155,7 @@ export function scanCurrentPageContext(pathname: string): ContextActionSuggestio
         description: 'Verify one-time Google Calendar connection',
         prompt: 'Check my Google Calendar connection status and sync upcoming events.',
         category: 'calendar',
-        icon: 'Sparkles',
+        icon: 'Calendar',
       },
       {
         id: 'cal_meeting_agenda',
@@ -206,7 +206,7 @@ export function scanCurrentPageContext(pathname: string): ContextActionSuggestio
       description: 'Review urgent tasks, meetings & follow-ups',
       prompt: 'Give me a fast, comprehensive daily briefing on my upcoming tasks, scheduled meetings, and pending follow-ups.',
       category: 'general',
-      icon: 'Sparkles',
+      icon: 'Bot',
     },
     {
       id: 'gen_check_overdue',
