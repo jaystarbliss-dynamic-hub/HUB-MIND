@@ -19,6 +19,8 @@ test('3D renderer failure cannot prevent the Jess pet voice bridge from initiali
   assert.match(pet, /if \(!THREE \|\| typeof THREE\.WebGLRenderer !== "function"\)/);
   assert.match(pet, /Three\.js or WebGL is unavailable; using the lightweight avatar fallback/);
   assert.match(pet, /drawFallback2D\(\)/);
+  assert.match(pet, /const fallbackCanvas = canvas\.cloneNode\(false\)/);
+  assert.match(pet, /canvas\.replaceWith\(fallbackCanvas\)/);
   assert.match(pet, /if \(!leftArm \|\| !rightArm \|\| !headRig\) return/);
   assert.match(pet, /window\.jessPet\?\.onVisualState\?\./);
   assert.match(pet, /window\.jessPet\?\.activateVoice\?\./);
@@ -47,6 +49,8 @@ test('saved Allow Everything consent bypasses product prompts but still requires
   assert.match(settings, /permissionMode: 'allow-everything', confirmHighRiskOutLoud: false/);
   assert.match(settings, /disabled=\{prefs\.permissionMode === 'allow-everything'\}/);
   assert.match(main, /Native action blocked because Jess Full Control is not active/);
+  assert.ok(main.includes("if (!allowEverything) {"));
+  assert.ok(main.includes("Set up Chrome bridge"));
 });
 
 test('Jess server endpoints verify Firebase identity and active Hub-Mind membership', () => {
