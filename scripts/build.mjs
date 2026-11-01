@@ -38,16 +38,16 @@ for (const file of scanFiles) {
   }
 }
 
-// Client credentials must never be statically injected into the browser bundle.
-// Firebase browser configuration is loaded at runtime through /api/config instead.
+// Only browser application sources are subject to this check. Build config and
+// Netlify function files legitimately use Node's process.env on the server.
 const clientSourceFiles = scanFiles.filter((file) => {
   const relative = path.relative(projectRoot, file).split(path.sep).join('/');
-  return relative.startsWith('src/') || sourceFiles.includes(relative);
+  return relative.startsWith('src/') || relative === 'index.html';
 });
 for (const file of clientSourceFiles) {
   if (!fs.existsSync(file)) continue;
   const source = fs.readFileSync(file, 'utf8');
-  if (/import\\.meta\\.env|process\\.env/.test(source)) {
+  if (/import\.meta\.env|process\.env/.test(source)) {
     throw new Error(`Client build-time environment access detected in source: ${path.relative(projectRoot, file)}. Client runtime configuration must come from server endpoints.`);
   }
 }
