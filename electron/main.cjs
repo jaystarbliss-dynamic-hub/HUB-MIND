@@ -908,13 +908,16 @@ app.whenReady().then(() => {
     if (!app.isPackaged) return { ok: false, error: 'Build/install the packaged Windows app before setting up the Chrome native host.' };
     const script = path.join(process.resourcesPath, 'Install-JessChromeBridge.ps1');
     if (!fs.existsSync(script)) return { ok: false, error: 'The Chrome setup script is missing from this installation. Repair or reinstall Hub-Mind.' };
-    const choice = await dialog.showMessageBox(getDialogParent(), {
-      type: 'info', buttons: ['Cancel', 'Set up Chrome bridge'], defaultId: 0, cancelId: 0,
-      title: 'Set up Jess for Chrome',
-      message: 'Register the Hub-Mind Jess native-messaging host for this Windows user?',
-      detail: 'This copies the bundled extension into your local AppData folder and registers a Chrome native-messaging host under your Windows user account. It does not install or force-enable the extension. You will still need to load/enable the extension in Chrome.',
-    });
-    if (choice.response !== 1) return { ok: false, cancelled: true };
+    const allowEverything = fullControlActive && !!controlSessionSecret && jessPreferences.fullControlEnabled && jessPreferences.permissionMode === 'allow-everything';
+    if (!allowEverything) {
+      const choice = await dialog.showMessageBox(getDialogParent(), {
+        type: 'info', buttons: ['Cancel', 'Set up Chrome bridge'], defaultId: 0, cancelId: 0,
+        title: 'Set up Jess for Chrome',
+        message: 'Register the Hub-Mind Jess native-messaging host for this Windows user?',
+        detail: 'This copies the bundled extension into your local AppData folder and registers a Chrome native-messaging host under your Windows user account. It does not install or force-enable the extension. You will still need to load/enable the extension in Chrome.',
+      });
+      if (choice.response !== 1) return { ok: false, cancelled: true };
+    }
     const started = Date.now();
     try {
       const result = await new Promise((resolve, reject) => execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true, timeout: 30000, maxBuffer: 1024 * 1024, shell: false }, (error, stdout, stderr) => {
