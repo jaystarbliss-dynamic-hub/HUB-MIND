@@ -205,6 +205,7 @@ export function JessFloatingAssistant() {
   const { user, profile, updatePreferredName } = useAuth();
   const jessPreferencesRef = useRef({
     permissionMode: 'ask' as 'ask' | 'allow-routine' | 'allow-everything' | 'always-allow',
+    fullControlEnabled: false,
     confirmHighRiskOutLoud: true,
     memoryEnabled: true,
     contextEnabled: true,
@@ -679,7 +680,8 @@ export function JessFloatingAssistant() {
         const hasSpokenApproval = !!riskSummary && !!spokenApproval
           && spokenApproval.fingerprint === riskFingerprint
           && Date.now() - spokenApproval.at <= 30000;
-        if (riskSummary && jessPreferencesRef.current.confirmHighRiskOutLoud !== false && !hasSpokenApproval) {
+        const allowEverything = jessPreferencesRef.current.fullControlEnabled === true && jessPreferencesRef.current.permissionMode === 'allow-everything';
+        if (riskSummary && !allowEverything && jessPreferencesRef.current.confirmHighRiskOutLoud !== false && !hasSpokenApproval) {
           pendingHighRiskConfirmationRef.current = { fingerprint: riskFingerprint, summary: riskSummary, at: Date.now() };
           spokenHighRiskApprovalRef.current = null;
           result = { result: {
@@ -1019,8 +1021,10 @@ export function JessFloatingAssistant() {
   }, [connection, navigate, profile, selectedAudioInputId, stop, stopScreenSharing, updatePreferredName, scheduleFade]);
 
   const activate = useCallback(() => {
-    if (connection === 'connected' || connection === 'connecting') void stop();
-    else void start();
+    if (connection === 'connected') void stop();
+    else if (connection === 'connecting') {
+      setSpeechState({ text: "Jess is already connecting to Gemini Live. Please wait; another click won't cancel the attempt.", speaker: 'jess', visible: true });
+    } else void start();
   }, [connection, start, stop]);
 
   // Route desktop-character gestures through the same LiveAudioClient as the former orb.
@@ -1067,7 +1071,11 @@ export function JessFloatingAssistant() {
       if (isDesktopShell && ['/', '/login'].includes(locationPathRef.current)) {
         navigate('/workspace', { replace: true });
       }
-      const ending = connection === 'connected' || connection === 'connecting';
+      if (connection === 'connecting') {
+        setSpeechState({ text: "Jess is already connecting to Gemini Live. Please wait; another click won't cancel the attempt.", speaker: 'jess', visible: true });
+        return;
+      }
+      const ending = connection === 'connected';
       setSpeechState({ text: ending ? 'Ending voice chat…' : 'Connecting to Jess…', speaker: 'jess', visible: true });
       activate();
     };
