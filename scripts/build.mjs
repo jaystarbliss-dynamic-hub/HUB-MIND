@@ -38,16 +38,17 @@ for (const file of scanFiles) {
   }
 }
 
-// Only browser application sources are subject to this check. Build config and
-// Netlify function files legitimately use Node's process.env on the server.
+// Vite's built-in DEV/PROD flags are safe and are replaced with booleans.
+// Block only custom VITE_* browser env access and Node process.env access.
 const clientSourceFiles = scanFiles.filter((file) => {
   const relative = path.relative(projectRoot, file).split(path.sep).join('/');
   return relative.startsWith('src/') || relative === 'index.html';
 });
+const unsafeClientEnvAccess = /import\.meta\.env\s*(?:\.\s*VITE_[A-Z0-9_]+|\[\s*['"]VITE_[A-Z0-9_]+['"]\s*\])|process\.env/;
 for (const file of clientSourceFiles) {
   if (!fs.existsSync(file)) continue;
   const source = fs.readFileSync(file, 'utf8');
-  if (/import\.meta\.env|process\.env/.test(source)) {
+  if (unsafeClientEnvAccess.test(source)) {
     throw new Error(`Client build-time environment access detected in source: ${path.relative(projectRoot, file)}. Client runtime configuration must come from server endpoints.`);
   }
 }
