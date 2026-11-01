@@ -6,6 +6,8 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 
 test('Gemini Live WebSocket URLs are never captured by the Vite development mock', () => {
   const html = read('../../index.html');
+  assert.match(html, /window\.location\.hostname === 'localhost'/);
+  assert.match(html, /window\.location\.hostname === '127\.0\.0\.1'/);
   assert.doesNotMatch(html, /urlStr\.includes\(['"]token=['"]\)/i);
   assert.doesNotMatch(html, /access_token=/i);
 });
@@ -37,7 +39,7 @@ test('saved Allow Everything consent bypasses product prompts but still requires
   const settings = read('../../src/pages/JessSettings.tsx');
   assert.match(main, /const allowEverything = fullControlActive && !!controlSessionSecret && jessPreferences\.fullControlEnabled && jessPreferences\.permissionMode === 'allow-everything'/);
   assert.match(main, /!allowEverything && jessPreferences\.allowShellCommands/);
-  assert.match(main, /!allowEverything && jessPreferences\.allowSystemWideFileScan/);
+  assert.match(main, /method === 'filesystem_scan' && !allowEverything &&/);
   assert.match(main, /!allowEverything && jessPreferences\.allowAutomatedFileManagement/);
   assert.match(main, /if \(!allowEverything\) \{[\s\S]*?Confirm Windows storage cleanup/);
   assert.match(main, /allowUnrestricted: allowEverything \|\| jessPreferences\.allowShellCommands === true/);
