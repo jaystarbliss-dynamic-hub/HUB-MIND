@@ -173,49 +173,75 @@ export async function flushOfflineQueue(): Promise<{
   const remaining: OfflineAction[] = [];
 
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('hubmind:sync-status', {
-        detail: { status: 'syncing', queueCount: queue.length },
-      })
-    );
+    window.dispatchEvent(new CustomEvent('hubmind:sync-status', {
+      detail: { status: 'syncing', queueCount: queue.length },
+    }));
   }
 
-  for (const item of queue) {
-    try {
-      item.status = 'syncing';
-      await processSingleAction(item);
-      synced++;
-    } catch (err: any) {
-      console.error(`[OfflineQueue] Error syncing action ${item.id} (${item.type}):`, err);
-      item.retryCount = (item.retryCount || 0) + 1;
-      item.error = err?.message || 'Sync failed';
-      item.status = 'failed';
-      // Keep in queue if retry count < 5
-      if (item.retryCount < 5) {
+  try {
+    for (const item of queue) {
+      // Exhausted actions stay in the durable queue until the user explicitly
+      // retries them. Never turn an empty active queue into a false "synced".
+      if (item.status === 'failed' && (item.retryCount || 0) >= 5) {
         remaining.push(item);
-      } else {
-        console.warn(`[OfflineQueue] Action ${item.id} exceeded max retries, dropping.`);
+        failed++;
+        continue;
       }
-      failed++;
+      try {
+        item.status = 'syncing';
+        await processSingleAction(item);
+        synced++;
+      } catch (err: any) {
+        console.error(`[OfflineQueue] Error syncing action ${item.id} (${item.type}):`, err);
+        item.retryCount = (item.retryCount || 0) + 1;
+        item.error = err?.message || 'Sync failed';
+        item.status = item.retryCount >= 5 ? 'failed' : 'pending';
+        // Always retain failed work. Items at five retries become a manual
+        // recovery item and are excluded from background retry attempts.
+        remaining.push(item);
+        failed++;
+      }
     }
+  } finally {
+    isFlushing = false;
   }
 
   setOfflineActionQueue(remaining);
-  isFlushing = false;
-
+  const hasExhaustedFailures = remaining.some(item => item.status === 'failed' && (item.retryCount || 0) >= 5);
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('hubmind:sync-status', {
-        detail: {
-          status: remaining.length === 0 ? 'synced' : 'pending',
-          syncedCount: synced,
-          queueCount: remaining.length,
-        },
-      })
-    );
+    window.dispatchEvent(new CustomEvent('hubmind:sync-status', {
+      detail: {
+        status: remaining.length === 0 ? 'synced' : hasExhaustedFailures ? 'failed' : 'pending',
+        syncedCount: synced,
+        failedCount: failed,
+        queueCount: remaining.length,
+      },
+    }));
   }
 
   return { synced, failed, remaining: remaining.length };
+}
+
+/**
+ * Reset exhausted actions for an explicit user-requested retry.
+ */
+export async function retryFailedOfflineActions(): Promise<{
+  synced: number;
+  failed: number;
+  remaining: number;
+}> {
+  const queue = getOfflineActionQueue();
+  let retried = 0;
+  for (const item of queue) {
+    if (item.status === 'failed') {
+      item.retryCount = 0;
+      item.status = 'pending';
+      delete item.error;
+      retried++;
+    }
+  }
+  if (retried > 0) setOfflineActionQueue(queue);
+  return flushOfflineQueue();
 }
 
 /**
