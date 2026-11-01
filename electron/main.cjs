@@ -14,9 +14,9 @@ const { McpBridge } = require('./mcpBridge.cjs');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 const APP_URL = process.env.HUBMIND_APP_URL || 'https://hub-mind.netlify.app';
-const JESS_PET_WIDTH = 260;
-const JESS_PET_HEIGHT = 300;
-const JESS_PET_STATES = new Set(['idle', 'stride', 'run', 'jump', 'think', 'happy', 'walk', 'tired', 'celebrate']);
+const JESS_PET_WIDTH = 130;
+const JESS_PET_HEIGHT = 150;
+const JESS_PET_STATES = new Set(['idle', 'listening', 'thinking', 'speaking', 'interrupted', 'muted', 'error', 'stride', 'run', 'jump', 'think', 'happy', 'walk', 'tired', 'celebrate']);
 const JESS_PET_EXPRESSIONS = new Set(['happy', 'happyEyesClosed', 'concerned', 'surprised', 'annoyed']);
 const JESS_LIVE_STATES = new Set(['idle', 'listening', 'thinking', 'speaking', 'interrupted', 'muted', 'error']);
 const JESS_CONNECTION_STATES = new Set(['disconnected', 'connecting', 'connected', 'error']);
@@ -970,6 +970,10 @@ app.whenReady().then(() => {
     if (typeof method !== 'string' || !allowed.has(method)) throw new Error('Unknown or unavailable native action.');
     if (!['get_time','system_info'].includes(method)) requireFullControl(method, { userId, executionId: correlationId });
     const safeArgs = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+    // Allow Everything is the user's saved, session-level Full Control consent.
+    // It bypasses product confirmation prompts while retaining the trusted IPC,
+    // active-session, input validation, audit and Windows account boundaries.
+    const allowEverything = fullControlActive && !!controlSessionSecret && jessPreferences.fullControlEnabled && jessPreferences.permissionMode === 'allow-everything';
     if (method === 'screenshot') {
       if (safeArgs.detail !== undefined && !['standard', 'high'].includes(String(safeArgs.detail))) {
         throw new Error('Screenshot detail must be standard or high.');
@@ -983,7 +987,7 @@ app.whenReady().then(() => {
     }
     if (method === 'media_key' && !['volume_up','volume_down','volume_mute','brightness_up','brightness_down'].includes(String(safeArgs.action))) throw new Error('Unsupported volume or brightness action.');
     if (method === 'run_command') {
-      if (jessPreferences.allowShellCommands !== true) throw new Error('Advanced shell commands are disabled in Jess settings. Enable Advanced shell commands to execute this command as your Windows user.');
+      if (!allowEverything && jessPreferences.allowShellCommands !== true) throw new Error('Advanced shell commands are disabled in Jess settings. Enable Advanced shell commands to execute this command as your Windows user.');
       const command = String(safeArgs.command || '');
       if (safeArgs.timeoutMs !== undefined && (!Number.isFinite(safeArgs.timeoutMs) || safeArgs.timeoutMs < 1000 || safeArgs.timeoutMs > 120000)) throw new Error('Command timeout must be between 1,000 and 120,000 milliseconds.');
       if (command.length > 10000) throw new Error('Command exceeds the 10,000-character limit.');
@@ -1031,15 +1035,15 @@ app.whenReady().then(() => {
       if (!Array.isArray(safeArgs.candidateIds) || safeArgs.candidateIds.length < 1 || safeArgs.candidateIds.length > 100) throw new Error('Choose between 1 and 100 exact candidate IDs from the scan report.');
       if (safeArgs.candidateIds.some(id => typeof id !== 'string' || !/^F\d{6}$/.test(id)) || new Set(safeArgs.candidateIds).size !== safeArgs.candidateIds.length) throw new Error('Candidate IDs must be unique IDs copied from the scan report.');
     }
-    if (method === 'filesystem_scan' && !String(safeArgs.root || '').trim() && jessPreferences.allowSystemWideFileScan !== true) {
+    if (method === 'filesystem_scan' && !allowEverything && !String(safeArgs.root || '').trim() && jessPreferences.allowSystemWideFileScan !== true) {
       throw new Error('Full-drive recursive scanning is disabled in Jess settings. Enable “Scan all local drives” or provide a specific folder to scan.');
     }
-    if (method === 'filesystem_clean' && jessPreferences.allowAutomatedFileManagement !== true) {
+    if (method === 'filesystem_clean' && !allowEverything && jessPreferences.allowAutomatedFileManagement !== true) {
       throw new Error('Automated file management is disabled in Jess settings. Enable it before cleaning scanned candidates.');
     }
     if (method === 'file_action') {
       const mutatingFileActions = new Set(['write','copy','move','rename','recycle']);
-      if (mutatingFileActions.has(String(safeArgs.action || '')) && jessPreferences.allowAutomatedFileManagement !== true) {
+      if (mutatingFileActions.has(String(safeArgs.action || '')) && !allowEverything && jessPreferences.allowAutomatedFileManagement !== true) {
         throw new Error('Automated file management is disabled in Jess settings. Enable it before modifying files.');
       }
       const actions = new Set(['list','read','write','copy','move','rename','search','recycle']);
@@ -1054,7 +1058,6 @@ app.whenReady().then(() => {
     }
     const mutatingActions = new Set(['filesystem_clean','focus_window','close_window','minimize_window','maximize_window','restore_window','move_window','resize_window','snap_window','show_desktop','minimize_all','start_menu','switch_window','mouse_move','click','double_click','drag','right_click','scroll','type_text','press_keys','invoke_ui_element','launch_app','run_command','file_action','clipboard_action','system_power_action','open_path','media_key']);
     const routineActions = new Set(['filesystem_scan','list_windows','focus_window','minimize_window','maximize_window','restore_window','move_window','resize_window','snap_window','show_desktop','minimize_all','start_menu','switch_window','mouse_move','click','double_click','drag','right_click','scroll','type_text','press_keys','invoke_ui_element','launch_app','open_path','media_key','screenshot','read_screen_text','find_ui_element']);
-    const allowEverything = fullControlActive && !!controlSessionSecret && jessPreferences.fullControlEnabled && jessPreferences.permissionMode === 'allow-everything';
     const readOnlyFileAction = method === 'file_action' && ['list','read','search'].includes(String(safeArgs.action || ''));
     const readOnlyClipboardAction = method === 'clipboard_action' && String(safeArgs.action || '') === 'read';
     const allowRoutine = fullControlActive && !!controlSessionSecret && jessPreferences.fullControlEnabled && jessPreferences.permissionMode === 'allow-routine' && (routineActions.has(method) || readOnlyFileAction || readOnlyClipboardAction);
@@ -1087,18 +1090,20 @@ app.whenReady().then(() => {
         const prettySize = bytes >= 1024 ** 3 ? (bytes / (1024 ** 3)).toFixed(2) + ' GB' : bytes >= 1024 ** 2 ? (bytes / (1024 ** 2)).toFixed(1) + ' MB' : (bytes / 1024).toFixed(1) + ' KB';
         const paths = previewItems.slice(0, 12).map(item => String(item.path || '').slice(0, 220));
         const remaining = previewItems.length - paths.length;
-        const choice = await dialog.showMessageBox(getDialogParent(), {
-          type: 'warning',
-          buttons: ['Cancel cleanup', 'Move to Recycle Bin'],
-          defaultId: 0,
-          cancelId: 0,
-          title: 'Confirm Windows storage cleanup',
-          message: 'Move ' + previewItems.length + ' selected files (' + prettySize + ') to the Windows Recycle Bin?',
-          detail: 'Review the exact files before continuing:\n\n' + paths.map((item, index) => (index + 1) + '. ' + item).join('\n') + (remaining > 0 ? '\n… and ' + remaining + ' more selected files.' : '') + '\n\nOnly temporary or hash-verified duplicate candidates are accepted. Files are moved to the Recycle Bin, not permanently deleted. Inactive files alone are review-only.',
-        });
-        if (choice.response !== 1) {
-          auditNativeAction({ event: 'filesystem-clean-cancelled', method, userId, executionId: correlationId, candidateCount: cleanRequest.candidateIds.length });
-          return { ok: false, verified: true, evidence: { count: previewItems.length, totalBytes: bytes, cancelled: true }, error: 'Cleanup cancelled. No files were changed.' };
+        if (!allowEverything) {
+          const choice = await dialog.showMessageBox(getDialogParent(), {
+            type: 'warning',
+            buttons: ['Cancel cleanup', 'Move to Recycle Bin'],
+            defaultId: 0,
+            cancelId: 0,
+            title: 'Confirm Windows storage cleanup',
+            message: 'Move ' + previewItems.length + ' selected files (' + prettySize + ') to the Windows Recycle Bin?',
+            detail: 'Review the exact files before continuing:\n\n' + paths.map((item, index) => (index + 1) + '. ' + item).join('\n') + (remaining > 0 ? '\n… and ' + remaining + ' more selected files.' : '') + '\n\nOnly temporary or hash-verified duplicate candidates are accepted. Files are moved to the Recycle Bin, not permanently deleted. Inactive files alone are review-only.',
+          });
+          if (choice.response !== 1) {
+            auditNativeAction({ event: 'filesystem-clean-cancelled', method, userId, executionId: correlationId, candidateCount: cleanRequest.candidateIds.length });
+            return { ok: false, verified: true, evidence: { count: previewItems.length, totalBytes: bytes, cancelled: true }, error: 'Cleanup cancelled. No files were changed.' };
+          }
         }
         result = await nativeAgent.call('filesystem_clean', { ...cleanRequest, confirmedByDesktop: true }, 120000);
       } else {
@@ -1110,7 +1115,7 @@ app.whenReady().then(() => {
               ? Math.min(125000, Math.max(15000, (Number(safeArgs.timeoutMs) || 30000) + 5000))
               : 15000;
         const nativeArgs = method === 'run_command'
-          ? { ...safeArgs, allowUnrestricted: jessPreferences.allowShellCommands === true }
+          ? { ...safeArgs, allowUnrestricted: allowEverything || jessPreferences.allowShellCommands === true }
           : safeArgs;
         result = await nativeAgent.call(method, nativeArgs, actionTimeout);
       }
