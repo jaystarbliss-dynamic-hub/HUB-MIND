@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { Search, CheckSquare, FileText, Briefcase, Building, Sparkles, X, ArrowRight, CornerDownLeft } from 'lucide-react';
+import { Search, CheckSquare, FileText, Briefcase, Building, X, ArrowRight, CornerDownLeft } from 'lucide-react';
 
 interface SearchResultItem {
   id: string;

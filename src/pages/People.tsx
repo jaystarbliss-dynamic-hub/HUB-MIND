@@ -16,7 +16,6 @@ import {
   AtSign, 
   Clock, 
   UserCheck, 
-  Sparkles,
   AlertCircle,
   Loader2,
   RefreshCw,

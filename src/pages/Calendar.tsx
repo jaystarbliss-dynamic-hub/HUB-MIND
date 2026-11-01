@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import { 
   Loader2, ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, 
   CheckSquare, X, Clock, MapPin, Tag, ListFilter, CalendarDays, CheckCircle2,
-  AlertCircle, Globe, Link2, Unlink, Sparkles
+  AlertCircle, Globe, Link2, Unlink
 } from 'lucide-react';
 import { safeParseISO, safeFormat } from "../lib/dateUtils";
 import { materializeRecurringMeetings } from "../lib/recurringMeetings";

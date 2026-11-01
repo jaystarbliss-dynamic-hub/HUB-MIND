@@ -13,7 +13,6 @@ import {
   Filter,
   Search,
   Layers,
-  Sparkles,
   ArrowUpRight,
   CheckSquare,
   Flag,

@@ -10,7 +10,6 @@ import {
   CheckSquare, 
   FolderKanban, 
   MessageSquare, 
-  Sparkles, 
   MessageCircle, 
   Copy, 
   Check, 

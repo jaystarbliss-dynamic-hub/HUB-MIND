@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   History, Clock, RotateCcw, Check, User, FileText, 
-  Bookmark, Plus, X, Eye, Loader2, Sparkles, AlertCircle 
+  Bookmark, Plus, X, Eye, Loader2, AlertCircle 
 } from 'lucide-react';
 import { DocumentVersion, fetchDocumentVersionHistory, createNamedCheckpoint } from '../../lib/offlineSync';
 import { formatExactTimestamp, formatTimeWithSeconds } from '../../lib/dateUtils';

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { addDoc, collection, doc, onSnapshot, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { ArrowUp, Copy, Download, History, LoaderCircle, MessageCircle, Monitor, MonitorOff, Plus, Sparkles, X } from 'lucide-react';
+import { ArrowUp, Copy, Download, History, LoaderCircle, MessageCircle, Monitor, MonitorOff, Plus, X } from 'lucide-react';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
 import { formatMemoriesForPrompt, getUserMemories, saveUserMemory } from '../services/memoryService';

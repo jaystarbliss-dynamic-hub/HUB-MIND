@@ -23,7 +23,6 @@ import {
   AlignStartVertical,
   AlignCenterVertical,
   AlignEndVertical,
-  Sparkles,
   ArrowUpDown,
 } from 'lucide-react';
 import {

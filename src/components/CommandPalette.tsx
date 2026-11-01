@@ -19,7 +19,6 @@ import {
   Clock3,
   Shield,
   Plus,
-  Sparkles,
   RefreshCw,
   X,
   ArrowRight,

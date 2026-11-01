@@ -13,3 +13,10 @@ release/
 
 # Generated from the official logo during Windows packaging
 build-resources/icon.ico
+
+# Local backup snapshots
+jess_ai_backup/
+dist/
+build/
+out/
+
