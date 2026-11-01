@@ -8,9 +8,9 @@
           const OrigWebSocket = window.WebSocket;
           const isViteWs = function(url, protocols) {
             const urlStr = String(url || '').toLowerCase();
-            if (urlStr.includes('vite') || urlStr.includes('hmr') || urlStr.includes('ping')) return true;
-            if (typeof protocols === 'string' && (protocols.includes('vite') || protocols.includes('hmr'))) return true;
-            if (Array.isArray(protocols) && protocols.some(function(p) { return String(p).toLowerCase().includes('vite') || String(p).toLowerCase().includes('hmr'); })) return true;
+            if (urlStr.includes('vite') || urlStr.includes('hmr') || urlStr.includes('ping') || urlStr.includes('token=') || urlStr.includes('24678')) return true;
+            if (typeof protocols === 'string' && (protocols.includes('vite') || protocols.includes('hmr') || protocols.includes('ping'))) return true;
+            if (Array.isArray(protocols) && protocols.some(function(p) { return String(p).toLowerCase().includes('vite') || String(p).toLowerCase().includes('hmr') || String(p).toLowerCase().includes('ping'); })) return true;
             return false;
           };
 
@@ -19,12 +19,16 @@
               return new ViteMockWebSocket(url, protocols);
             }
             if (!isViteWs(url, protocols)) {
-              return new OrigWebSocket(url, protocols);
+              return protocols !== undefined ? new OrigWebSocket(url, protocols) : new OrigWebSocket(url);
             }
             const self = this;
+            this.CONNECTING = 0;
+            this.OPEN = 1;
+            this.CLOSING = 2;
+            this.CLOSED = 3;
             this.url = String(url || '');
             this.protocol = typeof protocols === 'string' ? protocols : (Array.isArray(protocols) ? protocols[0] : 'vite-hmr');
-            this.readyState = OrigWebSocket.OPEN || 1;
+            this.readyState = 1;
             this.binaryType = 'blob';
             this.bufferedAmount = 0;
             this.extensions = '';
@@ -47,7 +51,7 @@
             this.dispatchEvent = function(event) {
               const type = event && event.type;
               if (listeners[type]) {
-                listeners[type].forEach(function(fn) {
+                listeners[type].slice().forEach(function(fn) {
                   try { fn.call(self, event); } catch (e) {}
                 });
               }
@@ -78,24 +82,28 @@
             };
 
             this.close = function() {
-              self.readyState = OrigWebSocket.CLOSED || 3;
-              self.dispatchEvent(new CloseEvent('close'));
+              self.readyState = 3;
             };
 
             setTimeout(function() {
-              self.readyState = OrigWebSocket.OPEN || 1;
+              self.readyState = 1;
               self.dispatchEvent(new Event('open'));
               setTimeout(function() {
                 self.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'connected' }) }));
-              }, 20);
-            }, 10);
+              }, 10);
+            }, 5);
           }
 
-          ViteMockWebSocket.CONNECTING = OrigWebSocket.CONNECTING || 0;
-          ViteMockWebSocket.OPEN = OrigWebSocket.OPEN || 1;
-          ViteMockWebSocket.CLOSING = OrigWebSocket.CLOSING || 2;
-          ViteMockWebSocket.CLOSED = OrigWebSocket.CLOSED || 3;
-          ViteMockWebSocket.prototype = OrigWebSocket.prototype;
+          ViteMockWebSocket.CONNECTING = 0;
+          ViteMockWebSocket.OPEN = 1;
+          ViteMockWebSocket.CLOSING = 2;
+          ViteMockWebSocket.CLOSED = 3;
+          ViteMockWebSocket.prototype = {
+            CONNECTING: 0,
+            OPEN: 1,
+            CLOSING: 2,
+            CLOSED: 3
+          };
 
           window.WebSocket = ViteMockWebSocket;
         }
@@ -120,6 +128,7 @@
             const lower = fullText.toLowerCase();
             return (
               lower.includes('[vite]') ||
+              lower.includes('websocket closed without opened') ||
               lower.includes('failed to connect to websocket') ||
               lower.includes('vite:') ||
               lower.includes('/@vite/') ||

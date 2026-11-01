@@ -10,12 +10,28 @@ import {
   Printer, Download, Upload, Copy, Scissors, ClipboardPaste,
   Search, ZoomIn, ZoomOut, Maximize2, SplitSquareVertical,
   Plus, Trash2, Columns, Rows, Pin, PinOff, ChevronUp, ChevronDown,
-  History, Clock
+  History, Clock, PaintBucket, Grid, Square, Combine, Split,
+  ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Check, X,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  ArrowUpDown, Sparkles
 } from 'lucide-react';
 import { ImportExportMenu } from './ImportExportMenu';
 import { PaperSizeOption, OrientationOption, MarginOption, PaperThemeOption } from '../../lib/paginationEngine';
+import {
+  getActiveTableCellAttributes,
+  setTableCellFormatting,
+  applyFormattingToEntireTable,
+  TABLE_CELL_BG_PALETTE,
+  TABLE_BORDER_COLOR_PALETTE,
+  PREFORMATTED_TABLE_TEMPLATES,
+  insertPreformattedTableTemplate,
+  sortActiveTableByColumn,
+  TableBorderMode,
+  TableTextAlign,
+  TableVerticalAlign,
+} from '../../lib/CustomTableExtensions';
 
-export type RibbonTab = 'home' | 'insert' | 'layout' | 'review' | 'view' | 'file';
+export type RibbonTab = 'home' | 'insert' | 'table' | 'layout' | 'review' | 'view' | 'file';
 
 interface DocumentRibbonProps {
   editor: Editor;
@@ -91,10 +107,14 @@ export function DocumentRibbon({
 
   // Table Drawer / Popover State
   const [isTableMenuOpen, setIsTableMenuOpen] = useState(false);
+  const [isTemplatesMenuOpen, setIsTemplatesMenuOpen] = useState(false);
   const [gridHover, setGridHover] = useState<{ rows: number; cols: number }>({ rows: 3, cols: 3 });
   const [customTableRows, setCustomTableRows] = useState<number>(3);
   const [customTableCols, setCustomTableCols] = useState<number>(3);
   const [customTableWithHeader, setCustomTableWithHeader] = useState<boolean>(true);
+  const [tableBorderMenuOpen, setTableBorderMenuOpen] = useState(false);
+  const [tableBgMenuOpen, setTableBgMenuOpen] = useState(false);
+  const [applyToWholeTable, setApplyToWholeTable] = useState(false);
 
   // Re-render ribbon on every selection update or transaction so active tool highlights match Microsoft Word precisely
   useEffect(() => {
@@ -158,31 +178,32 @@ export function DocumentRibbon({
 
   const insertTable = () => {
     setIsTableMenuOpen(prev => !prev);
+    setIsTemplatesMenuOpen(false);
+  };
+
+  const toggleTemplatesMenu = () => {
+    setIsTemplatesMenuOpen(prev => !prev);
+    setIsTableMenuOpen(false);
   };
 
   const handleInsertGridTable = (rows: number, cols: number, withHeader: boolean = true) => {
     editor.chain().focus().insertTable({ rows: Math.max(1, rows), cols: Math.max(1, cols), withHeaderRow: withHeader }).run();
     setIsTableMenuOpen(false);
+    setIsTemplatesMenuOpen(false);
   };
 
   const handleInsertCustomTable = () => {
     handleInsertGridTable(customTableRows, customTableCols, customTableWithHeader);
   };
 
-  const handleInsertTemplateTable = (type: 'fees' | 'roster' | 'comparison' | 'matrix') => {
-    if (type === 'fees') {
-      const html = `<table><thead><tr><th><p>Course Module</p></th><th><p>Duration</p></th><th><p>Certifications</p></th><th><p>Tuition Fee (NGN / USD)</p></th></tr></thead><tbody><tr><td><p>Executive Leadership & Management</p></td><td><p>6 Weeks</p></td><td><p>Professional Diploma</p></td><td><p>₦150,000 / $250</p></td></tr><tr><td><p>Full-Stack Web & AI Engineering</p></td><td><p>12 Weeks</p></td><td><p>Certified Specialist</p></td><td><p>₦280,000 / $450</p></td></tr><tr><td><p>Data Analytics & Business Intelligence</p></td><td><p>8 Weeks</p></td><td><p>Associate Certificate</p></td><td><p>₦180,000 / $300</p></td></tr></tbody></table>`;
-      editor.chain().focus().insertContent(html).run();
-    } else if (type === 'roster') {
-      const html = `<table><thead><tr><th><p>Student ID</p></th><th><p>Full Name</p></th><th><p>Department</p></th><th><p>Status</p></th><th><p>Grade Avg</p></th></tr></thead><tbody><tr><td><p>JDI-2026-001</p></td><td><p>Adeyemi Johnson</p></td><td><p>Computer Science</p></td><td><p>Enrolled</p></td><td><p>A (4.8)</p></td></tr><tr><td><p>JDI-2026-002</p></td><td><p>Blessing Chinedu</p></td><td><p>Business Admin</p></td><td><p>Active</p></td><td><p>A- (4.5)</p></td></tr><tr><td><p>JDI-2026-003</p></td><td><p>Faruq Abubakar</p></td><td><p>Data Science</p></td><td><p>Active</p></td><td><p>B+ (4.2)</p></td></tr></tbody></table>`;
-      editor.chain().focus().insertContent(html).run();
-    } else if (type === 'comparison') {
-      const html = `<table><thead><tr><th><p>Key Dimension</p></th><th><p>Current Framework</p></th><th><p>Jaystarbliss Proposed</p></th></tr></thead><tbody><tr><td><p>Curriculum Architecture</p></td><td><p>Traditional lecture-based</p></td><td><p>AI-Integrated project sprints</p></td></tr><tr><td><p>Practical Mastery</p></td><td><p>Theoretical evaluations</p></td><td><p>Live industrial capstones</p></td></tr><tr><td><p>Industry Certification</p></td><td><p>Internal diploma only</p></td><td><p>Global dual credentialing</p></td></tr></tbody></table>`;
-      editor.chain().focus().insertContent(html).run();
-    } else {
+  const handleInsertTemplateTable = (templateId: string) => {
+    if (templateId === 'matrix') {
       handleInsertGridTable(3, 3, true);
+    } else {
+      insertPreformattedTableTemplate(editor, templateId);
     }
     setIsTableMenuOpen(false);
+    setIsTemplatesMenuOpen(false);
   };
 
   const fontFamilies = [
@@ -221,7 +242,7 @@ export function DocumentRibbon({
       : 'p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors';
 
   return (
-    <div className="bg-slate-900 border-b border-slate-800 text-slate-200 select-none shrink-0 print:hidden shadow-md transition-all duration-200">
+    <div className="relative z-30 bg-slate-900 border-b border-slate-800 text-slate-200 select-none shrink-0 print:hidden shadow-md transition-all duration-200">
       {/* Top Ribbon Navigation Tabs */}
       <div className="flex items-center gap-0.5 px-3 pt-1 border-b border-slate-800/80 bg-slate-950 overflow-x-auto scrollbar-none text-xs">
         <button
@@ -289,6 +310,24 @@ export function DocumentRibbon({
           }`}
         >
           View
+        </button>
+
+        <button
+          onClick={() => handleTabClick('table')}
+          className={`px-3.5 py-1.5 font-semibold rounded-t-md transition-colors flex items-center gap-1.5 cursor-pointer ${
+            activeTab === 'table'
+              ? 'bg-slate-900 text-teal-300 border-t-2 border-teal-400 font-bold'
+              : editor.isActive('table')
+              ? 'bg-teal-500/15 text-teal-300 border-t-2 border-teal-400/60 hover:bg-teal-500/25'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+          title="Table Creation, Cell Borders, Shading & Alignment Tools"
+        >
+          <TableIcon className="w-3.5 h-3.5 text-teal-400" />
+          <span>Table Tools</span>
+          {editor.isActive('table') && (
+            <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+          )}
         </button>
 
         {/* Ribbon Pin & Collapse Controls + Page Counter */}
@@ -521,39 +560,75 @@ export function DocumentRibbon({
                 </button>
               </div>
 
-              {/* Paragraph Alignments with Word-Style Active Reflection */}
+              {/* Paragraph & Table Cell Alignments with Word-Style Active Reflection */}
               <div className="flex items-center gap-0.5 pr-2 border-r border-slate-800">
                 <button
-                  onClick={() => editor.chain().focus().setTextAlign('left').run()}
-                  className={`${getToolClass(editor.isActive({ textAlign: 'left' }))} cursor-pointer`}
-                  title="Align Left"
+                  onClick={() => {
+                    if (editor.isActive('table')) {
+                      setTableCellFormatting(editor, { textAlign: 'left' });
+                    } else {
+                      editor.chain().focus().setTextAlign('left').run();
+                    }
+                  }}
+                  className={`${getToolClass(
+                    editor.isActive({ textAlign: 'left' }) ||
+                      (editor.isActive('table') && getActiveTableCellAttributes(editor).textAlign === 'left')
+                  )} cursor-pointer`}
+                  title="Align Left (Paragraph & Table Cells)"
                 >
                   <AlignLeft className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => editor.chain().focus().setTextAlign('center').run()}
-                  className={`${getToolClass(editor.isActive({ textAlign: 'center' }))} cursor-pointer`}
-                  title="Align Center"
+                  onClick={() => {
+                    if (editor.isActive('table')) {
+                      setTableCellFormatting(editor, { textAlign: 'center' });
+                    } else {
+                      editor.chain().focus().setTextAlign('center').run();
+                    }
+                  }}
+                  className={`${getToolClass(
+                    editor.isActive({ textAlign: 'center' }) ||
+                      (editor.isActive('table') && getActiveTableCellAttributes(editor).textAlign === 'center')
+                  )} cursor-pointer`}
+                  title="Align Center (Paragraph & Table Cells)"
                 >
                   <AlignCenter className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => editor.chain().focus().setTextAlign('right').run()}
-                  className={`${getToolClass(editor.isActive({ textAlign: 'right' }))} cursor-pointer`}
-                  title="Align Right"
+                  onClick={() => {
+                    if (editor.isActive('table')) {
+                      setTableCellFormatting(editor, { textAlign: 'right' });
+                    } else {
+                      editor.chain().focus().setTextAlign('right').run();
+                    }
+                  }}
+                  className={`${getToolClass(
+                    editor.isActive({ textAlign: 'right' }) ||
+                      (editor.isActive('table') && getActiveTableCellAttributes(editor).textAlign === 'right')
+                  )} cursor-pointer`}
+                  title="Align Right (Paragraph & Table Cells)"
                 >
                   <AlignRight className="w-3.5 h-3.5" />
                 </button>
                 <button
-                  onClick={() => editor.chain().focus().setTextAlign('justify').run()}
-                  className={`${getToolClass(editor.isActive({ textAlign: 'justify' }))} cursor-pointer`}
-                  title="Justify"
+                  onClick={() => {
+                    if (editor.isActive('table')) {
+                      setTableCellFormatting(editor, { textAlign: 'justify' });
+                    } else {
+                      editor.chain().focus().setTextAlign('justify').run();
+                    }
+                  }}
+                  className={`${getToolClass(
+                    editor.isActive({ textAlign: 'justify' }) ||
+                      (editor.isActive('table') && getActiveTableCellAttributes(editor).textAlign === 'justify')
+                  )} cursor-pointer`}
+                  title="Justify (Paragraph & Table Cells)"
                 >
                   <AlignJustify className="w-3.5 h-3.5" />
                 </button>
               </div>
 
-              {/* Lists & Quotes with Active Reflection */}
+              {/* Lists, Quotes & Quick Table Insert */}
               <div className="flex items-center gap-0.5 pr-2 border-r border-slate-800">
                 <button
                   onClick={() => editor.chain().focus().toggleBulletList().run()}
@@ -583,7 +658,83 @@ export function DocumentRibbon({
                 >
                   <Quote className="w-3.5 h-3.5" />
                 </button>
+                <button
+                  onClick={insertTable}
+                  className={`px-2 py-1 rounded-lg flex items-center gap-1 transition-colors cursor-pointer ml-0.5 ${
+                    isTableMenuOpen || editor.isActive('table')
+                      ? 'bg-teal-500/25 text-teal-300 ring-1 ring-teal-400/50 font-bold'
+                      : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white'
+                  }`}
+                  title="Create or Edit Table"
+                >
+                  <TableIcon className="w-3.5 h-3.5 text-teal-400" />
+                  <span className="text-[11px]">Table</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
+                <button
+                  onClick={toggleTemplatesMenu}
+                  className={`px-2 py-1 rounded-lg flex items-center gap-1 transition-colors cursor-pointer ${
+                    isTemplatesMenuOpen
+                      ? 'bg-cyan-500/25 text-cyan-300 ring-1 ring-cyan-400/50 font-bold'
+                      : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white'
+                  }`}
+                  title="Insert Pre-Formatted Table Template (Weekly Task Matrix, Expense Log, etc.)"
+                >
+                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  <span className="text-[11px]">Table Templates</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
               </div>
+
+              {/* Inline Table Formatting & Sort Toggles on Home Tab when inside a Table */}
+              {editor.isActive('table') && (
+                <div className="flex items-center gap-1 pr-2 border-r border-slate-800 bg-teal-500/10 px-2 py-0.5 rounded-lg border border-teal-500/30">
+                  <button
+                    onClick={() => sortActiveTableByColumn(editor)}
+                    className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 flex items-center gap-1 text-[11px] cursor-pointer"
+                    title="Sort Active Column (Or click any Table Header cell directly to toggle Asc/Desc)"
+                  >
+                    <ArrowUpDown className="w-3 h-3 text-cyan-400" />
+                    <span>Sort Col</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const current = getActiveTableCellAttributes(editor).borderMode;
+                      const order: TableBorderMode[] = ['all', 'none', 'bottom', 'thick', 'dashed'];
+                      const next = order[(order.indexOf(current) + 1) % order.length];
+                      setTableCellFormatting(editor, { borderMode: next });
+                    }}
+                    className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-teal-300 flex items-center gap-1 text-[11px] cursor-pointer"
+                    title={`Toggle Cell Borders (Current: ${getActiveTableCellAttributes(editor).borderMode})`}
+                  >
+                    <Grid className="w-3 h-3 text-teal-400" />
+                    <span className="capitalize">{getActiveTableCellAttributes(editor).borderMode}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setTableBgMenuOpen((prev) => !prev);
+                      setTableBorderMenuOpen(false);
+                    }}
+                    className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1 text-[11px] cursor-pointer"
+                    title="Cell Background Color"
+                  >
+                    <PaintBucket className="w-3 h-3 text-amber-400" />
+                    <span
+                      className="w-2.5 h-2.5 rounded-xs border border-slate-600"
+                      style={{
+                        backgroundColor: getActiveTableCellAttributes(editor).backgroundColor || 'transparent',
+                      }}
+                    />
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('table')}
+                    className="px-1.5 py-1 rounded bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-semibold text-[10px] cursor-pointer"
+                    title="Open Full Table Formatting Toolbar"
+                  >
+                    More Table Tools
+                  </button>
+                </div>
+              )}
 
               {/* Quick Heading Style Presets with Word-Style Active Reflection */}
               <div className="flex items-center gap-1">
@@ -635,8 +786,8 @@ export function DocumentRibbon({
         {activeTab === 'insert' && (
           <div className="flex items-center gap-3 text-xs relative">
             <div className="flex items-center gap-2 pr-3 border-r border-slate-800">
-              {/* Interactive Table Insert / Draw Button & Popover */}
-              <div className="relative">
+              {/* Interactive Table Insert / Draw Button */}
+              <div className="relative flex items-center gap-1.5">
                 <button
                   onClick={insertTable}
                   className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
@@ -647,119 +798,22 @@ export function DocumentRibbon({
                   title="Draw or Insert Table"
                 >
                   <TableIcon className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Table</span>
+                  <span>Insert Table</span>
                   <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
                 </button>
-
-                {/* Table Draw / Insert Dropdown */}
-                {isTableMenuOpen && (
-                  <div 
-                    className="absolute top-full left-0 mt-2 z-50 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3.5 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 select-none text-slate-200"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-800">
-                      <span className="font-bold text-xs text-teal-300 flex items-center gap-1.5">
-                        <TableIcon className="w-3.5 h-3.5" />
-                        Draw Table
-                      </span>
-                      <span className="text-[11px] font-mono font-bold text-teal-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                        {gridHover.cols} × {gridHover.rows} Table
-                      </span>
-                    </div>
-
-                    {/* Interactive 8x8 Visual Grid Selector */}
-                    <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 mb-3 flex flex-col gap-1 items-center">
-                      {Array.from({ length: 8 }).map((_, rIdx) => {
-                        const rowNum = rIdx + 1;
-                        return (
-                          <div key={`grid-row-${rowNum}`} className="flex gap-1">
-                            {Array.from({ length: 8 }).map((_, cIdx) => {
-                              const colNum = cIdx + 1;
-                              const isHovered = rowNum <= gridHover.rows && colNum <= gridHover.cols;
-                              return (
-                                <button
-                                  key={`cell-${rowNum}-${colNum}`}
-                                  type="button"
-                                  onMouseEnter={() => setGridHover({ rows: rowNum, cols: colNum })}
-                                  onClick={() => handleInsertGridTable(rowNum, colNum, true)}
-                                  className={`w-5 h-5 rounded-xs transition-colors border ${
-                                    isHovered
-                                      ? 'bg-teal-500/50 border-teal-400 shadow-xs'
-                                      : 'bg-slate-800/80 border-slate-700 hover:bg-slate-700'
-                                  }`}
-                                  title={`Insert ${colNum} × ${rowNum} Table`}
-                                />
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Quick Templates */}
-                    <div className="mb-3">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                        Quick Layout Templates
-                      </span>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          onClick={() => handleInsertTemplateTable('fees')}
-                          className="text-left px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 hover:text-teal-300 truncate transition-colors"
-                        >
-                          📋 Fee Schedule (4 Col)
-                        </button>
-                        <button
-                          onClick={() => handleInsertTemplateTable('roster')}
-                          className="text-left px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 hover:text-teal-300 truncate transition-colors"
-                        >
-                          👥 Student Roster (5 Col)
-                        </button>
-                        <button
-                          onClick={() => handleInsertTemplateTable('comparison')}
-                          className="text-left px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 hover:text-teal-300 truncate transition-colors"
-                        >
-                          ⚖️ Comparison Matrix
-                        </button>
-                        <button
-                          onClick={() => handleInsertTemplateTable('matrix')}
-                          className="text-left px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 hover:text-teal-300 truncate transition-colors"
-                        >
-                          📐 Standard 3 × 3 Grid
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Custom Dimension Form */}
-                    <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 text-[11px]">
-                        <span className="text-slate-400">Cols:</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={customTableCols}
-                          onChange={(e) => setCustomTableCols(Math.max(1, parseInt(e.target.value) || 1))}
-                          className="w-10 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-xs text-white"
-                        />
-                        <span className="text-slate-400 ml-1">Rows:</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={50}
-                          value={customTableRows}
-                          onChange={(e) => setCustomTableRows(Math.max(1, parseInt(e.target.value) || 1))}
-                          className="w-10 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-center text-xs text-white"
-                        />
-                      </div>
-                      <button
-                        onClick={handleInsertCustomTable}
-                        className="px-2.5 py-1 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition-colors shrink-0"
-                      >
-                        Insert
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <button
+                  onClick={toggleTemplatesMenu}
+                  className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    isTemplatesMenuOpen
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                  }`}
+                  title="Insert Pre-Formatted Table Template (Weekly Task Matrix, Expense Log, etc.)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Table Templates</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
+                </button>
               </div>
 
               <button
@@ -840,18 +894,315 @@ export function DocumentRibbon({
                   <TableIcon className="w-3 h-3 text-teal-400" />
                   Table:
                 </span>
-                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200" title="Add Column Left">+Col Left</button>
-                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200" title="Add Column Right">+Col Right</button>
-                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-red-300" title="Delete Column">-Col</button>
-                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200" title="Add Row Above">+Row Above</button>
-                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200" title="Add Row Below">+Row Below</button>
-                <button onClick={() => editor.chain().focus().deleteRow().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-red-300" title="Delete Row">-Row</button>
-                <button onClick={() => editor.chain().focus().mergeCells().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-teal-300 font-semibold" title="Merge Selected Cells">Merge</button>
-                <button onClick={() => editor.chain().focus().splitCell().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-teal-300 font-semibold" title="Split Cell">Split</button>
-                <button onClick={() => editor.chain().focus().toggleHeaderRow().run()} className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-amber-300 font-medium" title="Toggle Header Row">H-Row</button>
-                <button onClick={() => editor.chain().focus().deleteTable().run()} className="p-1 rounded bg-red-950/70 hover:bg-red-900 border border-red-800 text-[10px] text-red-300 font-semibold" title="Delete Table">Delete Table</button>
+                <button onClick={() => editor.chain().focus().addRowBefore().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 cursor-pointer" title="Insert Row Above">+Row Above</button>
+                <button onClick={() => editor.chain().focus().addRowAfter().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 cursor-pointer" title="Insert Row Below">+Row Below</button>
+                <button onClick={() => editor.chain().focus().addColumnBefore().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 cursor-pointer" title="Insert Column Left">+Col Left</button>
+                <button onClick={() => editor.chain().focus().addColumnAfter().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-200 cursor-pointer" title="Insert Column Right">+Col Right</button>
+                <button onClick={() => editor.chain().focus().deleteRow().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-red-300 cursor-pointer" title="Delete Row">-Row</button>
+                <button onClick={() => editor.chain().focus().deleteColumn().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-red-300 cursor-pointer" title="Delete Column">-Col</button>
+                <button onClick={() => editor.chain().focus().mergeCells().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-teal-300 font-semibold cursor-pointer" title="Merge Selected Cells">Merge</button>
+                <button onClick={() => editor.chain().focus().splitCell().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-teal-300 font-semibold cursor-pointer" title="Split Cell">Split</button>
+                <button onClick={() => editor.chain().focus().toggleHeaderRow().run()} className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-amber-300 font-medium cursor-pointer" title="Toggle Header Row">H-Row</button>
+                <button onClick={() => editor.chain().focus().deleteTable().run()} className="px-1.5 py-1 rounded bg-red-950/70 hover:bg-red-900 border border-red-800 text-[10px] text-red-300 font-semibold cursor-pointer" title="Delete Table">Delete Table</button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB: TABLE TOOLS (Table Creation, Templates, Sorting, Rows/Cols, Cell Borders, Cell Background Color, Text Alignment) */}
+        {activeTab === 'table' && (
+          <div className="flex items-center gap-2.5 text-xs">
+            {/* Create / Insert Table & Pre-Formatted Templates Buttons */}
+            <div className="flex items-center gap-1.5 pr-2.5 border-r border-slate-800">
+              <button
+                onClick={insertTable}
+                className="px-2.5 py-1.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Create New Table"
+              >
+                <TableIcon className="w-3.5 h-3.5 text-teal-400" />
+                <span>New Table</span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              <button
+                onClick={toggleTemplatesMenu}
+                className={`px-2.5 py-1.5 rounded-lg border font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isTemplatesMenuOpen
+                    ? 'bg-cyan-500/25 text-cyan-300 border-cyan-400/50'
+                    : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border-slate-700'
+                }`}
+                title="Insert Pre-Formatted Table Templates (Weekly Task Matrix, Expense Log, etc.)"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Templates</span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Column Sorting Controls */}
+            <div className="flex items-center gap-1 pr-2.5 border-r border-slate-800">
+              <span className="text-[10px] font-bold uppercase text-slate-400 mr-0.5" title="Tip: You can also click any table header cell directly to sort!">
+                Sort Col:
+              </span>
+              <button
+                onClick={() => sortActiveTableByColumn(editor, 'asc')}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-teal-300 flex items-center gap-1 cursor-pointer"
+                title="Sort Active Column Ascending (A → Z / Low → High) — or click any Header Cell"
+              >
+                <ArrowUp className="w-3 h-3 text-teal-400" />
+                <span>Asc</span>
+              </button>
+              <button
+                onClick={() => sortActiveTableByColumn(editor, 'desc')}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-cyan-300 flex items-center gap-1 cursor-pointer"
+                title="Sort Active Column Descending (Z → A / High → Low) — or click any Header Cell"
+              >
+                <ArrowDown className="w-3 h-3 text-cyan-400" />
+                <span>Desc</span>
+              </button>
+            </div>
+
+            {/* Row & Column Quick Insert/Delete */}
+            <div className="flex items-center gap-1 pr-2.5 border-r border-slate-800">
+              <span className="text-[10px] font-bold uppercase text-slate-400 mr-0.5">Rows & Cols:</span>
+              <button
+                onClick={() => editor.chain().focus().addRowBefore().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 flex items-center gap-1 cursor-pointer"
+                title="Insert Row Above"
+              >
+                <ArrowUp className="w-3 h-3 text-teal-400" />
+                <span>+Row Above</span>
+              </button>
+              <button
+                onClick={() => editor.chain().focus().addRowAfter().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 flex items-center gap-1 cursor-pointer"
+                title="Insert Row Below"
+              >
+                <ArrowDown className="w-3 h-3 text-teal-400" />
+                <span>+Row Below</span>
+              </button>
+              <button
+                onClick={() => editor.chain().focus().addColumnBefore().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 flex items-center gap-1 cursor-pointer"
+                title="Insert Column Left"
+              >
+                <ArrowLeft className="w-3 h-3 text-cyan-400" />
+                <span>+Col Left</span>
+              </button>
+              <button
+                onClick={() => editor.chain().focus().addColumnAfter().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 flex items-center gap-1 cursor-pointer"
+                title="Insert Column Right"
+              >
+                <ArrowRight className="w-3 h-3 text-cyan-400" />
+                <span>+Col Right</span>
+              </button>
+              <button
+                onClick={() => editor.chain().focus().deleteRow().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-rose-950/60 disabled:opacity-40 text-rose-300 flex items-center gap-1 cursor-pointer"
+                title="Delete Row"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>-Row</span>
+              </button>
+              <button
+                onClick={() => editor.chain().focus().deleteColumn().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-rose-950/60 disabled:opacity-40 text-rose-300 flex items-center gap-1 cursor-pointer"
+                title="Delete Column"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>-Col</span>
+              </button>
+            </div>
+
+            {/* Cell Borders Toolbar Toggle */}
+            <div className="flex items-center gap-1 pr-2.5 border-r border-slate-800">
+              <span className="text-[10px] font-bold uppercase text-slate-400 mr-0.5">Borders:</span>
+              {(
+                [
+                  { mode: 'all', label: 'All', icon: Grid },
+                  { mode: 'none', label: 'None', icon: Square },
+                  { mode: 'bottom', label: 'Bottom', icon: Minus },
+                  { mode: 'thick', label: 'Thick', icon: Grid },
+                ] as { mode: TableBorderMode; label: string; icon: any }[]
+              ).map((b) => {
+                const Icon = b.icon;
+                const active = editor.isActive('table') && getActiveTableCellAttributes(editor).borderMode === b.mode;
+                return (
+                  <button
+                    key={b.mode}
+                    onClick={() => {
+                      if (applyToWholeTable) {
+                        applyFormattingToEntireTable(editor, { borderMode: b.mode });
+                      } else {
+                        setTableCellFormatting(editor, { borderMode: b.mode });
+                      }
+                    }}
+                    disabled={!editor.isActive('table')}
+                    className={`px-2 py-1 rounded flex items-center gap-1 transition-colors disabled:opacity-40 cursor-pointer ${
+                      active
+                        ? 'bg-teal-500/25 text-teal-300 border border-teal-500/40 font-semibold'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                    }`}
+                    title={`Set ${b.label} Borders`}
+                  >
+                    <Icon className="w-3 h-3" />
+                    <span>{b.label}</span>
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => {
+                  setTableBorderMenuOpen((prev) => !prev);
+                  setTableBgMenuOpen(false);
+                }}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 flex items-center gap-1 cursor-pointer"
+                title="Border Color & Table Scope"
+              >
+                <span>Color</span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Cell Background Color Toolbar Toggle */}
+            <div className="flex items-center gap-1 pr-2.5 border-r border-slate-800">
+              <span className="text-[10px] font-bold uppercase text-slate-400 mr-0.5">Cell Fill:</span>
+              <button
+                onClick={() => {
+                  setTableBgMenuOpen((prev) => !prev);
+                  setTableBorderMenuOpen(false);
+                }}
+                disabled={!editor.isActive('table')}
+                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 flex items-center gap-1.5 cursor-pointer"
+                title="Choose Cell Background Color"
+              >
+                <PaintBucket className="w-3.5 h-3.5 text-amber-400" />
+                <span
+                  className="w-3 h-3 rounded-xs border border-slate-600"
+                  style={{
+                    backgroundColor: getActiveTableCellAttributes(editor).backgroundColor || 'transparent',
+                  }}
+                />
+                <span>Shading</span>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
+              </button>
+              {editor.isActive('table') && getActiveTableCellAttributes(editor).backgroundColor && (
+                <button
+                  onClick={() => setTableCellFormatting(editor, { backgroundColor: null })}
+                  className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-[11px] cursor-pointer"
+                  title="Clear Cell Fill"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Table Cell Text Alignment Toggles */}
+            <div className="flex items-center gap-0.5 pr-2.5 border-r border-slate-800">
+              <span className="text-[10px] font-bold uppercase text-slate-400 mr-1">Align:</span>
+              {(
+                [
+                  { id: 'left', icon: AlignLeft, label: 'Align Left' },
+                  { id: 'center', icon: AlignCenter, label: 'Align Center' },
+                  { id: 'right', icon: AlignRight, label: 'Align Right' },
+                  { id: 'justify', icon: AlignJustify, label: 'Justify' },
+                ] as { id: TableTextAlign; icon: any; label: string }[]
+              ).map((a) => {
+                const Icon = a.icon;
+                const active = editor.isActive('table') && getActiveTableCellAttributes(editor).textAlign === a.id;
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setTableCellFormatting(editor, { textAlign: a.id })}
+                    disabled={!editor.isActive('table')}
+                    className={`p-1.5 rounded disabled:opacity-40 cursor-pointer ${
+                      active
+                        ? 'bg-teal-500/25 text-teal-300 ring-1 ring-teal-400/50'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title={a.label}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </button>
+                );
+              })}
+
+              <span className="mx-1 text-slate-700">|</span>
+
+              {(
+                [
+                  { id: 'top', icon: AlignStartVertical, label: 'Align Top' },
+                  { id: 'middle', icon: AlignCenterVertical, label: 'Align Middle' },
+                  { id: 'bottom', icon: AlignEndVertical, label: 'Align Bottom' },
+                ] as { id: TableVerticalAlign; icon: any; label: string }[]
+              ).map((v) => {
+                const Icon = v.icon;
+                const active =
+                  editor.isActive('table') && getActiveTableCellAttributes(editor).verticalAlign === v.id;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setTableCellFormatting(editor, { verticalAlign: v.id })}
+                    disabled={!editor.isActive('table')}
+                    className={`p-1.5 rounded disabled:opacity-40 cursor-pointer ${
+                      active
+                        ? 'bg-teal-500/25 text-teal-300 ring-1 ring-teal-400/50'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title={v.label}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Merge / Split / Header / Delete Table */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => editor.chain().focus().mergeCells().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-teal-300 flex items-center gap-1 cursor-pointer"
+                title="Merge Selected Cells"
+              >
+                <Combine className="w-3 h-3" />
+                <span>Merge</span>
+              </button>
+              <button
+                onClick={() => editor.chain().focus().splitCell().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-teal-300 flex items-center gap-1 cursor-pointer"
+                title="Split Cell"
+              >
+                <Split className="w-3 h-3" />
+                <span>Split</span>
+              </button>
+              <button
+                onClick={() => editor.chain().focus().toggleHeaderRow().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-amber-300 font-semibold cursor-pointer"
+                title="Toggle Header Row"
+              >
+                Header Row
+              </button>
+              <button
+                onClick={() => editor.chain().focus().deleteTable().run()}
+                disabled={!editor.isActive('table')}
+                className="px-2 py-1 rounded bg-rose-950/70 hover:bg-rose-900 border border-rose-800 disabled:opacity-40 text-rose-300 font-semibold flex items-center gap-1 cursor-pointer"
+                title="Delete Entire Table"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Delete Table</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -1150,6 +1501,340 @@ export function DocumentRibbon({
           </div>
         )}
       </div>
+      )}
+
+      {/* Unclipped Table Creation / Draw Popover */}
+      {isTableMenuOpen && (
+        <div
+          className="absolute top-full left-4 mt-1.5 z-50 w-80 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 select-none text-slate-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-800">
+            <span className="font-bold text-xs text-teal-300 flex items-center gap-1.5">
+              <TableIcon className="w-3.5 h-3.5 text-teal-400" />
+              Create & Insert Table
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono font-bold text-teal-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                {gridHover.cols} × {gridHover.rows}
+              </span>
+              <button
+                onClick={() => setIsTableMenuOpen(false)}
+                className="p-0.5 rounded text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive 8x8 Visual Grid Selector */}
+          <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 mb-3 flex flex-col gap-1 items-center">
+            {Array.from({ length: 8 }).map((_, rIdx) => {
+              const rowNum = rIdx + 1;
+              return (
+                <div key={`grid-row-${rowNum}`} className="flex gap-1">
+                  {Array.from({ length: 8 }).map((_, cIdx) => {
+                    const colNum = cIdx + 1;
+                    const isHovered = rowNum <= gridHover.rows && colNum <= gridHover.cols;
+                    return (
+                      <button
+                        key={`cell-${rowNum}-${colNum}`}
+                        type="button"
+                        onMouseEnter={() => setGridHover({ rows: rowNum, cols: colNum })}
+                        onClick={() => handleInsertGridTable(rowNum, colNum, customTableWithHeader)}
+                        className={`w-6 h-5 rounded-xs transition-colors border cursor-pointer ${
+                          isHovered
+                            ? 'bg-teal-500/50 border-teal-400 shadow-xs'
+                            : 'bg-slate-800/80 border-slate-700 hover:bg-slate-700'
+                        }`}
+                        title={`Insert ${colNum} × ${rowNum} Table`}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Quick Pre-Formatted Templates inside Table Drawer */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                Pre-Formatted Table Templates
+              </span>
+              <span className="text-[9px] text-teal-400 font-mono">Click Header to Sort ⇅</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {PREFORMATTED_TABLE_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  onClick={() => handleInsertTemplateTable(tpl.id)}
+                  className="text-left px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 hover:text-teal-300 truncate transition-colors cursor-pointer border border-slate-700/60 hover:border-teal-500/40"
+                  title={`${tpl.name}: ${tpl.description}`}
+                >
+                  {tpl.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom Dimension Form */}
+          <div className="pt-2.5 border-t border-slate-800 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={customTableWithHeader}
+                  onChange={(e) => setCustomTableWithHeader(e.target.checked)}
+                  className="rounded border-slate-700 bg-slate-950 text-teal-500"
+                />
+                <span>Include Header Row</span>
+              </label>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="text-slate-400">Cols:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={customTableCols}
+                  onChange={(e) => setCustomTableCols(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-center text-xs text-white"
+                />
+                <span className="text-slate-400 ml-1">Rows:</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={customTableRows}
+                  onChange={(e) => setCustomTableRows(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-12 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-center text-xs text-white"
+                />
+              </div>
+              <button
+                onClick={handleInsertCustomTable}
+                className="px-3 py-1 rounded-md bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition-colors shrink-0 cursor-pointer"
+              >
+                Insert Table
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unclipped Pre-Formatted Table Templates Gallery Popover */}
+      {isTemplatesMenuOpen && (
+        <div
+          className="absolute top-full left-16 mt-1.5 z-50 w-96 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-4 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150 select-none text-slate-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between pb-2.5 mb-3 border-b border-slate-800">
+            <div>
+              <span className="font-bold text-xs text-cyan-300 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                Insert Pre-Formatted Table Template
+              </span>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Ready-to-use tables with styled headers &amp; click-to-sort columns
+              </p>
+            </div>
+            <button
+              onClick={() => setIsTemplatesMenuOpen(false)}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="space-y-2 max-h-80 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-700">
+            {PREFORMATTED_TABLE_TEMPLATES.map((tpl) => (
+              <button
+                key={tpl.id}
+                type="button"
+                onClick={() => handleInsertTemplateTable(tpl.id)}
+                className="w-full text-left p-2.5 rounded-lg bg-slate-950/90 hover:bg-slate-800/90 border border-slate-800 hover:border-cyan-500/40 transition-all group cursor-pointer"
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-bold text-xs text-slate-100 group-hover:text-cyan-300 transition-colors">
+                    {tpl.name}
+                  </span>
+                  <span className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shrink-0">
+                    {tpl.badge}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">{tpl.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Unclipped Table Border Color & Style Popover */}
+      {tableBorderMenuOpen && (
+        <div
+          className="absolute top-full left-48 mt-1.5 z-50 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3.5 backdrop-blur-xl text-xs text-slate-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-800">
+            <span className="font-bold text-teal-300">Cell & Table Borders</span>
+            <button
+              onClick={() => setTableBorderMenuOpen(false)}
+              className="text-slate-400 hover:text-white p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <label className="flex items-center gap-1.5 text-[11px] text-teal-300 mb-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={applyToWholeTable}
+              onChange={(e) => setApplyToWholeTable(e.target.checked)}
+              className="rounded border-slate-700 bg-slate-950 text-teal-500"
+            />
+            <span>Apply changes to entire table</span>
+          </label>
+
+          <div className="grid grid-cols-2 gap-1.5 mb-3">
+            {(
+              [
+                { mode: 'all', label: 'All Borders' },
+                { mode: 'none', label: 'No Borders' },
+                { mode: 'bottom', label: 'Bottom Border' },
+                { mode: 'thick', label: 'Thick Borders' },
+                { mode: 'dashed', label: 'Dashed Borders' },
+                { mode: 'outer', label: 'Box Borders' },
+              ] as { mode: TableBorderMode; label: string }[]
+            ).map((item) => (
+              <button
+                key={item.mode}
+                onClick={() => {
+                  if (applyToWholeTable) {
+                    applyFormattingToEntireTable(editor, { borderMode: item.mode });
+                  } else {
+                    setTableCellFormatting(editor, { borderMode: item.mode });
+                  }
+                }}
+                className={`px-2 py-1.5 rounded text-left text-[11px] flex items-center justify-between cursor-pointer ${
+                  getActiveTableCellAttributes(editor).borderMode === item.mode
+                    ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 font-semibold'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                }`}
+              >
+                <span>{item.label}</span>
+                {getActiveTableCellAttributes(editor).borderMode === item.mode && (
+                  <Check className="w-3 h-3 text-teal-400" />
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="text-[10px] font-bold uppercase text-slate-400 mb-1.5">Border Color</div>
+          <div className="flex flex-wrap gap-1.5">
+            {TABLE_BORDER_COLOR_PALETTE.map((swatch) => (
+              <button
+                key={swatch.label}
+                onClick={() => {
+                  if (applyToWholeTable) {
+                    applyFormattingToEntireTable(editor, { borderColor: swatch.value });
+                  } else {
+                    setTableCellFormatting(editor, { borderColor: swatch.value });
+                  }
+                }}
+                style={{ backgroundColor: swatch.value || '#334155' }}
+                className={`w-5 h-5 rounded-full border transition-transform hover:scale-110 cursor-pointer ${
+                  getActiveTableCellAttributes(editor).borderColor === swatch.value
+                    ? 'ring-2 ring-teal-400 border-white'
+                    : 'border-slate-600'
+                }`}
+                title={swatch.label}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Unclipped Table Cell Background Shading Popover */}
+      {tableBgMenuOpen && (
+        <div
+          className="absolute top-full left-64 mt-1.5 z-50 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3.5 backdrop-blur-xl text-xs text-slate-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-800">
+            <span className="font-bold text-teal-300">Cell Background Color</span>
+            <button
+              onClick={() => setTableBgMenuOpen(false)}
+              className="text-slate-400 hover:text-white p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <label className="flex items-center gap-1.5 text-[11px] text-teal-300 mb-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={applyToWholeTable}
+              onChange={(e) => setApplyToWholeTable(e.target.checked)}
+              className="rounded border-slate-700 bg-slate-950 text-teal-500"
+            />
+            <span>Apply fill to entire table</span>
+          </label>
+
+          <div className="grid grid-cols-4 gap-1.5 mb-3">
+            {TABLE_CELL_BG_PALETTE.map((swatch) => (
+              <button
+                key={swatch.label}
+                onClick={() => {
+                  if (applyToWholeTable) {
+                    applyFormattingToEntireTable(editor, { backgroundColor: swatch.value });
+                  } else {
+                    setTableCellFormatting(editor, { backgroundColor: swatch.value });
+                  }
+                }}
+                style={{ backgroundColor: swatch.value || 'transparent' }}
+                className={`h-7 rounded-md border flex items-center justify-center transition-transform hover:scale-105 cursor-pointer ${
+                  getActiveTableCellAttributes(editor).backgroundColor === swatch.value
+                    ? 'ring-2 ring-teal-400 border-white'
+                    : 'border-slate-700'
+                }`}
+                title={swatch.label}
+              >
+                {swatch.value === null && <X className="w-3.5 h-3.5 text-slate-400" />}
+                {getActiveTableCellAttributes(editor).backgroundColor === swatch.value &&
+                  swatch.value !== null && <Check className="w-3.5 h-3.5 text-slate-900 drop-shadow" />}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+            <span className="text-[11px] text-slate-400">Custom Fill:</span>
+            <input
+              type="color"
+              value={getActiveTableCellAttributes(editor).backgroundColor || '#f1f5f9'}
+              onChange={(e) => {
+                if (applyToWholeTable) {
+                  applyFormattingToEntireTable(editor, { backgroundColor: e.target.value });
+                } else {
+                  setTableCellFormatting(editor, { backgroundColor: e.target.value });
+                }
+              }}
+              className="w-8 h-6 rounded cursor-pointer bg-transparent border border-slate-700"
+            />
+            <button
+              onClick={() => {
+                if (applyToWholeTable) {
+                  applyFormattingToEntireTable(editor, { backgroundColor: null });
+                } else {
+                  setTableCellFormatting(editor, { backgroundColor: null });
+                }
+              }}
+              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] cursor-pointer"
+            >
+              Clear Fill
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Modal prompt for Link and Image insertion */}
