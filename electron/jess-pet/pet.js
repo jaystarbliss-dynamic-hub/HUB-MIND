@@ -1,10 +1,10 @@
-const THREE = window.THREE;
+const THREE = window.THREE || null;
 
 (() => {
   "use strict";
   const canvas = document.getElementById("jess-canvas");
   const visualCanvas = document.getElementById("jess-visualizer");
-  const visualCtx = visualCanvas.getContext("2d", { alpha: true });
+  const visualCtx = visualCanvas?.getContext("2d", { alpha: true }) || null;
   const speech = document.getElementById("speech");
   const speechText = document.getElementById("speech-text");
   const status = document.getElementById("status");
@@ -20,19 +20,27 @@ const THREE = window.THREE;
   let nextBlinkAt = 2.5, blink = 0, alive = true;
   let pointerStart = null, lastPointer = null, isDragging = false, singleClickTimer = null, suppressNextClick = false;
   const SINGLE_CLICK_DELAY_MS = 420;
-  const clock = new THREE.Clock();
+  let clock = null, sphereGeometry = null;
+  let skin = null, skinLight = null, hair = null, hairHighlight = null;
+  let blazer = null, blazerLight = null, blouse = null, blouseLight = null;
+  let gold = null, white = null, iris = null, pupil = null, eyeGlint = null;
+  let brow = null, lip = null, mouthInterior = null, mouthTongue = null;
 
   const mat = (color, roughness = 0.72, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
-  const sphereGeometry = new THREE.SphereGeometry(1, 48, 32);
-  const skin = mat(0xc88f72, 0.72), skinLight = mat(0xd9a58b, 0.66);
-  const hair = mat(0x211922, 0.48), hairHighlight = mat(0x382735, 0.48);
-  const blazer = mat(0x202b3e, 0.65), blazerLight = mat(0x344258, 0.58);
-  const blouse = mat(0x8f2429, 0.6), blouseLight = mat(0xb33a3d, 0.55);
-  const gold = mat(0xd8b36a, 0.32, 0.58), white = mat(0xfff7f1, 0.34);
-  const iris = mat(0x4e322a, 0.34), pupil = mat(0x130f15, 0.2);
-  const eyeGlint = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const brow = mat(0x38232a, 0.8), lip = mat(0x702b37, 0.5);
-  const mouthInterior = mat(0x260e17, 0.4), mouthTongue = mat(0xb44d60, 0.5);
+  function initializeMaterials() {
+    if (!THREE || typeof THREE.WebGLRenderer !== "function") throw new Error("Three.js or WebGL is unavailable; using the lightweight avatar fallback.");
+    clock = new THREE.Clock();
+    sphereGeometry = new THREE.SphereGeometry(1, 48, 32);
+    skin = mat(0xc88f72, 0.72); skinLight = mat(0xd9a58b, 0.66);
+    hair = mat(0x211922, 0.48); hairHighlight = mat(0x382735, 0.48);
+    blazer = mat(0x202b3e, 0.65); blazerLight = mat(0x344258, 0.58);
+    blouse = mat(0x8f2429, 0.6); blouseLight = mat(0xb33a3d, 0.55);
+    gold = mat(0xd8b36a, 0.32, 0.58); white = mat(0xfff7f1, 0.34);
+    iris = mat(0x4e322a, 0.34); pupil = mat(0x130f15, 0.2);
+    eyeGlint = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    brow = mat(0x38232a, 0.8); lip = mat(0x702b37, 0.5);
+    mouthInterior = mat(0x260e17, 0.4); mouthTongue = mat(0xb44d60, 0.5);
+  }
 
   function level(value) { return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0; }
   function ellipsoid(parent, position, scale, material, geometry = sphereGeometry) {
@@ -156,6 +164,8 @@ const THREE = window.THREE;
     activeState = liveStates.has(next) ? next : "idle";
     if (idleFidgetTimer !== null) window.clearTimeout(idleFidgetTimer);
     idleFidgetTimer = null;
+    // Keep the companion's voice controls operational if WebGL or Three.js fails.
+    if (!leftArm || !rightArm || !headRig) return;
     if (activeState === "thinking" || activeState === "think") {
       leftArm.userData.targetZ = -0.08; rightArm.userData.targetZ = -2.08; headRig.userData.targetZ = 0.12;
     } else if (activeState === "celebrate" || activeState === "happy" || activeState === "jump") {
@@ -192,7 +202,9 @@ const THREE = window.THREE;
     return { line: "148,163,184", solid: "#94a3b8" };
   }
   function renderVisualizer() {
-    visualFrame = 0; visualPhase += 0.055;
+    visualFrame = 0;
+    if (!visualCtx || !visualCanvas) return;
+    visualPhase += 0.055;
     const dpr = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1));
     const logicalSize = 130, pixels = Math.round(logicalSize * dpr);
     if (visualCanvas.width !== pixels || visualCanvas.height !== pixels) { visualCanvas.width = pixels; visualCanvas.height = pixels; }
@@ -237,6 +249,10 @@ const THREE = window.THREE;
     speechTimer = window.setTimeout(() => { speech.hidden = true; }, 5000);
   }
   function requestVoiceActivation(gesture) {
+    if (gesture === "toggle" && visualState.connection === "connecting") {
+      say("I'm still connecting to Gemini Live. Please wait; another click won't cancel the attempt.");
+      return;
+    }
     const active = visualState.connection === "connected" || visualState.connection === "connecting";
     if (gesture === "mute") say(visualState.state === "muted" ? "Turning the microphone back on…" : "Muting the microphone…");
     else say(active ? "Ending voice chat…" : "Connecting to Jess…");
@@ -309,6 +325,7 @@ const THREE = window.THREE;
   }
   function initialize() {
     try {
+      initializeMaterials();
       renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "high-performance", premultipliedAlpha: false });
       renderer.setPixelRatio(Math.min(2.5, Math.max(1, window.devicePixelRatio || 1)));
       renderer.setClearColor(0x000000, 0); renderer.outputEncoding = THREE.sRGBEncoding;
@@ -326,7 +343,10 @@ const THREE = window.THREE;
       }
       nextBlinkAt = 2 + Math.random() * 3; animate();
     } catch (error) {
-      console.error("[Jess pet] Three.js initialization failed; using vector fallback:", error);
+      console.warn("[Jess pet] 3D rendering is unavailable; keeping the voice companion active with a lightweight fallback:", error);
+      try { renderer?.dispose?.(); } catch {}
+      renderer = null; scene = null; camera = null; avatar = null;
+      leftArm = null; rightArm = null; leftEye = null; rightEye = null; mouth = null; mouthLip = null;
       drawFallback2D();
     }
   }
