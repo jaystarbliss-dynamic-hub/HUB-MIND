@@ -14,8 +14,7 @@ import { FontSize } from '../lib/FontSize';
 import { DocumentFormatting } from '../lib/DocumentFormatting';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
-import { TableCell } from '@tiptap/extension-table-cell';
-import { TableHeader } from '@tiptap/extension-table-header';
+import { CustomTableCell, CustomTableHeader } from '../lib/CustomTableExtensions';
 import { Image } from '@tiptap/extension-image';
 import { TaskList } from '@tiptap/extension-task-list';
 import { TaskItem } from '@tiptap/extension-task-item';
@@ -24,6 +23,7 @@ import { HubMindPasteEngine } from '../components/documents/clipboard/paste-engi
 import { sanitizeClipboardHtml } from '../components/documents/clipboard/clipboard-sanitizer';
 import { normalizeClipboardHtml } from '../components/documents/clipboard/clipboard-normalizer';
 import { DocumentRibbon } from '../components/documents/DocumentRibbon';
+import { TableFloatingMenu } from '../components/documents/TableFloatingMenu';
 import { ImportExportMenu } from '../components/documents/ImportExportMenu';
 import { PaginatedPageContainer } from '../components/documents/PaginatedPageContainer';
 import { FullPagePreviewModal } from '../components/documents/FullPagePreviewModal';
@@ -44,7 +44,7 @@ import {
   FileText, Eye,
   Clock, Cloud, History, WifiOff, RefreshCw,
   Bold, Italic, List, Undo, Redo,
-  SplitSquareVertical, AlertTriangle
+  SplitSquareVertical, AlertTriangle, Table as TableIcon
 } from 'lucide-react';
 import { 
   PaperSizeOption, 
@@ -234,7 +234,7 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
         underline: {},
       }),
       Highlight.configure({ multicolor: true }),
-      TextAlign.configure({ types: ['heading', 'paragraph'] }),
+      TextAlign.configure({ types: ['heading', 'paragraph', 'tableCell', 'tableHeader'] }),
       DocumentFormatting,
       TextStyle,
       FontFamily,
@@ -244,8 +244,8 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
       Color,
       Table.configure({ resizable: true }),
       TableRow,
-      TableHeader,
-      TableCell,
+      CustomTableHeader,
+      CustomTableCell,
       Image.configure({ inline: true, allowBase64: true }),
       TaskList,
       TaskItem.configure({ nested: true }),
@@ -928,6 +928,15 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
             >
               <List className="w-4 h-4" />
             </button>
+            <button
+              onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+              className={`p-2 rounded-lg text-xs ${
+                editor.isActive('table') ? 'bg-teal-500/25 text-teal-300 ring-1 ring-teal-400' : 'bg-slate-800 text-teal-400'
+              }`}
+              title="Insert 3x3 Table"
+            >
+              <TableIcon className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
@@ -948,6 +957,9 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
           </div>
         </div>
       )}
+
+      {/* Floating Context Menu & Cell Formatting Toolbar for Tables */}
+      {editor && !isSharedView && <TableFloatingMenu editor={editor} />}
 
       {/* Main Workspace Stage */}
       <div className="flex-1 flex flex-col min-h-0 bg-slate-950 overflow-hidden print:bg-white print:overflow-visible">

@@ -408,27 +408,136 @@ body {
   border-color: #0e7490 !important;
 }
 .ProseMirror table {
-  @apply border-collapse table-auto w-full my-4 overflow-hidden rounded-lg;
+  @apply border-collapse table-auto w-full my-4;
+}
+.ProseMirror table td,
+.ProseMirror table th {
+  @apply relative p-2.5 min-w-[80px] align-top transition-colors;
+}
+.ProseMirror table td p,
+.ProseMirror table th p {
+  margin-top: 0;
+  margin-bottom: 0.2rem;
+}
+.ProseMirror table td p:last-child,
+.ProseMirror table th p:last-child {
+  margin-bottom: 0;
 }
 .paper-white .ProseMirror table td,
 .paper-white .ProseMirror table th {
-  @apply border border-slate-300 p-2.5 min-w-[100px] text-slate-900;
+  @apply border border-slate-300 text-slate-900;
 }
-.paper-white .ProseMirror table th {
-  @apply bg-slate-100 text-left font-bold text-slate-900;
+.paper-white .ProseMirror table th:not([data-bg-color]) {
+  @apply bg-slate-100 font-bold text-slate-900;
+}
+.paper-white .ProseMirror table th[data-bg-color] {
+  @apply font-bold text-slate-900;
 }
 .paper-dark .ProseMirror table td,
 .paper-dark .ProseMirror table th {
-  @apply border border-slate-700 p-2.5 min-w-[100px] text-slate-200;
+  @apply border border-slate-700 text-slate-200;
 }
-.paper-dark .ProseMirror table th {
-  @apply bg-slate-800 text-left font-bold text-slate-200;
+.paper-dark .ProseMirror table th:not([data-bg-color]) {
+  @apply bg-slate-800 font-bold text-slate-200;
+}
+.paper-dark .ProseMirror table th[data-bg-color] {
+  @apply font-bold text-slate-900;
+}
+.paper-dark .ProseMirror table td[data-bg-color] {
+  @apply text-slate-900;
+}
+/* Border mode overrides for table cells */
+.ProseMirror table td[data-border-mode="none"],
+.ProseMirror table th[data-border-mode="none"] {
+  border-color: transparent !important;
+}
+.ProseMirror:focus-within table td[data-border-mode="none"],
+.ProseMirror:focus-within table th[data-border-mode="none"] {
+  border: 1px dashed rgba(148, 163, 184, 0.35) !important;
+}
+.ProseMirror table td[data-border-mode="bottom"],
+.ProseMirror table th[data-border-mode="bottom"] {
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom-width: 2px !important;
+  border-bottom-style: solid !important;
+}
+.ProseMirror table td[data-border-mode="thick"],
+.ProseMirror table th[data-border-mode="thick"] {
+  border-width: 2.5px !important;
+  border-style: solid !important;
+}
+.ProseMirror table td[data-border-mode="dashed"],
+.ProseMirror table th[data-border-mode="dashed"] {
+  border-width: 1.5px !important;
+  border-style: dashed !important;
 }
 .ProseMirror table .selectedCell:after {
-  @apply z-10 absolute inset-0 bg-accent/20 content-[""] pointer-events-none;
+  @apply z-10 absolute inset-0 bg-teal-500/20 ring-1 ring-inset ring-teal-400/60 content-[""] pointer-events-none;
+}
+.ProseMirror table th {
+  padding-right: 1.75rem !important;
+  cursor: pointer;
+}
+.ProseMirror table th:hover::before {
+  content: '⇅';
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 700;
+  color: #0d9488;
+  opacity: 0.75;
+  pointer-events: none;
+}
+.ProseMirror table th[data-sort-dir="asc"]::before {
+  content: '↑ ASC';
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #0f766e;
+  background-color: rgba(20, 184, 166, 0.18);
+  border: 1px solid rgba(20, 184, 166, 0.45);
+  border-radius: 4px;
+  padding: 0px 4px;
+  line-height: 1.3;
+  opacity: 1;
+  pointer-events: none;
+}
+.ProseMirror table th[data-sort-dir="desc"]::before {
+  content: '↓ DESC';
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #0369a1;
+  background-color: rgba(14, 165, 233, 0.18);
+  border: 1px solid rgba(14, 165, 233, 0.45);
+  border-radius: 4px;
+  padding: 0px 4px;
+  line-height: 1.3;
+  opacity: 1;
+  pointer-events: none;
+}
+@media print {
+  .ProseMirror table th::before {
+    display: none !important;
+  }
 }
 .ProseMirror table .column-resize-handle {
-  @apply absolute right-[-2px] top-0 bottom-0 w-[4px] bg-accent/50 pointer-events-none;
+  @apply z-20 absolute right-[-2px] top-0 bottom-0 w-[4px] bg-teal-400/80 pointer-events-none;
+}
+.ProseMirror.resize-cursor {
+  cursor: col-resize;
 }
 ul[data-type="taskList"] {
   @apply list-none p-0;

@@ -701,6 +701,15 @@ async function startServer() {
   });
 
   const wss = new WebSocketServer({ noServer: true });
+  const hmrWss = new WebSocketServer({
+    noServer: true,
+    handleProtocols: (protocols) => {
+      if (protocols.has("vite-hmr")) return "vite-hmr";
+      if (protocols.has("vite-ping")) return "vite-ping";
+      const first = Array.from(protocols)[0];
+      return first || false;
+    },
+  });
 
   // Heartbeat ping interval to keep connection alive through proxies
   const heartbeatInterval = setInterval(() => {
@@ -720,9 +729,7 @@ async function startServer() {
   });
 
   server.on("upgrade", (request, socket, head) => {
-    socket.on("error", (err) => {
-      console.warn("WebSocket socket connection error:", err.message);
-    });
+    socket.on("error", () => {});
 
     try {
       const host = request.headers.host || "localhost:3000";
@@ -740,14 +747,26 @@ async function startServer() {
           wss.emit("connection", ws, request);
         });
       } else {
-        // Close unexpected or Vite HMR websocket requests cleanly
-        try {
-          socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-          socket.destroy();
-        } catch (e) {}
+        // Accept Vite HMR / ping websocket requests cleanly so the browser never throws "WebSocket closed without opened."
+        hmrWss.handleUpgrade(request, socket, head, (ws) => {
+          ws.on("error", () => {});
+          try {
+            ws.send(JSON.stringify({ type: "connected" }));
+          } catch {}
+          ws.on("message", (raw) => {
+            try {
+              const msg = JSON.parse(String(raw || "{}"));
+              if (msg?.type === "ping") {
+                ws.send(JSON.stringify({ type: "pong" }));
+              }
+            } catch {}
+          });
+        });
       }
     } catch (err) {
-      console.error("WebSocket upgrade parse error:", err);
+      try {
+        socket.destroy();
+      } catch {}
     }
   });
 

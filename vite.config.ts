@@ -36,6 +36,26 @@ export default defineConfig(() => {
   return {
     customLogger,
     plugins: [
+      {
+        name: 'disable-vite-client-ws',
+        enforce: 'pre',
+        transform(code, id) {
+          if (id.includes('vite/dist/client/client.mjs') || code.includes('WebSocket closed without opened.')) {
+            return {
+              code: code
+                .replace(
+                  /const createWebSocketModuleRunnerTransport = \(options\) => \{[\s\S]*?(?=function createHMRHandler)/,
+                  'const createWebSocketModuleRunnerTransport = () => ({ async connect({ onMessage } = {}) { try { onMessage?.({ type: "connected" }); } catch {} }, disconnect() {}, send() {} });\n'
+                )
+                .replace(
+                  /async function waitForSuccessfulPing\([^)]*\)\s*\{/,
+                  'async function waitForSuccessfulPing() { return true;'
+                ),
+              map: null,
+            };
+          }
+        },
+      },
       react(),
       tailwindcss(),
       VitePWA({
