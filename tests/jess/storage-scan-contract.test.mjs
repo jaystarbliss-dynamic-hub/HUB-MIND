@@ -88,7 +88,7 @@ test('Jess settings expose local access controls and conversational style choice
     assert.ok(main.includes(key), 'main-process preferences missing ' + key);
   }
   assert.ok(main.includes('Advanced shell commands are disabled in Jess settings'));
-  assert.ok(main.includes('allowUnrestricted: jessPreferences.allowShellCommands === true'));
+  assert.ok(main.includes('allowUnrestricted: allowEverything || jessPreferences.allowShellCommands === true'));
   assert.ok(assistant.includes('run a high-impact Windows command as your current user'));
   assert.ok(live.includes('MOOD ADAPTATION:'));
   assert.ok(live.includes("new Set(['search_web', 'google_search', 'desktop_open_website'])"));

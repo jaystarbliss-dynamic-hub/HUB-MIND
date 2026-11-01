@@ -42,6 +42,7 @@ export function JessSettings() {
   const [chromeBridgeState, setChromeBridgeState] = useState<{ available?: boolean; serverListening?: boolean; connected?: boolean; authenticated?: boolean; pendingRequests?: number; lastHandshakeAt?: string | null; lastDisconnectAt?: string | null; lastError?: string | null; transport?: string; pipe?: string } | null>(null);
   const [chromeSetupBusy, setChromeSetupBusy] = useState(false);
   const [chromeSetupMessage, setChromeSetupMessage] = useState('');
+  const [companionVisibilityMessage, setCompanionVisibilityMessage] = useState('');
 
   useEffect(() => {
     if (!profile?.id) { setLoading(false); return; }
@@ -79,6 +80,22 @@ export function JessSettings() {
     const timer = window.setInterval(() => { void refresh(); }, 4000);
     return () => { disposed = true; window.clearInterval(timer); };
   }, []);
+
+  const setDesktopCharacterVisible = async (visible: boolean) => {
+    const desktop = (window as any).hubMindDesktop;
+    const action = visible ? desktop?.showCompanion : desktop?.hideCompanion;
+    if (typeof action !== 'function') {
+      setCompanionVisibilityMessage('Desktop character controls are available in the installed Windows app.');
+      return;
+    }
+    try {
+      const result = await action();
+      if (result === false || result?.ok === false) throw new Error('Hub-Mind could not update the character window.');
+      setCompanionVisibilityMessage(visible ? 'Jess is visible on the desktop.' : 'Jess is hidden. Use Show Jess character in the Windows tray menu to restore her.');
+    } catch (controlError: any) {
+      setCompanionVisibilityMessage(controlError?.message || 'Could not update Jess visibility.');
+    }
+  };
 
   const setupChromeBridge = async () => {
     const desktop = (window as any).hubMindDesktop;
@@ -133,31 +150,40 @@ export function JessSettings() {
       {error && <div role="alert" className="mb-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">{error}</div>}
       <div className="space-y-5">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 md:p-6">
+          <div className="flex items-center gap-3 mb-4"><MonitorCog className="text-teal-300" size={20}/><div><h2 className="font-semibold">Desktop character</h2><p className="text-xs text-slate-400 mt-1">Keep Jess available while you work, or hide her until you need her again.</p></div></div>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" onClick={() => void setDesktopCharacterVisible(true)} disabled={!((window as any).hubMindDesktop?.isDesktopApp)} className="rounded-lg bg-teal-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Show Jess character</button>
+            <button type="button" onClick={() => void setDesktopCharacterVisible(false)} disabled={!((window as any).hubMindDesktop?.isDesktopApp)} className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 disabled:opacity-40">Hide Jess character</button>
+          </div>
+          {companionVisibilityMessage && <p role="status" aria-live="polite" className="mt-3 text-xs text-slate-300">{companionVisibilityMessage}</p>}
+          <p className="mt-3 text-xs text-slate-500">You can also use the Windows Hub-Mind tray menu. Hiding Jess does not quit Hub-Mind or end an active voice conversation.</p>
+        </section>
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 md:p-6">
           <div className="flex items-center gap-3 mb-4"><ShieldCheck className="text-teal-300" size={20}/><div><h2 className="font-semibold">Desktop permissions</h2><p className="text-xs text-slate-400 mt-1">Changes auto-save and the desktop reports its live session state.</p></div></div>
-          <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 p-4 mb-4"><span><strong className="block text-sm">Full Control</strong><span className="block text-xs text-slate-400 mt-1">Enable Windows and connected Chrome controls when the desktop session is active.</span></span><input type="checkbox" checked={prefs.fullControlEnabled} onChange={e => update('fullControlEnabled', e.target.checked)} className="w-5 h-5 accent-teal-400"/></label>
+          <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 p-4 mb-4"><span><strong className="block text-sm">Full Control</strong><span className="block text-xs text-slate-400 mt-1">Enable Windows and connected Chrome controls when the desktop session is active.</span></span><input type="checkbox" checked={prefs.fullControlEnabled} onChange={e => setPrefs(current => ({ ...current, fullControlEnabled: e.target.checked, ...(e.target.checked ? { permissionMode: 'allow-everything', confirmHighRiskOutLoud: false, allowSystemWideFileScan: true, allowAutomatedFileManagement: true, allowShellCommands: true } : { permissionMode: 'ask' }) }))} className="w-5 h-5 accent-teal-400"/></label>
           <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Permission mode</div>
           <label className="flex gap-3 rounded-xl border border-slate-800 p-4 cursor-pointer mb-3"><input type="radio" name="permissionMode" checked={prefs.permissionMode==='ask'} onChange={() => update('permissionMode','ask')} className="mt-1 accent-teal-400"/><span><strong className="block text-sm">Ask</strong><span className="block text-xs text-slate-400 mt-1">Ask before each mutating native action.</span></span></label>
           <label className="flex gap-3 rounded-xl border border-slate-800 p-4 cursor-pointer mb-3"><input type="radio" name="permissionMode" checked={prefs.permissionMode==='allow-routine'} onChange={() => setPrefs(current => ({ ...current, permissionMode: 'allow-routine', fullControlEnabled: true }))} className="mt-1 accent-teal-400"/><span><strong className="block text-sm">Allow routine</strong><span className="block text-xs text-slate-400 mt-1">Routine desktop actions proceed without repeated prompts. High-impact operations still require explicit handling.</span></span></label>
-          <label className="flex gap-3 rounded-xl border border-rose-400/25 bg-rose-400/5 p-4 cursor-pointer mb-4"><input type="radio" name="permissionMode" checked={prefs.permissionMode==='allow-everything'} onChange={() => setPrefs(current => ({ ...current, permissionMode: 'allow-everything', fullControlEnabled: true }))} className="mt-1 accent-rose-400"/><span><strong className="block text-sm">Allow everything</strong><span className="block text-xs text-slate-400 mt-1">One native confirmation on first activation; then no per-action approval prompts while this mode remains enabled. Windows secure-desktop/UAC prompts cannot be automated.</span></span></label>
+          <label className="flex gap-3 rounded-xl border border-rose-400/25 bg-rose-400/5 p-4 cursor-pointer mb-4"><input type="radio" name="permissionMode" checked={prefs.permissionMode==='allow-everything'} onChange={() => setPrefs(current => ({ ...current, permissionMode: 'allow-everything', fullControlEnabled: true, confirmHighRiskOutLoud: false, allowSystemWideFileScan: true, allowAutomatedFileManagement: true, allowShellCommands: true }))} className="mt-1 accent-rose-400"/><span><strong className="block text-sm">Allow everything</strong><span className="block text-xs text-slate-400 mt-1">The first Full Control grant is saved for this Windows profile. After that, Jess proceeds without per-action permission prompts while Allow Everything is enabled. Windows secure-desktop/UAC prompts remain OS-controlled.</span></span></label>
           <label className="flex items-center justify-between gap-4 py-3 border-t border-slate-800"><span><strong className="block text-sm">Start in Full Control when Hub-Mind launches</strong><span className="block text-xs text-slate-400">Uses your saved consent and current permission mode.</span></span><input type="checkbox" checked={prefs.startInFullControl} onChange={e => update('startInFullControl', e.target.checked)} className="w-5 h-5 accent-teal-400"/></label>
-          <label className="flex items-center justify-between gap-4 py-3"><span><strong className="block text-sm">Ask out loud before high-impact actions</strong><span className="block text-xs text-slate-400">For deleting, formatting, shutting down or sending. Requires a verified spoken yes/no flow; this switch does not itself create speech confirmation.</span></span><input type="checkbox" checked={prefs.confirmHighRiskOutLoud} onChange={e => update('confirmHighRiskOutLoud', e.target.checked)} className="w-5 h-5 accent-teal-400"/></label>
+          <label className="flex items-center justify-between gap-4 py-3"><span><strong className="block text-sm">Ask out loud before high-impact actions</strong><span className="block text-xs text-slate-400">For deleting, formatting, shutting down or sending. Requires a verified spoken yes/no flow; this switch does not itself create speech confirmation.</span></span><input type="checkbox" checked={prefs.confirmHighRiskOutLoud} disabled={prefs.permissionMode === 'allow-everything'} onChange={e => update('confirmHighRiskOutLoud', e.target.checked)} className="w-5 h-5 accent-teal-400"/></label>
           <div className="mt-3 rounded-lg bg-slate-950 p-3 text-xs text-slate-400" aria-live="polite">Desktop live state: <strong className={desktopState?.active ? 'text-emerald-300' : 'text-amber-200'}>{desktopState?.active ? 'Full Control active' : 'Not active / browser only'}</strong>{desktopState?.permissionMode ? ` · Main-process mode: ${desktopState.permissionMode}` : ''}{desktopState?.startedAt ? ` · Started ${new Date(desktopState.startedAt).toLocaleTimeString()}` : ''}</div>
         </section>
         <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 md:p-6">
           <div className="flex items-center gap-3 mb-4"><ShieldCheck className="text-teal-300" size={20}/><div><h2 className="font-semibold">Advanced local access</h2><p className="text-xs text-slate-400 mt-1">Choose what Jess may do on this Windows account. Changes auto-save.</p></div></div>
           <label className="flex items-center justify-between gap-4 py-3 border-b border-slate-800">
             <span><strong className="block text-sm">Scan all local drives</strong><span className="block text-xs text-slate-400 mt-1">Allow recursive read-only scans of ready fixed drives, including C:. You can still scan a specific folder when this is off.</span></span>
-            <input type="checkbox" checked={prefs.allowSystemWideFileScan} onChange={e => update('allowSystemWideFileScan', e.target.checked)} className="w-5 h-5 accent-teal-400"/>
+            <input type="checkbox" checked={prefs.allowSystemWideFileScan} disabled={prefs.permissionMode === 'allow-everything'} onChange={e => update('allowSystemWideFileScan', e.target.checked)} className="w-5 h-5 accent-teal-400"/>
           </label>
           <label className="flex items-center justify-between gap-4 py-3 border-b border-slate-800">
-            <span><strong className="block text-sm">Automated file management</strong><span className="block text-xs text-slate-400 mt-1">Permit creating, writing, copying, moving, renaming and recycling files through Jess. Storage cleanup still shows a native confirmation with the selected paths.</span></span>
-            <input type="checkbox" checked={prefs.allowAutomatedFileManagement} onChange={e => update('allowAutomatedFileManagement', e.target.checked)} className="w-5 h-5 accent-teal-400"/>
+            <span><strong className="block text-sm">Automated file management</strong><span className="block text-xs text-slate-400 mt-1">Permit creating, writing, copying, moving, renaming and recycling files through Jess. Storage cleanup remains previewed and uses the configured cleanup behaviour.</span></span>
+            <input type="checkbox" checked={prefs.allowAutomatedFileManagement} disabled={prefs.permissionMode === 'allow-everything'} onChange={e => update('allowAutomatedFileManagement', e.target.checked)} className="w-5 h-5 accent-teal-400"/>
           </label>
           <label className="flex items-center justify-between gap-4 py-3">
             <span><strong className="block text-sm">Advanced shell commands</strong><span className="block text-xs text-slate-400 mt-1">Allow broader PowerShell commands, including script launches, as your current Windows user. The app does not elevate privileges or bypass Windows/UAC prompts. Commands have a configurable 1–120 second timeout.</span></span>
-            <input type="checkbox" checked={prefs.allowShellCommands} onChange={e => update('allowShellCommands', e.target.checked)} className="w-5 h-5 accent-teal-400"/>
+            <input type="checkbox" checked={prefs.allowShellCommands} disabled={prefs.permissionMode === 'allow-everything'} onChange={e => update('allowShellCommands', e.target.checked)} className="w-5 h-5 accent-teal-400"/>
           </label>
-          <p className="mt-3 rounded-lg bg-slate-950 p-3 text-xs leading-relaxed text-slate-400">These controls govern Jess's product-level access. Your Windows account permissions, protected folders, secure desktop, device policies and OS prompts still apply. Keep “Ask out loud before high-impact actions” enabled for a fresh spoken yes/no on risky commands.</p>
+          <p className="mt-3 rounded-lg bg-slate-950 p-3 text-xs leading-relaxed text-slate-400">Allow Everything automatically enables Jess's full product-level desktop capabilities and removes further Jess permission prompts for the active Full Control session. Windows account permissions, protected folders, device policies, UAC and secure-desktop prompts remain controlled by Windows.</p>
         </section>
         <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5 md:p-6">
           <div className="flex items-center gap-3 mb-4"><MonitorCog className="text-teal-300" size={20}/><div><h2 className="font-semibold">Chrome browser bridge</h2><p className="text-xs text-slate-400 mt-1">Connect Jess to real Chrome tabs through the installed desktop app.</p></div></div>

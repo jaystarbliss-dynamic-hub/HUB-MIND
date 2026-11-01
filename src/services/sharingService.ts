@@ -208,7 +208,8 @@ export async function sendDirectInformation(params: {
   // Deliver activity log
   try {
     await addDoc(collection(db, 'activityLogs'), {
-      userId: params.senderName,
+      userId: params.senderId,
+      userDisplayName: params.senderName,
       action: `sent ${params.type} "${params.title}" to`,
       details: params.recipientName || 'colleague',
       entityType: params.type,
@@ -250,10 +251,12 @@ export async function revokeResourceShare(shareId: string): Promise<void> {
   }
 }
 
-export function subscribeToResourceShares(resourceId: string, callback: (shares: ResourceShare[]) => void): () => void {
+export function subscribeToResourceShares(resourceId: string, ownerId: string, callback: (shares: ResourceShare[]) => void): () => void {
+  if (!resourceId || !ownerId) { callback([]); return () => {}; }
   const q = query(
     collection(db, 'shares'),
     where('resourceId', '==', resourceId),
+    where('ownerId', '==', ownerId),
     where('status', '==', 'active')
   );
   return onSnapshot(q, (snap) => {

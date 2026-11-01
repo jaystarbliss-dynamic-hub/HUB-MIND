@@ -257,13 +257,20 @@ export function Dashboard() {
         setDocumentsAttentionCount(attention);
       }).catch((e) => console.warn('Dashboard documents attention warning:', e));
 
-      getDocs(collection(db, 'payments')).then((paymentsSnap) => {
-        const awaiting = paymentsSnap.docs.filter(d => {
-          const x = d.data() as any;
-          return ['pending', 'awaiting_confirmation', 'awaiting_payment', 'pending_confirmation'].includes(x.status);
-        }).length;
+      const paymentReads = profile.role === 'admin'
+        ? [getDocs(collection(db, 'payments'))]
+        : [
+            getDocs(query(collection(db, 'payments'), where('ownerId', '==', profile.id))),
+            getDocs(query(collection(db, 'payments'), where('userId', '==', profile.id))),
+          ];
+      Promise.all(paymentReads).then((paymentSnapshots) => {
+        const uniquePayments = new Map<string, any>();
+        paymentSnapshots.forEach(snapshot => snapshot.docs.forEach(payment => uniquePayments.set(payment.id, payment.data())));
+        const awaiting = Array.from(uniquePayments.values()).filter(payment =>
+          ['pending', 'awaiting_confirmation', 'awaiting_payment', 'pending_confirmation'].includes(payment.status)
+        ).length;
         setPaymentsAwaitingCount(awaiting);
-      }).catch(() => {});
+      }).catch((e) => console.warn('Dashboard payments query fallback:', e));
 
       getDoc(doc(db, 'users', profile.id, 'private', 'quickNotes')).then((notesDoc) => {
         if (notesDoc.exists()) {

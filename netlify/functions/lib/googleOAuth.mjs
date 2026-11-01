@@ -1,6 +1,6 @@
-const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || '';
-const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
-const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || '(default)';
+const FIREBASE_WEB_API_KEY = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || '';
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || '';
+const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || process.env.VITE_FIRESTORE_DATABASE_ID || '(default)';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const GOOGLE_OAUTH_SECRET = process.env.GOOGLE_OAUTH_SECRET || '';
@@ -25,19 +25,42 @@ export function getBearer(req) {
 }
 
 export async function verifyFirebaseUser(idToken) {
-  if (!idToken || !FIREBASE_WEB_API_KEY) throw new Error('Authentication configuration is incomplete.');
+  if (!idToken || !FIREBASE_WEB_API_KEY || !FIREBASE_PROJECT_ID) {
+    throw Object.assign(new Error('Hub-Mind authentication is not configured.'), { status: 503 });
+  }
+
   const response = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(FIREBASE_WEB_API_KEY)}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ idToken }),
+      signal: AbortSignal.timeout(10000),
     },
   );
   const data = await response.json().catch(() => ({}));
   const user = data?.users?.[0];
-  if (!response.ok || !user || user.disabled) throw new Error('Your Hub-Mind session is no longer valid.');
-  return user;
+  if (!response.ok || !user || user.disabled || !user.localId) {
+    throw Object.assign(new Error('Your Hub-Mind sign-in session is invalid or expired.'), { status: 401 });
+  }
+
+  // A valid Firebase identity alone is not enough: every server-side assistant
+  // and Google integration requires an active Hub-Mind workspace profile.
+  const profileUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_PROJECT_ID)}/databases/${encodeURIComponent(FIRESTORE_DATABASE_ID)}/documents/users/${encodeURIComponent(user.localId)}`;
+  const profileResponse = await fetch(profileUrl, {
+    headers: { Authorization: `Bearer ${idToken}` },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!profileResponse.ok) {
+    throw Object.assign(new Error('Your Hub-Mind account is not active or its workspace profile could not be verified.'), { status: 403 });
+  }
+  const profileDocument = await profileResponse.json().catch(() => ({}));
+  const fields = profileDocument?.fields || {};
+  if (fields.status?.stringValue !== 'active') {
+    throw Object.assign(new Error('Your Hub-Mind account is not active.'), { status: 403 });
+  }
+
+  return { ...user, hubMindRole: fields.role?.stringValue || 'staff' };
 }
 
 function base64url(bytes) {

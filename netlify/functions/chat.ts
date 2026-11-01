@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { getBearer, verifyFirebaseUser } from './lib/googleOAuth.mjs';
 import { firebaseAdminRequest, firestoreDocumentUrl, decodeFirestoreFields } from '../../src/server/firebaseAdminRest.ts';
 
 const JESS_CORE_IDENTITY = `IDENTITY AND ATTRIBUTION (always preserve this accurately):
@@ -86,11 +87,37 @@ function sourceList(chunks: any[] = []) {
   });
 }
 
+const jessChatRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+function isChatRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const current = jessChatRateLimits.get(userId);
+  if (current && current.resetAt > now && current.count >= 30) return true;
+  if (!current || current.resetAt <= now) jessChatRateLimits.set(userId, { count: 1, resetAt: now + 60_000 });
+  else current.count += 1;
+  if (jessChatRateLimits.size > 5000) {
+    for (const [key, value] of jessChatRateLimits) if (value.resetAt <= now) jessChatRateLimits.delete(key);
+  }
+  return false;
+}
+
 export default async (req: Request) => {
   if (req.method !== 'POST') return responseJson({ error: 'Method not allowed' }, 405);
 
   try {
+    const idToken = getBearer(req);
+    if (!idToken) return responseJson({ error: 'Authentication required.' }, 401);
+    const user = await verifyFirebaseUser(idToken);
+    if (isChatRateLimited(user.localId)) return responseJson({ error: 'Jess is receiving requests too quickly. Please wait a moment and try again.' }, 429);
+
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 5 * 1024 * 1024) {
+      return responseJson({ error: 'Jess request is too large. Reduce the attached content and try again.' }, 413);
+    }
     const body = await req.json();
+    if (!body || typeof body !== 'object' || !Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 80) {
+      return responseJson({ error: 'A valid conversation with 1–80 messages is required.' }, 400);
+    }
     const key = process.env.GEMINI_API_KEY;
     if (!key) {
       const detail = 'GEMINI_API_KEY is missing from the Netlify environment.';
@@ -199,15 +226,16 @@ export default async (req: Request) => {
       serviceError: true,
     }, 502);
   } catch (error: any) {
-    console.error('Jess Netlify function error:', error);
+    const status = [401, 403, 503].includes(Number(error?.status)) ? Number(error.status) : 500;
+    if (status >= 500) console.error('Jess Netlify function error:', error);
     const detail = error?.message || 'Unknown server error';
     return responseJson({
-      text: 'Jess hit a server error before I could answer. ' + detail,
-      error: 'Jess request failed before a response could be generated.',
-      code: 'AI_REQUEST_FAILED',
+      text: status === 401 || status === 403 ? detail : 'Jess hit a server error before I could answer. ' + detail,
+      error: status === 401 || status === 403 ? detail : 'Jess request failed before a response could be generated.',
+      code: status === 401 ? 'AUTHENTICATION_REQUIRED' : status === 403 ? 'HUBMIND_ACCESS_DENIED' : 'AI_REQUEST_FAILED',
       detail,
-      serviceError: true,
-    }, 500);
+      serviceError: status >= 500,
+    }, status);
   }
 };
 
