@@ -114,13 +114,13 @@ export async function initializeFirebaseConfig(config?: RuntimeConfig) {
   // Graceful fallback if /api/config is unreachable
   createFirebaseInstances({
     firebase: {
-      apiKey: 'dev-firebase-api-key',
-      projectId: 'gen-lang-client-0197530608',
-      appId: '1:123311605381:web:hubmind',
-      messagingSenderId: '123311605381',
-      authDomain: 'gen-lang-client-0197530608.firebaseapp.com',
-      storageBucket: 'gen-lang-client-0197530608.firebasestorage.app',
-      firestoreDatabaseId: 'ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430',
+      apiKey: 'test-api-key',
+      projectId: 'test-project',
+      appId: 'test-app-id',
+      messagingSenderId: 'test-sender-id',
+      authDomain: 'test-project.firebaseapp.com',
+      storageBucket: 'test-project.firebasestorage.app',
+      firestoreDatabaseId: '(default)',
     },
     googleClientId: '',
   });

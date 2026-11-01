@@ -53,7 +53,19 @@ for (const file of clientSourceFiles) {
 }
 
 // 1. Run Vite build with all plugins (including Tailwind and VitePWA)
-await build();
+// Temporarily strip VITE_* variables during static bundling so Vite never injects them.
+const savedViteEnv = {};
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('VITE_')) {
+    savedViteEnv[key] = process.env[key];
+    delete process.env[key];
+  }
+}
+try {
+  await build({ envFile: false });
+} finally {
+  Object.assign(process.env, savedViteEnv);
+}
 
 const distDir = path.resolve(process.cwd(), 'dist');
 if (!fs.existsSync(distDir) || fs.readdirSync(distDir).length === 0) {
@@ -91,7 +103,7 @@ for (const file of builtFiles) {
   }
   for (const key of clientEnvKeys) {
     const value = process.env[key];
-    if (value && value.length > 4 && output.includes(value)) {
+    if (value && value !== '(default)' && value.length > 4 && output.includes(value)) {
       throw new Error(`Client environment value ${key} was embedded in production artifact: ${path.relative(projectRoot, file)}`);
     }
   }
