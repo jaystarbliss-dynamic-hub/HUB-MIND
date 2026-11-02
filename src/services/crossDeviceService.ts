@@ -304,7 +304,7 @@ export function startCrossDeviceAgentLoop(
             const execOut = await toolExecutor(cmd.actionType, normalizedArgs);
             const resObj = execOut?.result || {};
             const ok = resObj.success === true || resObj.ok === true || resObj.status === 'done_verified';
-            const verified = resObj.verified === true || resObj.status === 'done_verified' || ok;
+            const verified = resObj.verified === true || resObj.status === 'done_verified';
             const summary =
               resObj.message ||
               resObj.summary ||

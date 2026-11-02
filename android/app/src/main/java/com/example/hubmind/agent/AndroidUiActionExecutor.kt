@@ -32,6 +32,16 @@ class AndroidUiActionExecutor(private val context: Context) {
             )
         }
 
+        if (command.requiresConfirmation) {
+            return AndroidActionResult(
+                commandId = command.commandId,
+                actionType = command.actionType,
+                success = false,
+                verified = false,
+                error = "This action requires explicit user confirmation. No confirmation was provided, so it was not executed."
+            )
+        }
+
         val result: AndroidActionResult = when (command.actionType) {
             AndroidActionType.OPEN_APP, AndroidActionType.LAUNCH_APP -> {
                 val pkg = command.parameters["packageName"] as? String
@@ -52,7 +62,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = verified || success,
+                    verified = verified,
                     outputText = if (success) "Launched application ${appName ?: resolvedPkg}." else null,
                     error = if (!success) "Target application (${appName ?: pkg}) not found or could not be launched." else null
                 )

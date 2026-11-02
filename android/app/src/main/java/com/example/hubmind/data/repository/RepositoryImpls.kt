@@ -119,26 +119,32 @@ class AuthRepositoryImpl(
         val nowIso = Instant.now().toString()
 
         if (!snap.exists()) {
-            val defaultRole = if (isBootstrapAdmin) "admin" else "staff"
-            val defaultName = displayName.ifBlank {
-                if (isBootstrapAdmin) "John Rufai" else normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
+            if (!isBootstrapAdmin) {
+                throw IllegalStateException(
+                    "This account has not been authorized for Hub-Mind. Ask an administrator for an invitation."
+                )
             }
+            val defaultName = displayName.ifBlank { "John Rufai" }
             val newDoc = mapOf(
+                "id" to uid,
                 "email" to normalizedEmail,
+                "name" to defaultName,
                 "displayName" to defaultName,
-                "preferredName" to (if (isBootstrapAdmin) "Johnny" else defaultName.substringBefore(" ")),
-                "role" to defaultRole,
+                "preferredName" to "Johnny",
+                "role" to "admin",
                 "status" to "active",
                 "createdAt" to nowIso,
+                "approvedAt" to nowIso,
+                "defaultVisibility" to "workspace",
                 "lastSeenAt" to nowIso
             )
-            runCatching { userRef.set(newDoc, SetOptions.merge()).await() }
+            userRef.set(newDoc, SetOptions.merge()).await()
             return@runCatching User(
                 id = uid,
                 email = normalizedEmail,
                 displayName = defaultName,
-                preferredName = if (isBootstrapAdmin) "Johnny" else defaultName.substringBefore(" "),
-                role = defaultRole,
+                preferredName = "Johnny",
+                role = "admin",
                 status = "active",
                 lastSeenAt = nowIso
             )
@@ -1012,8 +1018,6 @@ class DeviceRegistryRepositoryImpl(
         val accConnected = HubMindAccessibilityService.isServiceConnected
         val caps = buildList {
             add(DeviceCapability.APP_LAUNCH)
-            add(DeviceCapability.MEDIA_STREAMING)
-            add(DeviceCapability.STORAGE_MANAGEMENT)
             if (accConnected) {
                 add(DeviceCapability.ANDROID_ACCESSIBILITY)
                 add(DeviceCapability.SCREEN_READING)
@@ -1024,7 +1028,11 @@ class DeviceRegistryRepositoryImpl(
             deviceId = localDeviceId,
             deviceName = name,
             platform = DevicePlatform.ANDROID,
-            clientVersion = "2.4.0",
+            clientVersion = context?.let { appContext ->
+                runCatching {
+                    appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
+                }.getOrNull()
+            } ?: "2.4.0",
             status = DeviceStatus.ONLINE,
             isCurrentDevice = true,
             fullControlActive = accConnected,
@@ -1079,7 +1087,7 @@ class DeviceRegistryRepositoryImpl(
                         val platformStr = (doc.getString("platform") ?: "ANDROID").uppercase()
                         val platform = runCatching { DevicePlatform.valueOf(platformStr) }
                             .getOrDefault(DevicePlatform.ANDROID)
-                        val lastSeen = doc.getLong("lastSeenAt") ?: 0L
+                        val lastSeen = doc.getLong("lastSeen") ?: doc.getLong("lastSeenAt") ?: 0L
                         val rawStatus = (doc.getString("status") ?: "ONLINE").uppercase()
                         val isFresh = (now - lastSeen) < 65_000L
                         val status = if (devId == localDeviceId) {
@@ -1147,7 +1155,8 @@ class DeviceRegistryRepositoryImpl(
         KeystorePairingManager.generateDeviceKeyPair()
         val keyFp = KeystorePairingManager.getPublicKeyFingerprint()
 
-        val docMap = mapOf(
+        val now = System.currentTimeMillis()
+        val docMap = mutableMapOf<String, Any>(
             "deviceId" to androidNode.deviceId,
             "userId" to uid,
             "deviceName" to androidNode.deviceName,
@@ -1157,11 +1166,12 @@ class DeviceRegistryRepositoryImpl(
             "fullControlActive" to androidNode.fullControlActive,
             "permissionMode" to androidNode.permissionMode,
             "capabilities" to androidNode.capabilities.map { it.name },
-            "lastSeenAt" to System.currentTimeMillis(),
-            "batteryPercent" to androidNode.batteryPercent,
-            "ipAddress" to androidNode.ipAddress,
-            "publicKeyFingerprint" to keyFp
+            "lastSeen" to now,
+            "lastSeenAt" to now,
+            "batteryPercent" to (androidNode.batteryPercent ?: -1)
         )
+        androidNode.ipAddress?.takeIf { it.isNotBlank() }?.let { docMap["ipAddress"] = it }
+        keyFp?.takeIf { it.isNotBlank() }?.let { docMap["publicKeyFingerprint"] = it }
 
         val db = client.getFirebaseFirestore().getOrNull()
         if (db != null) {
@@ -1183,8 +1193,8 @@ class DeviceRegistryRepositoryImpl(
 
     override suspend fun pingDevice(deviceId: String): Boolean {
         if (deviceId == localDeviceId) return true
-        val transport = controlPlaneTransport ?: return true
-        val uid = boundUserId ?: "local-user"
+        val transport = controlPlaneTransport ?: return false
+        val uid = boundUserId ?: return false
         val envelope = CommandEnvelope(
             issuingUserId = uid,
             sourceDeviceId = localDeviceId,
@@ -1235,57 +1245,60 @@ class DeviceControlRepositoryImpl(
         )
         _commandHistory.value = listOf(command) + _commandHistory.value
 
-        val isLocalTarget = targetDeviceId == localId ||
-            targetDeviceId.startsWith("android") ||
-            toolName.equals("android_device_action", ignoreCase = true)
+        val isLocalTarget = targetDeviceId == localId
 
-        val result: CommandResult = if (isLocalTarget && localExecutor != null) {
-            val actionStr = (args["actionType"] as? String)?.ifBlank { null } ?: toolName
-            val actionType = runCatching { AndroidActionType.valueOf(actionStr.uppercase()) }
-                .getOrElse {
-                    when (actionStr.uppercase()) {
-                        "LAUNCH_APP", "OPEN_APP" -> AndroidActionType.OPEN_APP
-                        "NAVIGATE_BACK", "BACK" -> AndroidActionType.NAVIGATE_BACK
-                        "GO_HOME", "HOME" -> AndroidActionType.GO_HOME
-                        "CAPTURE_SCREEN", "SCREENSHOT" -> AndroidActionType.CAPTURE_SCREEN
-                        else -> AndroidActionType.GET_SCREEN_HIERARCHY
-                    }
-                }
-            val androidRes = localExecutor.executeCommand(
-                AndroidCommand(
-                    commandId = cmdId,
-                    actionType = actionType,
-                    parameters = args
+        val result: CommandResult = when {
+            isLocalTarget -> {
+                val executor = localExecutor
+                    ?: return CommandResult(false, false, error = "Android native executor is not initialized.")
+                val actionStr = (args["actionType"] as? String)?.ifBlank { null } ?: toolName
+                val actionType = runCatching { AndroidActionType.valueOf(actionStr.uppercase()) }
+                    .getOrElse {
+                        when (actionStr.uppercase()) {
+                            "LAUNCH_APP", "OPEN_APP" -> AndroidActionType.OPEN_APP
+                            "NAVIGATE_BACK", "BACK" -> AndroidActionType.NAVIGATE_BACK
+                            "GO_HOME", "HOME" -> AndroidActionType.GO_HOME
+                            "CAPTURE_SCREEN", "SCREENSHOT" -> AndroidActionType.CAPTURE_SCREEN
+                            else -> null
+                        }
+                    } ?: return CommandResult(
+                        false, false,
+                        error = "Unsupported Android action '$actionStr'. No fallback action was run."
+                    )
+                val androidRes = executor.executeCommand(
+                    AndroidCommand(
+                        commandId = cmdId,
+                        actionType = actionType,
+                        parameters = args,
+                        requiresConfirmation = args["requiresConfirmation"] == true
+                    )
                 )
-            )
-            CommandResult(
-                success = androidRes.success,
-                verified = androidRes.verified,
-                output = androidRes.outputText,
-                error = androidRes.error,
-                durationMs = androidRes.durationMs
-            )
-        } else if (controlPlaneTransport != null) {
-            val uid = authRepository?.currentUser?.value?.id ?: "authenticated-user"
-            val envelope = CommandEnvelope(
-                commandId = cmdId,
-                issuingUserId = uid,
-                sourceDeviceId = localId,
-                targetDeviceId = targetDeviceId,
-                actionType = toolName,
-                parameters = args,
-                creationTime = startMs,
-                expirationTime = startMs + 20_000L
-            )
-            controlPlaneTransport.dispatchCommand(envelope)
-        } else {
-            // Deterministic unit-test fallback when neither AndroidUiActionExecutor nor ControlPlaneTransport is wired
-            CommandResult(
-                success = true,
-                verified = true,
-                output = "Executed $toolName on $targetDeviceId",
-                durationMs = System.currentTimeMillis() - startMs
-            )
+                CommandResult(
+                    success = androidRes.success,
+                    verified = androidRes.verified,
+                    output = androidRes.outputText,
+                    error = androidRes.error,
+                    durationMs = androidRes.durationMs
+                )
+            }
+            else -> {
+                val uid = authRepository?.currentUser?.value?.id
+                    ?: return CommandResult(false, false, error = "Sign in before controlling a paired device.")
+                val transport = controlPlaneTransport
+                    ?: return CommandResult(false, false, error = "Cross-device control is not available on this build.")
+                val envelope = CommandEnvelope(
+                    commandId = cmdId,
+                    issuingUserId = uid,
+                    sourceDeviceId = localId,
+                    targetDeviceId = targetDeviceId,
+                    actionType = toolName,
+                    parameters = args,
+                    creationTime = startMs,
+                    expirationTime = startMs + 20_000L,
+                    requiresConfirmation = args["requiresConfirmation"] == true
+                )
+                transport.dispatchCommand(envelope)
+            }
         }
 
         val finalStatus = if (result.success) CommandStatus.COMPLETED else CommandStatus.FAILED
