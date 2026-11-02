@@ -18,12 +18,15 @@ type NativeAndroidInterface = {
 
 declare global {
   interface Window {
+    __HUBMIND_NATIVE_TOKEN__?: string;
     HubMindAndroidBridge?: NativeAndroidInterface;
     hubMindAndroid?: {
       isAndroidApp: boolean;
       getDeviceInfo: () => Promise<any>;
       isAccessibilityEnabled: () => Promise<boolean>;
       openAccessibilitySettings: () => void;
+      startAgentSession: () => void;
+      stopAgentSession: () => void;
       executeTool: (name: string, args: Record<string, any>, userId?: string) => Promise<AndroidNativeResult>;
       __resolve?: (id: string, resultJson: string) => void;
     };
@@ -42,7 +45,7 @@ export function installAndroidNativeBridge(): boolean {
   window.hubMindAndroid = {
     isAndroidApp: true,
     getDeviceInfo: async () => {
-      try { return JSON.parse(native.getDeviceInfo() || '{}'); }
+      try { return JSON.parse(native.getDeviceInfo(String(window.__HUBMIND_NATIVE_TOKEN__ || '')) || '{}'); }
       catch { return {}; }
     },
     isAccessibilityEnabled: async () => {
