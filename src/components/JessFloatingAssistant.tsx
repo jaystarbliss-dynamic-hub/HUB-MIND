@@ -882,6 +882,21 @@ export function JessFloatingAssistant() {
           }
         }
 
+        if (fc.name === 'android_device_action' && result?.result?.evidence?.imageBase64) {
+          const evidence = result.result.evidence;
+          const mimeType = String(evidence.mimeType || 'image/jpeg');
+          const delivered = !!clientRef.current?.sendScreenFrame('data:' + mimeType + ';base64,' + String(evidence.imageBase64));
+          result.result.evidence = {
+            mimeType,
+            imageDeliveredToJess: delivered,
+            note: delivered
+              ? 'The current Android screen image was sent to Jess for visual inspection. Treat it as a point-in-time screenshot, not a continuous screen recording.'
+              : 'The Android screenshot was captured but could not be delivered to the active Gemini Live session.',
+          };
+          result.result.verified = delivered;
+          if (!delivered) result.result.error = 'The screenshot was captured but not delivered to Jess for visual inspection.';
+        }
+
         if (fc.name === 'take_windows_screenshot' && Array.isArray(result.result?.evidence?.monitors)) {
           const monitors = result.result.evidence.monitors;
           const selectedMonitor = monitors.find((monitor: any) => monitor.primary) || monitors[0];
