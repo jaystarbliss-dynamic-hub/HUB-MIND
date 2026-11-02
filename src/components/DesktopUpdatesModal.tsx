@@ -280,7 +280,7 @@ export function DesktopUpdatesModal({
     setError(null);
     void fetchAndroidReleaseHistory();
     try {
-      const res = await fetch(`/api/repository-context${forceFresh ? '?fresh=true' : ''}`,
+      const res = await fetch(`/api/repository-context${forceFresh ? '?fresh=true' : ''}`, {
         headers: { Accept: 'application/json' },
       }).catch(() => null);
       
