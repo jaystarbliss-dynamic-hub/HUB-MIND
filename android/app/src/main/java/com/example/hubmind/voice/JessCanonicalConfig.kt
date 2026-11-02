@@ -80,7 +80,7 @@ object JessCanonicalConfig {
                         put("type", "STRING")
                         put(
                             "description",
-                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, SET_VOLUME, GET_DEVICE_STATUS, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
+                            "Action type: OPEN_APP, TAP, CLICK_UI_ELEMENT, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, SET_VOLUME, GET_DEVICE_STATUS, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
                         )
                     })
                     put("packageName", JSONObject().put("type", "STRING").put("description", "Android package name (e.g. com.android.chrome)"))
@@ -91,6 +91,11 @@ object JessCanonicalConfig {
                     put("x", JSONObject().put("type", "NUMBER").put("description", "Screen X coordinate in pixels"))
                     put("y", JSONObject().put("type", "NUMBER").put("description", "Screen Y coordinate in pixels"))
                     put("direction", JSONObject().put("type", "STRING").put("description", "Scroll or swipe direction: up, down, left, right"))
+                    put("startX", JSONObject().put("type", "NUMBER").put("description", "Swipe start X in screen pixels"))
+                    put("startY", JSONObject().put("type", "NUMBER").put("description", "Swipe start Y in screen pixels"))
+                    put("endX", JSONObject().put("type", "NUMBER").put("description", "Swipe end X in screen pixels"))
+                    put("endY", JSONObject().put("type", "NUMBER").put("description", "Swipe end Y in screen pixels"))
+                    put("durationMs", JSONObject().put("type", "NUMBER").put("description", "Optional swipe duration in milliseconds"))
                     put("level", JSONObject().put("type", "NUMBER").put("description", "Media volume level from 0 to 100 when using SET_VOLUME"))
                 })
                 put("required", JSONArray().put("actionType"))
