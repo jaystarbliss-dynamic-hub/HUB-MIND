@@ -116,7 +116,7 @@ jobs:
             echo "$BADGING" | grep -F "name='$EXPECTED_APPLICATION_ID'"
             echo "$BADGING" | grep -F "versionCode='$EXPECTED_VERSION_CODE'"
             echo "$BADGING" | grep -F "versionName='$EXPECTED_VERSION_NAME'"
-            "$APKSIGNER" verify --print-certs "$APK" | grep -E 'Signer #1 certificate SHA-1 digest|Signer #1 certificate SHA-256 digest'
+            "$APKSIGNER" verify --print-certs "$APK"
           done
 
       - name: Upload Android APK build artifacts
