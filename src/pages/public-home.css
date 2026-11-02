@@ -416,3 +416,19 @@
 @media(max-width:650px){.hm-signal-strip{grid-template-columns:1fr;margin:0 auto;padding:0 18px;gap:7px}.hm-signal-strip>div{grid-template-columns:23px minmax(0,1fr);min-height:62px;padding:11px 13px}.hm-signal-strip small{font-size:9px}.hm-feature-grid{grid-template-columns:1fr}.hm-feature{min-height:165px}.hm-motion-ready .hm-reveal{transform:translateY(14px)}}
 @media(max-width:360px){.hm-inbox-heading{flex-wrap:wrap}.jess-chat-screen-share video{width:58px;height:40px}.jess-chat-screen-share span{font-size:7px}}
 @media(prefers-reduced-motion:reduce){.hm-motion-ready .hm-reveal,.hm-hero-copy .hm-eyebrow,.hm-hero h1,.hm-hero-description,.hm-hero-actions,.hm-trust-line{opacity:1!important;transform:none!important;animation:none!important;transition:none!important}.hm-feature,.hm-feature:after{transition:none!important}}
+
+
+/* Site-wide Unicorn Studio ambience: decorative only, never captures input or obscures page content. */
+.hm-public{background:transparent!important;isolation:isolate}
+.hm-public .hm-site-background{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:#080b12}
+.hm-public #hm-unicorn-background{position:absolute;inset:0;width:100%;height:100%;pointer-events:none!important;opacity:.78}
+.hm-public #hm-unicorn-background canvas{pointer-events:none!important}
+.hm-public .hm-site-background-shade{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(8,11,18,.52),rgba(8,11,18,.68) 48%,rgba(8,11,18,.84))}
+.hm-public>header,.hm-public>main,.hm-public>footer{position:relative;z-index:1}
+.hm-public .hm-hero:before{background:linear-gradient(180deg,rgba(8,11,18,.34),rgba(9,14,22,.42) 75%,rgba(8,11,18,.52))}
+.hm-public .hm-features{background:linear-gradient(180deg,rgba(8,11,18,.48),rgba(11,16,24,.55))}
+.hm-public .hm-jess-section{background:rgba(11,16,24,.52)}
+.hm-public .hm-desktop-section{background:radial-gradient(ellipse at 75% 52%,rgba(36,101,102,.12),transparent 44%),rgba(8,11,18,.52)}
+.hm-public .hm-footer{background:rgba(7,9,14,.76)}
+.hm-public .hm-nav{background:rgba(8,11,18,.72)}
+@media(prefers-reduced-motion:reduce){.hm-public #hm-unicorn-background{visibility:hidden}}
