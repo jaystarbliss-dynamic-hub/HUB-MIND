@@ -191,3 +191,21 @@ test('Android updater downloads to app-private cache, verifies checksum, and exp
   assert.match(screen, /Download & Install v/);
   assert.match(manifest, /android\.permission\.REQUEST_INSTALL_PACKAGES/);
 });
+
+test('Website lists CI-published Android debug prereleases as clearly labelled test downloads without enabling in-app updates', () => {
+  const workflow = read('.github/workflows/android-apk.yml');
+  const modal = read('src/components/DesktopUpdatesModal.tsx');
+  const manifest = JSON.parse(read('public/api/app-version.json'));
+
+  assert.match(workflow, /publish-android-debug-prerelease/);
+  assert.match(workflow, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /contents:\s*write/);
+  assert.match(workflow, /prerelease:\s*true/);
+  assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.match(modal, /isPrerelease:\s*Boolean\(rel\.prerelease\)/);
+  assert.match(modal, /TEST BUILD · DEBUG SIGNED/);
+  assert.match(modal, /cannot update an installation signed with a different certificate/i);
+  assert.match(modal, /Download Android test APK/);
+  assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
+  assert.equal(manifest.apkUrl, '');
+});
