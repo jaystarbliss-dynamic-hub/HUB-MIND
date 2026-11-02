@@ -994,10 +994,20 @@ class JessRepositoryImpl(
         return when (call.name) {
             "android_device_action" -> {
                 val localAndroidId = deviceRegistryRepository.devices.value
-                    .firstOrNull { it.isCurrentDevice || it.platform == DevicePlatform.ANDROID }
-                    ?.deviceId ?: "android-local"
-                val actionType = (call.args["actionType"] as? String) ?: "GET_SCREEN_HIERARCHY"
-                val res = deviceControlRepository.executeTool(localAndroidId, actionType, call.args)
+                    .firstOrNull { it.isCurrentDevice && it.platform == DevicePlatform.ANDROID }
+                    ?.deviceId ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "The current Android device is not registered in this Hub-Mind account."
+                    )
+                val actionType = (call.args["actionType"] as? String)?.takeIf { it.isNotBlank() }
+                    ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "Jess did not provide an Android actionType."
+                    )
+                val actionArgs = call.args.filterKeys { it != "actionType" }
+                val res = deviceControlRepository.executeTool(localAndroidId, actionType, actionArgs)
                 lastExecutedToolName = actionType
                 lastExecutionStatus = if (res.success && res.verified) "done_verified" else if (res.success) "sent_unverified" else "failed"
                 mapOf(
@@ -1010,11 +1020,20 @@ class JessRepositoryImpl(
             }
             "windows_device_action" -> {
                 val targetWinId = (call.args["targetDeviceId"] as? String)?.takeIf { it.isNotBlank() }
-                    ?: deviceRegistryRepository.devices.value.firstOrNull { it.platform == DevicePlatform.WINDOWS }?.deviceId
-                    ?: deviceRegistryRepository.currentTargetDevice.value?.deviceId
-                    ?: "windows-workstation"
-                val toolName = (call.args["toolName"] as? String) ?: "get_windows_system_info"
-                val res = deviceControlRepository.executeTool(targetWinId, toolName, call.args)
+                    ?: deviceRegistryRepository.devices.value.firstOrNull { it.platform == DevicePlatform.WINDOWS && it.status == DeviceStatus.ONLINE }?.deviceId
+                    ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "No online Windows workstation is registered to this Hub-Mind account."
+                    )
+                val toolName = (call.args["toolName"] as? String)?.takeIf { it.isNotBlank() }
+                    ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "Jess did not provide a Windows toolName."
+                    )
+                val toolArgs = call.args.filterKeys { it != "toolName" && it != "targetDeviceId" }
+                val res = deviceControlRepository.executeTool(targetWinId, toolName, toolArgs)
                 lastExecutedToolName = toolName
                 lastExecutionStatus = if (res.success && res.verified) "done_verified" else if (res.success) "sent_unverified" else "failed"
                 mapOf(
