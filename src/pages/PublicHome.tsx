@@ -34,6 +34,29 @@ export function PublicHome() {
     return () => observer.disconnect();
   }, []);
 
+
+  // Load the published Unicorn Studio scene once and keep it as a purely decorative page backdrop.
+  useEffect(() => {
+    const host = document.getElementById('hm-unicorn-background');
+    if (!host) return;
+    const init = () => {
+      const studio = (window as any).UnicornStudio;
+      if (studio?.init) studio.init();
+    };
+    const existing = document.querySelector<HTMLScriptElement>('script[data-hm-unicorn-sdk]');
+    if ((window as any).UnicornStudio?.init) {
+      init();
+    } else if (existing) {
+      existing.addEventListener('load', init, { once: true });
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/gh/hiunicornstudio/unicornstudio.js@v2.4.3/dist/unicornStudio.umd.js';
+      script.async = true;
+      script.dataset.hmUnicornSdk = 'true';
+      script.onload = init;
+      document.head.appendChild(script);
+    }
+  }, []);
   useEffect(() => {
     let active = true;
     fetch('https://api.github.com/repos/Jaystarbliss-studios/HUB-MIND/releases/latest')
@@ -104,6 +127,10 @@ export function PublicHome() {
 
   return (
     <div className="hm-public min-h-screen overflow-hidden">
+      <div className="hm-site-background" aria-hidden="true">
+        <div id="hm-unicorn-background" data-us-project="1AfwBht7npSsvDW0cDU5" data-us-production="true" />
+        <div className="hm-site-background-shade" />
+      </div>
       <header className="hm-nav">
         <a href="/" className="hm-brand" aria-label="Hub-Mind home">
           <span className="hm-brand-mark"><img src="/hub-mind%20logo.png" alt="" /></span>
