@@ -171,7 +171,7 @@ export function DesktopUpdatesModal({
               id: apk.id,
               name: apk.name || 'Hub-Mind-Android.apk',
               sizeFormatted: formatAssetBytes(apk.size || 0),
-              downloadUrl: apk.browser_download_url || '',
+              downloadUrl: apk.browser_download_url || `https://github.com/${repoSlug}/releases/download/${encodeURIComponent(rel.tag_name || `release-${rel.id}`)}/${encodeURIComponent(apk.name || 'Hub-Mind-Android.apk')}`,
             },
           } as RepoRelease;
         })
@@ -243,82 +243,16 @@ export function DesktopUpdatesModal({
     }
   };
 
-  const fetchAndroidReleaseHistory = async () => {
-    try {
-      const response = await fetch('https://api.github.com/repos/jaystarbliss-dynamic-hub/HUB-MIND/releases?per_page=50', {
-        headers: { Accept: 'application/vnd.github+json' },
-      });
-      if (!response.ok) return;
-      const raw = await response.json();
-      const mapped: RepoRelease[] = (Array.isArray(raw) ? raw : [])
-        .filter((rel: any) => !rel.draft)
-        .map((rel: any) => {
-          const apk = (Array.isArray(rel.assets) ? rel.assets : []).find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
-          if (!apk) return null;
-          return {
-            id: rel.id,
-            tag: rel.tag_name || `release-${rel.id}`,
-            name: rel.name || rel.tag_name || 'Hub-Mind Android Release',
-            publishedAt: rel.published_at || rel.created_at || new Date().toISOString(),
-            htmlUrl: rel.html_url || 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases',
-            body: rel.body || 'No release notes provided for this Android version.',
-            isLatest: false,
-            isPrerelease: Boolean(rel.prerelease),
-            apkAsset: {
-              id: apk.id,
-              name: apk.name || 'Hub-Mind-Android.apk',
-              sizeFormatted: formatAssetBytes(apk.size || 0),
-              downloadUrl: apk.browser_download_url || '',
-            },
-          } as RepoRelease;
-        })
-        .filter((release: RepoRelease | null): release is RepoRelease => Boolean(release));
-      const latestStableRelease = mapped.find((release) => !release.isPrerelease);
-      if (latestStableRelease) latestStableRelease.isLatest = true;
-      setAndroidReleases(mapped);
-    } catch {
-      // Preserve the last successful result when GitHub is unavailable.
-    }
-  };
-
-  const loadRepositoryData = async (forceFresh = false) => {
+  const loadRepositoryData = async (_forceFresh = false) => {
     setLoading(true);
     setError(null);
-    void fetchAndroidReleaseHistory();
     try {
-      const res = await fetch(`/api/repository-context${forceFresh ? '?fresh=true' : ''}`, {
-        headers: { Accept: 'application/json' },
-      }).catch(() => null);
-      
-      if (res && res.ok) {
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const text = await res.text();
-          if (text && !text.trim().startsWith('<')) {
-            try {
-              const data = JSON.parse(text);
-              if (Array.isArray(data.releases) && data.releases.length > 0) {
-                setReleases(data.releases);
-                setCommits(data.recentCommits || []);
-                setOverview(data.overview || null);
-                if (data.currentBundledVersion) setCurrentVersion(data.currentBundledVersion);
-                setExpandedRelease(data.releases[0].tag);
-                return;
-              }
-            } catch {
-              // Ignore parse error and proceed to GitHub fallback
-            }
-          }
-        }
-      }
+      // One GitHub request set supplies Android assets, Windows installers and history.
       await fetchDirectFromGitHub();
     } catch {
-      try {
-        await fetchDirectFromGitHub();
-      } catch {
-        setReleases(BUNDLED_FALLBACK_RELEASES);
-        setExpandedRelease(BUNDLED_FALLBACK_RELEASES[0].tag);
-      }
+      setReleases(BUNDLED_FALLBACK_RELEASES);
+      setAndroidReleases([]);
+      setExpandedRelease(BUNDLED_FALLBACK_RELEASES[0].tag);
     } finally {
       setLoading(false);
     }
@@ -391,9 +325,9 @@ export function DesktopUpdatesModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="desktop-updates-title"
-      className="fixed inset-0 z-[10001] flex items-stretch justify-center p-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200 sm:items-center sm:p-5"
+      className="fixed inset-0 z-[10001] flex items-stretch justify-center p-0 bg-slate-950/90 sm:items-center sm:p-5"
     >
-      <div className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border-0 bg-slate-900 text-slate-100 shadow-2xl shadow-teal-950/60 sm:h-auto sm:max-h-[90vh] sm:max-w-4xl sm:rounded-3xl sm:border sm:border-teal-500/30">
+      <div className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border-0 bg-slate-900 text-slate-100 sm:shadow-2xl sm:shadow-teal-950/60 sm:h-auto sm:max-h-[90vh] sm:max-w-4xl sm:rounded-3xl sm:border sm:border-teal-500/30">
         {/* Header */}
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-teal-500/20 bg-slate-950/60 px-4 py-3 sm:items-center sm:px-6 sm:py-4">
           <div className="flex items-center gap-3">
@@ -728,7 +662,7 @@ export function DesktopUpdatesModal({
                         <p className="whitespace-pre-wrap break-words rounded-xl border border-slate-800/80 bg-slate-950/50 p-3 text-xs leading-relaxed text-slate-300">{release.body || 'No detailed changelog provided.'}</p>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           {release.apkAsset && (
-                            <a href={release.apkAsset.downloadUrl} download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-500/20">
+                            <a href={release.apkAsset.downloadUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-500/20">
                               <Download className="h-4 w-4" />
                               {release.isPrerelease ? 'Download Android test APK' : 'Download Android APK'} ({release.apkAsset.sizeFormatted})
                             </a>
