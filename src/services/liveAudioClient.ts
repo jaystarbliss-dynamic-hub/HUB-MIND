@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { auth } from '../firebaseConfig';
 import { JESS_TOOLS_DECLARATIONS } from '../lib/jessTools';
-import { JESS_NATIVE_TOOL_NAME_SET } from '../shared/jessNativeToolNames';
+import { JESS_NATIVE_TOOL_NAME_SET, JESS_ANDROID_TOOL_NAME_SET } from '../shared/jessNativeToolNames';
 import { jessBackgroundTasks } from './jessBackgroundTasks';
 import { claimJessAudio, releaseJessAudio, type JessAudioLease } from './jessVoiceSessionCoordinator';
 import { getUserMemories, formatMemoriesForPrompt } from './memoryService';
@@ -384,6 +384,7 @@ export class LiveAudioClient {
       const bgTasksSummary = jessBackgroundTasks.getQueueSummaryForPrompt(context?.userId || '');
 
       const isDesktopClient = desktop?.isDesktopApp === true;
+      const isAndroidClient = (window as any).hubMindAndroid?.isAndroidApp === true;
       const mcpToolsPromise = (isDesktopClient && context?.userId && desktop?.mcpListTools)
         ? Promise.race([
             (async () => await desktop.mcpListTools(context.userId))(),
@@ -446,6 +447,7 @@ export class LiveAudioClient {
       const availableTools = [
         ...JESS_TOOLS_DECLARATIONS.filter(tool =>
           (isDesktopClient ? !desktopOnlyDomTools.has(tool.name) : !JESS_NATIVE_TOOL_NAME_SET.has(tool.name)) &&
+          (isAndroidClient || !JESS_ANDROID_TOOL_NAME_SET.has(tool.name)) &&
           (context?.webResearchEnabled !== false || !webResearchTools.has(tool.name))
         ),
         ...mcpToolDeclarations,
