@@ -979,7 +979,7 @@ class JessRepositoryImpl(
                     if (current.exists() && current.getString("sessionId") == sessionId) {
                         transaction.delete(leaseRef)
                     }
-                    null
+                    true
                 }.await()
             }
         }
