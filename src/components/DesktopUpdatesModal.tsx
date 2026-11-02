@@ -34,6 +34,7 @@ interface RepoRelease {
   htmlUrl: string;
   body: string;
   isLatest: boolean;
+  isPrerelease?: boolean;
   installerAsset?: RepoReleaseAsset;
   apkAsset?: RepoReleaseAsset;
   extensionAsset?: RepoReleaseAsset;
@@ -151,8 +152,9 @@ export function DesktopUpdatesModal({
       const rawCommits = comRes && comRes.ok ? await comRes.json().catch(() => []) : [];
       const rawRepo = repoRes && repoRes.ok ? await repoRes.json().catch(() => null) : null;
 
-      const publishedReleases = (Array.isArray(rawReleases) ? rawReleases : []).filter((rel: any) => !rel.draft && !rel.prerelease);
-      let mappedAndroidReleases: RepoRelease[] = publishedReleases
+      const nonDraftReleases = (Array.isArray(rawReleases) ? rawReleases : []).filter((rel: any) => !rel.draft);
+      const publishedReleases = nonDraftReleases.filter((rel: any) => !rel.prerelease);
+      let mappedAndroidReleases: RepoRelease[] = nonDraftReleases
         .map((rel: any) => {
           const apk = (Array.isArray(rel.assets) ? rel.assets : []).find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
           if (!apk) return null;
@@ -164,6 +166,7 @@ export function DesktopUpdatesModal({
             htmlUrl: rel.html_url || `https://github.com/${repoSlug}/releases`,
             body: rel.body || 'No release notes provided for this Android version.',
             isLatest: false,
+            isPrerelease: Boolean(rel.prerelease),
             apkAsset: {
               id: apk.id,
               name: apk.name || 'Hub-Mind-Android.apk',
@@ -173,7 +176,8 @@ export function DesktopUpdatesModal({
           } as RepoRelease;
         })
         .filter((release: RepoRelease | null): release is RepoRelease => Boolean(release));
-      if (mappedAndroidReleases.length > 0) mappedAndroidReleases[0].isLatest = true;
+      const latestStableAndroidRelease = mappedAndroidReleases.find((release) => !release.isPrerelease);
+      if (latestStableAndroidRelease) latestStableAndroidRelease.isLatest = true;
 
       let mappedReleases: RepoRelease[] = publishedReleases.map((rel: any, idx: number) => {
         const rawAssets = Array.isArray(rel.assets) ? rel.assets : [];
@@ -247,7 +251,7 @@ export function DesktopUpdatesModal({
       if (!response.ok) return;
       const raw = await response.json();
       const mapped: RepoRelease[] = (Array.isArray(raw) ? raw : [])
-        .filter((rel: any) => !rel.draft && !rel.prerelease)
+        .filter((rel: any) => !rel.draft)
         .map((rel: any) => {
           const apk = (Array.isArray(rel.assets) ? rel.assets : []).find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
           if (!apk) return null;
@@ -259,6 +263,7 @@ export function DesktopUpdatesModal({
             htmlUrl: rel.html_url || 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases',
             body: rel.body || 'No release notes provided for this Android version.',
             isLatest: false,
+            isPrerelease: Boolean(rel.prerelease),
             apkAsset: {
               id: apk.id,
               name: apk.name || 'Hub-Mind-Android.apk',
@@ -268,7 +273,8 @@ export function DesktopUpdatesModal({
           } as RepoRelease;
         })
         .filter((release: RepoRelease | null): release is RepoRelease => Boolean(release));
-      if (mapped.length > 0) mapped[0].isLatest = true;
+      const latestStableRelease = mapped.find((release) => !release.isPrerelease);
+      if (latestStableRelease) latestStableRelease.isLatest = true;
       setAndroidReleases(mapped);
     } catch {
       // Preserve the last successful result when GitHub is unavailable.
@@ -670,6 +676,14 @@ export function DesktopUpdatesModal({
 
           {activeTab === 'android' && (
             <div className="space-y-3">
+              {androidReleases.some((release) => release.isPrerelease) && (
+                <div role="note" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-100">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                  <p>
+                    <strong>Testing downloads only.</strong> The debug-signed APK is not an official production release and cannot update an installation signed with a different certificate. It is not offered through the in-app automatic updater.
+                  </p>
+                </div>
+              )}
               {androidReleases.length === 0 && !loading && (
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-8 text-center">
                   <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-400">
@@ -677,7 +691,7 @@ export function DesktopUpdatesModal({
                   </div>
                   <h3 className="text-sm font-semibold text-slate-200">No Android release published yet</h3>
                   <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-slate-400">
-                    Android v2.4.0 is being prepared for owner signing and phone acceptance tests. Test builds are not shown as public downloads.
+                    No Android APK has been uploaded yet. Once CI publishes a verified test build or an official signed release, it will appear here for direct download.
                   </p>
                 </div>
               )}
@@ -698,6 +712,7 @@ export function DesktopUpdatesModal({
                           <span className="flex flex-wrap items-center gap-2">
                             <span className="break-words text-sm font-bold text-slate-100">{release.name}</span>
                             <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[11px] text-teal-300">{release.tag}</span>
+                            {release.isPrerelease && <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">TEST BUILD · DEBUG SIGNED</span>}
                             {release.isLatest && <span className="rounded border border-teal-500/30 bg-teal-500/20 px-2 py-0.5 text-[10px] font-bold text-teal-300">LATEST</span>}
                           </span>
                           <span className="mt-1 block text-xs text-slate-400">
@@ -715,7 +730,7 @@ export function DesktopUpdatesModal({
                           {release.apkAsset && (
                             <a href={release.apkAsset.downloadUrl} download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-500/20">
                               <Download className="h-4 w-4" />
-                              Download Android APK ({release.apkAsset.sizeFormatted})
+                              {release.isPrerelease ? 'Download Android test APK' : 'Download Android APK'} ({release.apkAsset.sizeFormatted})
                             </a>
                           )}
                           <a href={release.htmlUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300">
