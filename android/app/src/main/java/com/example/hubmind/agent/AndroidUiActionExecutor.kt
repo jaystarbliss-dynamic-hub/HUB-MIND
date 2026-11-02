@@ -32,6 +32,16 @@ class AndroidUiActionExecutor(private val context: Context) {
             )
         }
 
+        if (command.requiresConfirmation) {
+            return AndroidActionResult(
+                commandId = command.commandId,
+                actionType = command.actionType,
+                success = false,
+                verified = false,
+                error = "This Android action requires explicit user confirmation. It was not executed because no approval token was supplied to the native executor."
+            )
+        }
+
         val result: AndroidActionResult = when (command.actionType) {
             AndroidActionType.OPEN_APP, AndroidActionType.LAUNCH_APP -> {
                 val pkg = command.parameters["packageName"] as? String
