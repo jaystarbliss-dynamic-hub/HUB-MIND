@@ -396,7 +396,7 @@ class HubMindControlPlaneTransportImpl(
         val candidate = (params["actionType"] as? String)?.ifBlank { null } ?: rawAction
         return when (candidate.uppercase().trim()) {
             "LAUNCH_APP", "OPEN_APP", "OPEN_APPLICATION" -> AndroidActionType.OPEN_APP
-            "TAP", "CLICK" -> if ((params["targetText"] as? String).orEmpty().isNotBlank() || (params["viewId"] as? String).orEmpty().isNotBlank()) AndroidActionType.CLICK_UI_ELEMENT else AndroidActionType.TAP
+            "TAP", "CLICK", "CLICK_UI_ELEMENT" -> AndroidActionType.TAP
             "DOUBLE_TAP" -> AndroidActionType.DOUBLE_TAP
             "LONG_PRESS" -> AndroidActionType.LONG_PRESS
             "SWIPE" -> AndroidActionType.SWIPE

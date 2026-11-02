@@ -80,7 +80,7 @@ object JessCanonicalConfig {
                         put("type", "STRING")
                         put(
                             "description",
-                            "Action type: OPEN_APP, TAP, CLICK_UI_ELEMENT, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, SET_VOLUME, GET_DEVICE_STATUS, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
+                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, SET_VOLUME, GET_DEVICE_STATUS, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
                         )
                     })
                     put("packageName", JSONObject().put("type", "STRING").put("description", "Android package name (e.g. com.android.chrome)"))

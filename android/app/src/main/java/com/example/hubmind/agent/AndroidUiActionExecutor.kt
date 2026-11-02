@@ -146,8 +146,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                             commandId = command.commandId,
                             actionType = command.actionType,
                             success = tapOk,
-                            verified = tapOk,
-                            outputText = if (tapOk) "Tapped center (${node.bounds.centerX}, ${node.bounds.centerY}) of '$targetText'." else null,
+                            verified = false,
+                            outputText = if (tapOk) "Android accepted the tap at center (${node.bounds.centerX}, ${node.bounds.centerY}) of '$targetText'." else null,
                             error = if (!tapOk) "Gesture dispatch cancelled while tapping '$targetText'." else null,
                             durationMs = System.currentTimeMillis() - startTime
                         )
