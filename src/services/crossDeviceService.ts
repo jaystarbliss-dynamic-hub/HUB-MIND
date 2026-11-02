@@ -43,6 +43,7 @@ export interface CrossDeviceCommandEnvelope {
   resultSuccess?: boolean;
   resultVerified?: boolean;
   resultSummary?: string;
+  resultPayloadJson?: string;
   resultError?: string;
   completedAt?: number;
 }
@@ -142,6 +143,7 @@ export async function dispatchCrossDeviceCommand(
   commandId: string;
   targetDeviceId: string;
   summary: string;
+  payload?: Record<string, any>;
   error?: string;
 }> {
   const commandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -213,6 +215,10 @@ export async function dispatchCrossDeviceCommand(
             commandId,
             targetDeviceId,
             summary: String(data.resultSummary || ''),
+            payload: (() => {
+              try { return data.resultPayloadJson ? JSON.parse(data.resultPayloadJson) : undefined; }
+              catch { return undefined; }
+            })(),
             error: data.resultError ? String(data.resultError) : undefined,
           });
         }
@@ -311,18 +317,24 @@ export function startCrossDeviceAgentLoop(
             const execOut = await toolExecutor(cmd.actionType, normalizedArgs);
             const resObj = execOut?.result || {};
             const ok = resObj.success === true || resObj.ok === true || resObj.status === 'done_verified';
-            const verified = resObj.verified === true || resObj.status === 'done_verified' || ok;
-            const summary =
-              resObj.message ||
-              resObj.summary ||
-              (resObj.evidence ? JSON.stringify(resObj.evidence).slice(0, 4000) : JSON.stringify(resObj).slice(0, 4000));
+            const verified = resObj.verified === true || resObj.status === 'done_verified';
+            const summary = resObj.message || resObj.summary || (ok ? 'Action accepted by the target device.' : '');
+            const imageEvidence = resObj.evidence?.imageBase64
+              ? { imageBase64: String(resObj.evidence.imageBase64), mimeType: String(resObj.evidence.mimeType || 'image/jpeg') }
+              : resObj.evidence?.monitors?.[0]?.imageBase64
+                ? { imageBase64: String(resObj.evidence.monitors[0].imageBase64), mimeType: String(resObj.evidence.monitors[0].mimeType || 'image/jpeg') }
+                : null;
+            const resultPayloadJson = imageEvidence && imageEvidence.imageBase64.length <= 450_000
+              ? JSON.stringify({ evidence: imageEvidence })
+              : '';
 
             await updateDoc(cmdRef, {
               lifecycleState: ok ? 'COMPLETED' : 'FAILED',
               resultSuccess: ok,
               resultVerified: verified,
               resultSummary: ok ? String(summary) : '',
-              resultError: ok ? '' : String(resObj.error || resObj.message || 'Execution failed on target workstation.'),
+              resultPayloadJson,
+              resultError: ok ? '' : String(resObj.error || resObj.message || 'Execution failed on target device.'),
               completedAt: Date.now(),
             }).catch(() => {});
           } catch (err: any) {
