@@ -35,6 +35,7 @@ interface RepoRelease {
   body: string;
   isLatest: boolean;
   installerAsset?: RepoReleaseAsset;
+  androidAsset?: RepoReleaseAsset;
   extensionAsset?: RepoReleaseAsset;
 }
 
@@ -70,11 +71,12 @@ export function DesktopUpdatesModal({
   const isOpen = propIsOpen !== undefined ? propIsOpen : internalOpen;
 
   const [activeTab, setActiveTab] = useState<'releases' | 'commits' | 'codebase'>('releases');
+  const [activePlatform, setActivePlatform] = useState<'windows' | 'android'>('windows');
   const [loading, setLoading] = useState(false);
   const [releases, setReleases] = useState<RepoRelease[]>([]);
   const [commits, setCommits] = useState<RepoCommit[]>([]);
   const [overview, setOverview] = useState<RepoOverview | null>(null);
-  const [currentVersion, setCurrentVersion] = useState<string>('0.1.0');
+  const [currentVersion, setCurrentVersion] = useState<string>('2.4.0');
   const [expandedRelease, setExpandedRelease] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -158,6 +160,7 @@ export function DesktopUpdatesModal({
           downloadUrl: a.browser_download_url || '',
         }));
         const installerAsset = assets.find((a) => /\.exe$/i.test(a.name));
+        const androidAsset = assets.find((a) => /\.apk$/i.test(a.name));
         const extensionAsset = assets.find((a) => /extension\.zip$/i.test(a.name) || /Jess-Chrome-Extension/i.test(a.name));
         return {
           id: rel.id,
@@ -168,6 +171,7 @@ export function DesktopUpdatesModal({
           body: rel.body || 'No release notes provided for this version.',
           isLatest: idx === 0,
           installerAsset,
+          androidAsset,
           extensionAsset,
         };
       });
@@ -311,38 +315,43 @@ export function DesktopUpdatesModal({
 
   if (!isOpen) return null;
 
-  const latestRelease = releases[0] || null;
+  const windowsReleases = releases.filter(release => !!release.installerAsset || /^desktop[-_]/i.test(release.tag));
+  const androidReleases = releases.filter(release => !!release.androidAsset || /^android[-_]/i.test(release.tag));
+  const platformReleases = activePlatform === 'android' ? androidReleases : windowsReleases;
+  const displayReleases = platformReleases.map((release, index) => ({ ...release, isLatest: index === 0 }));
+  const latestRelease = platformReleases[0] || null;
+  const latestDownloadAsset = activePlatform === 'android' ? latestRelease?.androidAsset : latestRelease?.installerAsset;
 
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="desktop-updates-title"
-      className="fixed inset-0 z-[10001] flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[10001] flex items-center justify-center p-1 sm:p-6 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
     >
-      <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl bg-slate-900 border border-teal-500/30 shadow-2xl shadow-teal-950/60 overflow-hidden text-slate-100">
+      <div className="relative w-full max-w-4xl max-h-[calc(100dvh-0.5rem)] sm:max-h-[90vh] min-h-0 flex flex-col rounded-xl sm:rounded-3xl bg-slate-900 border border-teal-500/30 shadow-2xl shadow-teal-950/60 overflow-hidden text-slate-100">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-teal-500/20 bg-slate-950/60">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3 sm:px-6 py-3 sm:py-4 border-b border-teal-500/20 bg-slate-950/60">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-300">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-300 shrink-0">
               <Layers className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 id="desktop-updates-title" className="text-base sm:text-lg font-bold text-teal-300 tracking-wide">
-                  Desktop Releases & Version History
+                <h2 id="desktop-updates-title" className="text-sm sm:text-lg font-bold text-teal-300 tracking-wide">
+                  Releases & Version History
                 </h2>
-                <span className="px-2 py-0.5 text-[10px] font-semibold bg-teal-500/10 text-teal-300 rounded-full border border-teal-500/20">
+                <span className="hidden sm:inline-flex px-2 py-0.5 text-[10px] font-semibold bg-teal-500/10 text-teal-300 rounded-full border border-teal-500/20">
                   Live GitHub
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Official releases, Windows desktop installers, and changelogs for Hub-Mind
+                Published Windows and Android releases, downloads, and changelogs for Hub-Mind
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-end gap-2 shrink-0">
             <button
               type="button"
               onClick={() => void loadRepositoryData(true)}
@@ -376,7 +385,7 @@ export function DesktopUpdatesModal({
 
         {/* Latest Version Hero Banner */}
         {latestRelease && (
-          <div className="mx-6 mt-4 p-4 rounded-2xl bg-gradient-to-r from-teal-950/60 via-slate-900 to-slate-950 border border-teal-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="mx-3 sm:mx-6 mt-3 sm:mt-4 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-teal-950/60 via-slate-900 to-slate-950 border border-teal-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 shrink-0">
                 <Zap className="w-5 h-5" />
@@ -398,26 +407,26 @@ export function DesktopUpdatesModal({
                 </div>
                 <h3 className="text-sm sm:text-base font-bold text-slate-100 mt-0.5">{latestRelease.name}</h3>
                 <p className="text-xs text-slate-400 line-clamp-1 mt-0.5">
-                  Current bundled version: v{currentVersion} • Total releases: {releases.length}
+                  Current app version: v{currentVersion} • {platformReleases.length} {activePlatform === 'android' ? 'Android' : 'Windows'} releases
                 </p>
               </div>
             </div>
 
-            {latestRelease.installerAsset && (
+            {latestDownloadAsset && (
               <a
-                href={latestRelease.installerAsset.downloadUrl}
+                href={latestDownloadAsset.downloadUrl}
                 download
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs sm:text-sm shadow-lg shadow-teal-500/20 transition-all hover:scale-[1.02] active:scale-[0.98] shrink-0"
               >
                 <ArrowDownCircle className="w-4 h-4" />
-                <span>Download Windows App ({latestRelease.installerAsset.sizeFormatted})</span>
+                <span>{activePlatform === 'android' ? 'Download Android APK' : 'Download Windows App'} ({latestDownloadAsset.sizeFormatted})</span>
               </a>
             )}
           </div>
         )}
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-2 px-6 mt-4 border-b border-slate-800">
+        <div className="flex items-center gap-2 px-3 sm:px-6 mt-3 sm:mt-4 border-b border-slate-800 overflow-x-auto whitespace-nowrap">
           <button
             type="button"
             onClick={() => setActiveTab('releases')}
@@ -428,7 +437,7 @@ export function DesktopUpdatesModal({
             }`}
           >
             <Tag className="w-3.5 h-3.5" />
-            <span>Version Releases ({releases.length})</span>
+            <span>Version History</span>
           </button>
           <button
             type="button"
@@ -460,7 +469,7 @@ export function DesktopUpdatesModal({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-6 space-y-3 sm:space-y-4">
           {error && (
             <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -471,13 +480,33 @@ export function DesktopUpdatesModal({
           {/* TAB 1: RELEASES */}
           {activeTab === 'releases' && (
             <div className="space-y-3">
-              {releases.length === 0 && !loading && (
-                <div className="text-center py-10 text-slate-400 text-sm">
-                  No public releases found yet. Check back soon!
+              <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-1.5 w-full sm:w-fit">
+                <button
+                  type="button"
+                  onClick={() => { setActivePlatform('windows'); setExpandedRelease(null); }}
+                  aria-pressed={activePlatform === 'windows'}
+                  className={activePlatform === 'windows' ? 'flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-colors bg-teal-500 text-slate-950' : 'flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-colors text-slate-300 hover:bg-slate-800'}
+                >
+                  Windows <span className="ml-1 opacity-75">({windowsReleases.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setActivePlatform('android'); setExpandedRelease(null); }}
+                  aria-pressed={activePlatform === 'android'}
+                  className={activePlatform === 'android' ? 'flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-colors bg-teal-500 text-slate-950' : 'flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-semibold transition-colors text-slate-300 hover:bg-slate-800'}
+                >
+                  Android <span className="ml-1 opacity-75">({androidReleases.length})</span>
+                </button>
+              </div>
+              {platformReleases.length === 0 && !loading && (
+                <div className="text-center py-8 sm:py-10 px-4 rounded-2xl border border-dashed border-slate-700 text-slate-400 text-sm">
+                  {activePlatform === 'android'
+                    ? 'No Android APK has been published yet. The first tested Android release will appear here.'
+                    : 'No Windows installer releases found. Check back after the next desktop release.'}
                 </div>
               )}
 
-              {releases.map((release) => {
+              {displayReleases.map((release) => {
                 const isExpanded = expandedRelease === release.tag;
                 return (
                   <div
@@ -486,15 +515,15 @@ export function DesktopUpdatesModal({
                   >
                     <div
                       onClick={() => setExpandedRelease(isExpanded ? null : release.tag)}
-                      className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-slate-900/50 transition-colors"
+                      className="px-3 sm:px-4 py-3 flex items-start sm:items-center justify-between gap-2 cursor-pointer hover:bg-slate-900/50 transition-colors"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex items-start sm:items-center gap-2 sm:gap-3 min-w-0 flex-1">
                         <div className="w-8 h-8 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 font-mono text-xs font-bold shrink-0">
                           <Tag className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-sm text-slate-100 truncate">{release.name}</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-xs sm:text-sm text-slate-100 break-words">{release.name}</span>
                             <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-teal-300">
                               {release.tag}
                             </span>
@@ -512,11 +541,11 @@ export function DesktopUpdatesModal({
                                 day: 'numeric',
                               })}
                             </span>
-                            {release.installerAsset && (
+                            {(activePlatform === 'android' ? release.androidAsset : release.installerAsset) && (
                               <>
                                 <span>•</span>
-                                <span className="text-teal-400 font-medium">
-                                  {release.installerAsset.name} ({release.installerAsset.sizeFormatted})
+                                <span className="text-teal-400 font-medium break-all">
+                                  {(activePlatform === 'android' ? release.androidAsset : release.installerAsset)?.name} ({(activePlatform === 'android' ? release.androidAsset : release.installerAsset)?.sizeFormatted})
                                 </span>
                               </>
                             )}
@@ -524,16 +553,16 @@ export function DesktopUpdatesModal({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        {release.installerAsset && (
+                      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+                        {(activePlatform === 'android' ? release.androidAsset : release.installerAsset) && (
                           <a
-                            href={release.installerAsset.downloadUrl}
+                            href={(activePlatform === 'android' ? release.androidAsset : release.installerAsset)!.downloadUrl}
                             download
                             onClick={(e) => e.stopPropagation()}
-                            className="px-3 py-1.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                            className="px-2 sm:px-3 py-1.5 rounded-lg bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/30 text-[10px] sm:text-xs font-semibold flex items-center gap-1 sm:gap-1.5 transition-colors"
                           >
                             <Download className="w-3.5 h-3.5" />
-                            <span>Download .exe</span>
+                            <span>{activePlatform === 'android' ? 'Download .apk' : 'Download .exe'}</span>
                           </a>
                         )}
                         <button
@@ -547,7 +576,7 @@ export function DesktopUpdatesModal({
 
                     {/* Collapsible Release Details */}
                     {isExpanded && (
-                      <div className="px-5 pb-4 pt-2 border-t border-slate-800/80 bg-slate-900/40 space-y-3">
+                      <div className="px-3 sm:px-5 pb-4 pt-2 border-t border-slate-800/80 bg-slate-900/40 space-y-3">
                         <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap font-sans bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
                           {release.body || 'No detailed changelog provided for this release.'}
                         </div>
@@ -555,8 +584,13 @@ export function DesktopUpdatesModal({
                         <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
                           <div className="flex items-center gap-2">
                             {release.installerAsset && (
-                              <span className="text-slate-400">
-                                Installer: <strong className="text-slate-200">{release.installerAsset.name}</strong> ({release.installerAsset.sizeFormatted})
+                              <span className="text-slate-400 break-all">
+                                Windows installer: <strong className="text-slate-200">{release.installerAsset.name}</strong> ({release.installerAsset.sizeFormatted})
+                              </span>
+                            )}
+                            {release.androidAsset && (
+                              <span className="text-slate-400 break-all">
+                                Android APK: <strong className="text-slate-200">{release.androidAsset.name}</strong> ({release.androidAsset.sizeFormatted})
                               </span>
                             )}
                             {release.extensionAsset && (
@@ -666,7 +700,7 @@ export function DesktopUpdatesModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400">
+        <div className="px-3 sm:px-6 py-3 border-t border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
             <span>Jaystarbliss Studios • Hub-Mind Operations</span>
