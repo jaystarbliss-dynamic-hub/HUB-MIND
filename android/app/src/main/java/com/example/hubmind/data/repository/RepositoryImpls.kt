@@ -722,7 +722,8 @@ class ConversationRepositoryImpl(
         }.onFailure {
             android.util.Log.w("HubMindMemory", "Could not save shared Jess memory: ${it.message}")
         }
-    }}
+    }
+}
 
 class JessRepositoryImpl(
     private val conversationRepository: ConversationRepository,
