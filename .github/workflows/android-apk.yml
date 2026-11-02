@@ -126,3 +126,39 @@ jobs:
           path: release/*.apk
           if-no-files-found: error
           retention-days: 30
+
+  publish-android-debug-prerelease:
+    name: Publish Android debug APK as a testing prerelease
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-android-apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified Android build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-mind-android-v2.4.0-build
+          path: release
+
+      - name: Publish the debug APK as a clearly labelled prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v2.4.0-debug-${{ github.run_number }}
+          name: Hub-Mind Android v2.4.0 — Debug Test Build #${{ github.run_number }}
+          body: |
+            **TEST BUILD ONLY — NOT AN OFFICIAL PRODUCTION RELEASE.**
+
+            This APK is built and verified by CI using Android's debug signing configuration.
+            It is published so the Hub-Mind website can provide a direct test download.
+
+            - It is not a production-signed APK.
+            - It cannot update an installation signed with a different certificate.
+            - It is not offered through the in-app automatic updater.
+            - Use only for owner-controlled device testing.
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: release/Hub-Mind-Android-v2.4.0-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
