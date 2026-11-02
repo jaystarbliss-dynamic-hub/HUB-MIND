@@ -50,8 +50,9 @@ export interface CrossDeviceCommandEnvelope {
 const LOCAL_DEVICE_STORAGE_KEY = 'hubmind_cross_device_node_id';
 
 export function getLocalDeviceId(): string {
+  const isAndroid = typeof window !== 'undefined' && (window as any).hubMindAndroid?.isAndroidApp === true;
   const isDesktop = typeof window !== 'undefined' && Boolean((window as any).hubMindDesktop);
-  const prefix = isDesktop ? 'win-workstation' : 'web-workspace';
+  const prefix = isAndroid ? 'android-phone' : isDesktop ? 'win-workstation' : 'web-workspace';
   try {
     const existing = localStorage.getItem(LOCAL_DEVICE_STORAGE_KEY);
     if (existing && existing.startsWith(prefix)) return existing;
@@ -72,37 +73,43 @@ export async function registerCurrentWorkspaceDevice(
     deviceName?: string;
   }
 ): Promise<CrossDeviceNode> {
+  const isAndroid = typeof window !== 'undefined' && (window as any).hubMindAndroid?.isAndroidApp === true;
   const isDesktop = typeof window !== 'undefined' && Boolean((window as any).hubMindDesktop);
   const deviceId = getLocalDeviceId();
   let desktopStatus: any = null;
+  let androidInfo: any = null;
   if (isDesktop && (window as any).hubMindDesktop?.getControlSessionStatus) {
-    try {
-      desktopStatus = await (window as any).hubMindDesktop.getControlSessionStatus();
-    } catch {
-      desktopStatus = null;
-    }
+    try { desktopStatus = await (window as any).hubMindDesktop.getControlSessionStatus(); } catch { desktopStatus = null; }
+  }
+  if (isAndroid && (window as any).hubMindAndroid?.getDeviceInfo) {
+    try { androidInfo = await (window as any).hubMindAndroid.getDeviceInfo(); } catch { androidInfo = null; }
   }
 
   const node: CrossDeviceNode = {
     deviceId,
-    deviceName: options?.deviceName || (isDesktop ? 'Hub-Mind Windows Workstation' : 'Hub-Mind Web Workspace'),
-    platform: isDesktop ? 'WINDOWS' : 'WEB',
+    deviceName: options?.deviceName || (isAndroid
+      ? String(androidInfo?.deviceName || 'Hub-Mind Android Phone')
+      : isDesktop ? 'Hub-Mind Windows Workstation' : 'Hub-Mind Web Workspace'),
+    platform: isAndroid ? 'ANDROID' : isDesktop ? 'WINDOWS' : 'WEB',
     clientVersion: String(hubMindPackage.version || '2.4.0'),
     status: 'ONLINE',
     lastSeen: Date.now(),
-    capabilities: isDesktop
-      ? [
-          'WINDOWS_SHELL',
-          'WINDOWS_UI_AUTOMATION',
-          'WINDOWS_APP_LAUNCH',
-          'WINDOWS_WINDOW_MANAGEMENT',
-          'WINDOWS_CLIPBOARD',
-          'WINDOWS_SCREEN_CAPTURE',
-          'CHROME_EXTENSION_BRIDGE',
-        ]
-      : ['VOICE_INPUT', 'VOICE_OUTPUT'],
+    capabilities: isAndroid
+      ? ['ANDROID_ACCESSIBILITY', 'ANDROID_UI_AUTOMATION', 'ANDROID_APP_LAUNCH', 'ANDROID_DEVICE_STATUS', 'ANDROID_SCREEN_CAPTURE']
+      : isDesktop
+        ? [
+            'WINDOWS_SHELL',
+            'WINDOWS_UI_AUTOMATION',
+            'WINDOWS_APP_LAUNCH',
+            'WINDOWS_WINDOW_MANAGEMENT',
+            'WINDOWS_CLIPBOARD',
+            'WINDOWS_SCREEN_CAPTURE',
+            'CHROME_EXTENSION_BRIDGE',
+          ]
+        : ['VOICE_INPUT', 'VOICE_OUTPUT'],
     permissionMode: options?.permissionMode || desktopStatus?.preferences?.permissionMode || 'allow-routine',
-    fullControlActive: Boolean(options?.fullControlActive ?? desktopStatus?.active),
+    fullControlActive: Boolean(options?.fullControlActive ?? (isAndroid ? androidInfo?.accessibilityEnabled : desktopStatus?.active)),
+    batteryPercent: Number.isFinite(Number(androidInfo?.batteryPercent)) ? Number(androidInfo.batteryPercent) : undefined,
   };
 
   await setDoc(doc(db, 'users', userId, 'devices', deviceId), node, { merge: true });
@@ -290,7 +297,7 @@ export function startCrossDeviceAgentLoop(
               lifecycleState: 'COMPLETED',
               resultSuccess: true,
               resultVerified: true,
-              resultSummary: `Pong from ${deviceId} (${typeof window !== 'undefined' && (window as any).hubMindDesktop ? 'Windows Workstation' : 'Web Workspace'})`,
+              resultSummary: `Pong from ${deviceId} (${(window as any).hubMindAndroid?.isAndroidApp ? 'Android Phone' : (window as any).hubMindDesktop ? 'Windows Workstation' : 'Web Workspace'})`,
               completedAt: Date.now(),
             }).catch(() => {});
             return;
