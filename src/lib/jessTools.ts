@@ -719,7 +719,7 @@ export async function executeJessTool(
         const allowed = new Set(['LAUNCH_APP','OPEN_DEEP_LINK','TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS','CLIPBOARD_READ','CLIPBOARD_WRITE','GET_SCREEN_HIERARCHY','CAPTURE_SCREEN','SET_VOLUME','GET_DEVICE_STATUS','GET_INSTALLED_APPS','OPEN_ACCESSIBILITY_SETTINGS']);
         if (!allowed.has(action)) return { result: { success: false, verified: false, error: 'Unsupported Android action.' } };
         const dispatched = await dispatchCrossDeviceCommand(user.id, target.deviceId, 'android_device_action', { ...args, actionType: action }, Number(args?.timeoutMs) || 30000);
-        return { result: { success: dispatched.success, verified: dispatched.verified, commandId: dispatched.commandId, targetDeviceId: dispatched.targetDeviceId, message: dispatched.summary, error: dispatched.error } };
+        return { result: { success: dispatched.success, verified: dispatched.verified, commandId: dispatched.commandId, targetDeviceId: dispatched.targetDeviceId, message: dispatched.summary, ...(dispatched.payload?.evidence ? { evidence: dispatched.payload.evidence } : {}), error: dispatched.error } };
       }
       case 'control_paired_device': {
         const targetDeviceId = String(args?.targetDeviceId || '').trim();
@@ -730,7 +730,7 @@ export async function executeJessTool(
         if (!target || target.status !== 'ONLINE') return { result: { success: false, verified: false, error: 'The selected device is not online or is not paired to this account.' } };
         const payload = args?.arguments && typeof args.arguments === 'object' && !Array.isArray(args.arguments) ? args.arguments : {};
         const dispatched = await dispatchCrossDeviceCommand(user.id, targetDeviceId, actionType, payload, Math.max(5000, Math.min(60000, Number(args?.timeoutMs) || 30000)));
-        return { result: { success: dispatched.success, verified: dispatched.verified, commandId: dispatched.commandId, targetDeviceId, message: dispatched.summary, error: dispatched.error } };
+        return { result: { success: dispatched.success, verified: dispatched.verified, commandId: dispatched.commandId, targetDeviceId, message: dispatched.summary, ...(dispatched.payload?.evidence ? { evidence: dispatched.payload.evidence } : {}), error: dispatched.error } };
       }
       case 'android_device_action': {
         const android = (window as any).hubMindAndroid;
