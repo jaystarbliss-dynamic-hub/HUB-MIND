@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { initializeFirebaseConfig } from './firebaseConfig';
+import { installAndroidNativeBridge } from './services/androidNativeBridge';
 import './index.css';
 
 // Handle dynamic import / vite chunk preload errors gracefully
@@ -26,6 +27,9 @@ const removeSplash = () => {
 
 const rootElement = document.getElementById('root')!;
 const root = createRoot(rootElement);
+
+// Detect the installed Android companion before Jess initializes its Live session and device registry.
+installAndroidNativeBridge();
 
 async function bootstrap() {
   try {
