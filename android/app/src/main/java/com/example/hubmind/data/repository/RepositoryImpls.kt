@@ -1169,7 +1169,7 @@ class DeviceRegistryRepositoryImpl(
                         val platformStr = (doc.getString("platform") ?: "ANDROID").uppercase()
                         val platform = runCatching { DevicePlatform.valueOf(platformStr) }
                             .getOrDefault(DevicePlatform.ANDROID)
-                        val lastSeen = doc.getLong("lastSeenAt") ?: 0L
+                        val lastSeen = doc.getLong("lastSeen") ?: doc.getLong("lastSeenAt") ?: 0L
                         val rawStatus = (doc.getString("status") ?: "ONLINE").uppercase()
                         val isFresh = (now - lastSeen) < 65_000L
                         val status = if (devId == localDeviceId) {
@@ -1247,6 +1247,7 @@ class DeviceRegistryRepositoryImpl(
             "fullControlActive" to androidNode.fullControlActive,
             "permissionMode" to androidNode.permissionMode,
             "capabilities" to androidNode.capabilities.map { it.name },
+            "lastSeen" to System.currentTimeMillis(),
             "lastSeenAt" to System.currentTimeMillis(),
             "batteryPercent" to androidNode.batteryPercent,
             "ipAddress" to androidNode.ipAddress,
@@ -1325,36 +1326,35 @@ class DeviceControlRepositoryImpl(
         )
         _commandHistory.value = listOf(command) + _commandHistory.value
 
-        val isLocalTarget = targetDeviceId == localId ||
-            targetDeviceId.startsWith("android") ||
-            toolName.equals("android_device_action", ignoreCase = true)
+        val isLocalTarget = targetDeviceId == localId
 
         val result: CommandResult = if (isLocalTarget && localExecutor != null) {
             val actionStr = (args["actionType"] as? String)?.ifBlank { null } ?: toolName
-            val actionType = runCatching { AndroidActionType.valueOf(actionStr.uppercase()) }
-                .getOrElse {
-                    when (actionStr.uppercase()) {
-                        "LAUNCH_APP", "OPEN_APP" -> AndroidActionType.OPEN_APP
-                        "NAVIGATE_BACK", "BACK" -> AndroidActionType.NAVIGATE_BACK
-                        "GO_HOME", "HOME" -> AndroidActionType.GO_HOME
-                        "CAPTURE_SCREEN", "SCREENSHOT" -> AndroidActionType.CAPTURE_SCREEN
-                        else -> AndroidActionType.GET_SCREEN_HIERARCHY
-                    }
-                }
-            val androidRes = localExecutor.executeCommand(
-                AndroidCommand(
-                    commandId = cmdId,
-                    actionType = actionType,
-                    parameters = args
+            val actionType = runCatching { AndroidActionType.valueOf(actionStr.uppercase()) }.getOrNull()
+            if (actionType == null) {
+                CommandResult(
+                    success = false,
+                    verified = false,
+                    error = "Unsupported Android action '$actionStr'. No fallback action was executed.",
+                    durationMs = System.currentTimeMillis() - startMs
                 )
-            )
-            CommandResult(
-                success = androidRes.success,
-                verified = androidRes.verified,
-                output = androidRes.outputText,
-                error = androidRes.error,
-                durationMs = androidRes.durationMs
-            )
+            } else {
+                val androidRes = localExecutor.executeCommand(
+                    AndroidCommand(
+                        commandId = cmdId,
+                        actionType = actionType,
+                        parameters = args,
+                        requiresConfirmation = args["requiresConfirmation"] as? Boolean ?: false
+                    )
+                )
+                CommandResult(
+                    success = androidRes.success,
+                    verified = androidRes.verified,
+                    output = androidRes.outputText,
+                    error = androidRes.error,
+                    durationMs = androidRes.durationMs
+                )
+            }
         } else if (controlPlaneTransport != null) {
             val uid = authRepository?.currentUser?.value?.id ?: "authenticated-user"
             val envelope = CommandEnvelope(
@@ -1365,7 +1365,8 @@ class DeviceControlRepositoryImpl(
                 actionType = toolName,
                 parameters = args,
                 creationTime = startMs,
-                expirationTime = startMs + 20_000L
+                expirationTime = startMs + 20_000L,
+                requiresConfirmation = args["requiresConfirmation"] as? Boolean ?: false
             )
             controlPlaneTransport.dispatchCommand(envelope)
         } else {
