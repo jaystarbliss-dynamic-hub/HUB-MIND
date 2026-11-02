@@ -96,6 +96,7 @@ data class ChatMessage(
     val sender: MessageSender,
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
+    val parentMessageId: String? = null,
     val isStreaming: Boolean = false,
     val targetDeviceId: String? = null,
     val toolCallName: String? = null,
@@ -119,7 +120,10 @@ enum class MemoryCategory {
     PERSONAL,
     WORKFLOW,
     FACT,
-    SCHEDULE
+    SCHEDULE,
+    HABIT,
+    INTERACTION,
+    BUSINESS
 }
 
 data class UserMemory(
