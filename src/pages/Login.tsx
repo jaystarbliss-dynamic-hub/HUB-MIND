@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { signInWithPopup, GoogleAuthProvider, getAdditionalUserInfo, signOut } from 'firebase/auth';
-import { auth } from '../firebaseConfig';
+import { signInWithPopup, signInWithCredential, GoogleAuthProvider, getAdditionalUserInfo, signOut } from 'firebase/auth';
+import { auth, GOOGLE_CLIENT_ID } from '../firebaseConfig';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Loader2, LogIn, AlertCircle, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../lib/auth';
@@ -28,7 +28,15 @@ export function Login() {
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
+      const result = window.hubMindAndroid?.isAndroidApp
+        ? await (async () => {
+            const nativeResult = await window.hubMindAndroid!.signInWithGoogle(GOOGLE_CLIENT_ID);
+            if (!nativeResult?.success || !nativeResult.idToken) {
+              throw new Error(nativeResult?.error || 'Google sign-in did not return a valid identity token.');
+            }
+            return signInWithCredential(auth, GoogleAuthProvider.credential(nativeResult.idToken));
+          })()
+        : await signInWithPopup(auth, provider);
       const isNewFirebaseUser = getAdditionalUserInfo(result)?.isNewUser === true;
 
       if (isNewFirebaseUser && !invite) {
