@@ -364,9 +364,9 @@ export function startCrossDeviceAgentLoop(
             const evidence = resObj.evidence && typeof resObj.evidence === 'object'
               ? resObj.evidence
               : undefined;
-            const resultPayloadJson = evidence
-              ? JSON.stringify({ evidence }).slice(0, 500_000)
-              : '';
+            const serializedEvidence = evidence ? JSON.stringify({ evidence }) : '';
+            // Never persist truncated JSON; malformed evidence cannot be parsed by the sender.
+            const resultPayloadJson = serializedEvidence.length <= 500_000 ? serializedEvidence : '';
             await updateDoc(cmdRef, {
               lifecycleState: ok ? 'COMPLETED' : 'FAILED',
               resultSuccess: ok,
