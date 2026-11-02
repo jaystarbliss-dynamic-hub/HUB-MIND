@@ -708,6 +708,10 @@ class JessRepositoryImpl(
 
     private var liveSession: GeminiLiveAudioSession? = null
     private var leaseListener: ListenerRegistration? = null
+    private var leaseHeartbeatJob: Job? = null
+    @Volatile private var activeSessionId: String? = null
+    private val jessLeaseDurationMs = 22_000L
+    private val jessLeaseHeartbeatMs = 8_000L
     private val currentTurnUserBuffer = StringBuilder()
     private val currentTurnJessBuffer = StringBuilder()
 
@@ -721,17 +725,24 @@ class JessRepositoryImpl(
                 .collection("private")
                 .document("jessActiveSession")
                 .addSnapshotListener { snap, _ ->
-                    if (snap != null && snap.exists()) {
-                        val active = snap.getBoolean("active") ?: false
-                        val owner = snap.getString("client")
-                        _activeLeaseClient.value = if (active) owner else null
-                    }
+                    val leaseUntil = snap?.getLong("leaseUntil") ?: 0L
+                    val status = snap?.getString("status")
+                    val owner = snap?.getString("client")
+                    _activeLeaseClient.value = if (
+                        snap != null && snap.exists() && status == "active" &&
+                        leaseUntil > System.currentTimeMillis()
+                    ) owner else null
                 }
         }
     }
 
     override suspend fun startVoiceSession(): Boolean {
-        // Unit-test path when no backendClient is wired
+        if (liveSession != null && _connectionState.value in setOf(
+                LiveConnectionState.CONNECTING,
+                LiveConnectionState.CONNECTED
+            )
+        ) return true
+
         val client = backendClient
         if (client == null) {
             _connectionState.value = LiveConnectionState.CONNECTING
@@ -758,26 +769,101 @@ class JessRepositoryImpl(
             return false
         }
 
-        // Claim the cross-device voice session lease in Firestore
-        val uid = authRepository?.currentUser?.value?.id ?: ephemeral.userId
-        if (uid.isNotBlank()) {
-            runCatching {
-                val db = client.getFirebaseFirestore().getOrNull()
-                db?.collection("users")
-                    ?.document(uid)
-                    ?.collection("private")
-                    ?.document("jessActiveSession")
-                    ?.set(
+        val uid = authRepository?.currentUser?.value?.id
+            ?: client.getFirebaseAuth().getOrNull()?.currentUser?.uid.orEmpty()
+        if (uid.isBlank() || ephemeral.userId != uid) {
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+
+        val db = client.getFirebaseFirestore().getOrNull()
+        if (db == null) {
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+        val leaseRef = db.collection("users").document(uid)
+            .collection("private").document("jessActiveSession")
+        val sessionId = "android-${UUID.randomUUID()}"
+        val now = System.currentTimeMillis()
+
+        val leaseClaimed = runCatching {
+            db.runTransaction { transaction ->
+                val current = transaction.get(leaseRef)
+                val currentSessionId = current.getString("sessionId")
+                val currentLeaseUntil = current.getLong("leaseUntil") ?: 0L
+                if (!currentSessionId.isNullOrBlank() &&
+                    currentSessionId != sessionId &&
+                    currentLeaseUntil > now
+                ) {
+                    false
+                } else {
+                    transaction.set(
+                        leaseRef,
                         mapOf(
-                            "sessionId" to ("sess-android-" + UUID.randomUUID().toString().take(8)),
+                            "sessionId" to sessionId,
                             "client" to "android",
-                            "active" to true,
-                            "updatedAt" to System.currentTimeMillis()
+                            "status" to "active",
+                            "leaseUntil" to (now + jessLeaseDurationMs),
+                            "updatedAt" to now
                         ),
                         SetOptions.merge()
                     )
-                    ?.await()
-                _activeLeaseClient.value = "android"
+                    true
+                }
+            }.await()
+        }.getOrElse {
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+
+        if (!leaseClaimed) {
+            val owner = runCatching { leaseRef.get().await().getString("client") }.getOrNull()
+            _activeLeaseClient.value = owner
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+
+        activeSessionId = sessionId
+        _activeLeaseClient.value = "android"
+        leaseHeartbeatJob?.cancel()
+        leaseHeartbeatJob = scope.launch {
+            while (isActive && activeSessionId == sessionId) {
+                delay(jessLeaseHeartbeatMs)
+                val renewed = runCatching {
+                    db.runTransaction { transaction ->
+                        val current = transaction.get(leaseRef)
+                        if (!current.exists() || current.getString("sessionId") != sessionId) {
+                            false
+                        } else {
+                            val heartbeatAt = System.currentTimeMillis()
+                            transaction.set(
+                                leaseRef,
+                                mapOf(
+                                    "client" to "android",
+                                    "status" to "active",
+                                    "leaseUntil" to (heartbeatAt + jessLeaseDurationMs),
+                                    "updatedAt" to heartbeatAt
+                                ),
+                                SetOptions.merge()
+                            )
+                            true
+                        }
+                    }.await()
+                }.getOrDefault(false)
+
+                if (!renewed) {
+                    liveSession?.shutdown()
+                    liveSession = null
+                    activeSessionId = null
+                    _activeLeaseClient.value = null
+                    _connectionState.value = LiveConnectionState.ERROR
+                    _liveState.value = JessLiveState.ERROR
+                    break
+                }
             }
         }
 
@@ -857,7 +943,11 @@ class JessRepositoryImpl(
                 }
 
                 override fun onError(message: String) {
-                    _liveState.value = JessLiveState.ERROR
+                    scope.launch {
+                        endVoiceSession()
+                        _connectionState.value = LiveConnectionState.ERROR
+                        _liveState.value = JessLiveState.ERROR
+                    }
                 }
             }
         )
@@ -867,6 +957,10 @@ class JessRepositoryImpl(
     }
 
     override suspend fun endVoiceSession() {
+        val sessionId = activeSessionId
+        activeSessionId = null
+        leaseHeartbeatJob?.cancel()
+        leaseHeartbeatJob = null
         liveSession?.shutdown()
         liveSession = null
         _liveState.value = JessLiveState.IDLE
@@ -874,24 +968,22 @@ class JessRepositoryImpl(
 
         val client = backendClient
         val uid = authRepository?.currentUser?.value?.id
-        if (client != null && !uid.isNullOrBlank()) {
+            ?: client?.getFirebaseAuth()?.getOrNull()?.currentUser?.uid
+        if (client != null && !uid.isNullOrBlank() && !sessionId.isNullOrBlank()) {
             runCatching {
-                val db = client.getFirebaseFirestore().getOrNull()
-                db?.collection("users")
-                    ?.document(uid)
-                    ?.collection("private")
-                    ?.document("jessActiveSession")
-                    ?.set(
-                        mapOf(
-                            "client" to "android",
-                            "active" to false,
-                            "updatedAt" to System.currentTimeMillis()
-                        ),
-                        SetOptions.merge()
-                    )
-                    ?.await()
+                val db = client.getFirebaseFirestore().getOrNull() ?: return@runCatching
+                val leaseRef = db.collection("users").document(uid)
+                    .collection("private").document("jessActiveSession")
+                db.runTransaction { transaction ->
+                    val current = transaction.get(leaseRef)
+                    if (current.exists() && current.getString("sessionId") == sessionId) {
+                        transaction.delete(leaseRef)
+                    }
+                    null
+                }.await()
             }
         }
+        _activeLeaseClient.value = null
     }
 
     override suspend fun setLiveState(state: JessLiveState) {
