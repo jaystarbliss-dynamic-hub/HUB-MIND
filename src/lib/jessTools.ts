@@ -32,6 +32,7 @@ import { getAllUsers } from '../services/userService';
 import { getShareUrl } from './shareLinks';
 import { sendEmail } from './googleApi';
 import { exportDocumentAsPDF, exportDocumentAsDOCX, exportDocumentAsHTML, exportDocumentAsTXT } from './documentExporter';
+import { listUserDevices, dispatchCrossDeviceCommand } from '../services/crossDeviceService';
 
 export interface JessToolDefinition {
   name: string;
@@ -251,6 +252,8 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
   { name: 'get_desktop_version_history', description: 'Fetch the complete version history of all Hub-Mind desktop applications released so far from GitHub releases (including desktop-v488, desktop-v14, desktop-v13, etc.), with download links for the Windows installer (Hub-Mind-Setup-x64.exe), release dates, file sizes, and changelogs. Use whenever asked what desktop versions have been released, what is the latest release, or what was changed in recent updates.', parameters: object({ limit: { type: 'number', description: 'Maximum number of recent releases to return (default 10)' } }) },
   { name: 'inspect_github_codebase', description: 'Inspect files and directories in the public Hub-Mind repository (Jaystarbliss-studios/HUB-MIND). Allows reading source code, package.json, documentation, Electron files, or listing directory contents. Use whenever asked about the codebase, files, or internal code structure.', parameters: object({ path: { type: 'string', description: 'File or directory path in the repository (e.g. "package.json", "electron/main.cjs", "README.md", "src/App.tsx")' }, branch: { type: 'string', description: 'Optional git branch (default: "main")' } }) },
   { name: 'open_visual_updates_panel', description: 'Open the visual Desktop Releases & Version History panel on screen for the user so they can visually view all releases, download desktop installers, and review changelogs.', parameters: object({}) },
+  { name: 'list_paired_devices', description: 'List all paired and registered Hub-Mind devices on this user account (Android phones, Windows workstations, and web sessions) with online/offline status, battery, capabilities, and permission mode.', parameters: object({}) },
+  { name: 'control_android_device', description: 'Dispatch an authenticated native action to the user’s paired Android phone via the Hub-Mind cross-device control plane and await the verified result from the phone agent. Supported actions: LAUNCH_APP, OPEN_DEEP_LINK, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, CLIPBOARD_READ, CLIPBOARD_WRITE, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, SET_VOLUME, GET_DEVICE_STATUS, GET_INSTALLED_APPS.', parameters: object({ targetDeviceId: { type: 'string', description: 'Optional specific Android deviceId from list_paired_devices; defaults to the primary online Android device.' }, actionType: { type: 'string', enum: ['LAUNCH_APP', 'OPEN_DEEP_LINK', 'TAP', 'DOUBLE_TAP', 'LONG_PRESS', 'SWIPE', 'SCROLL', 'TYPE_TEXT', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS', 'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS', 'CLIPBOARD_READ', 'CLIPBOARD_WRITE', 'GET_SCREEN_HIERARCHY', 'CAPTURE_SCREEN', 'SET_VOLUME', 'GET_DEVICE_STATUS', 'GET_INSTALLED_APPS'] }, packageName: { type: 'string' }, appName: { type: 'string' }, uri: { type: 'string' }, text: { type: 'string' }, targetText: { type: 'string' }, viewId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, startX: { type: 'number' }, startY: { type: 'number' }, endX: { type: 'number' }, endY: { type: 'number' }, direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, level: { type: 'number' } }, ['actionType']) },
   
   // Workspace Users & Directory
   { name: 'list_workspace_users', description: 'List and search colleagues, team members, and users in the Hub-Mind workspace to find usernames, roles, and contacts for sharing resources, assigning tasks, and sending schedules.', parameters: object({ query: { type: 'string', description: 'Optional search query by name, username, or email' }, limit: { type: 'number' } }) },
@@ -3202,6 +3205,55 @@ export async function executeJessTool(
             activeTasks: jessBackgroundTasks.getActiveTasksForUser(user.id),
             allTasks: jessBackgroundTasks.getTasksForUser(user.id).slice(0, 5),
             summary: jessBackgroundTasks.getActiveTasksSummary(user.id),
+          },
+        };
+      }
+
+      case 'list_paired_devices': {
+        const devices = await listUserDevices(user.id);
+        return {
+          result: {
+            success: true,
+            total: devices.length,
+            devices,
+            message: devices.length
+              ? `Found ${devices.length} registered device(s): ${devices.map(d => `${d.deviceName} (${d.platform}, ${d.status})`).join(', ')}.`
+              : 'No paired devices are registered yet for this account.',
+          },
+        };
+      }
+
+      case 'control_android_device': {
+        const actionType = String(args.actionType || '').trim().toUpperCase();
+        if (!actionType) return { result: { success: false, error: 'actionType is required.' } };
+        const devices = await listUserDevices(user.id);
+        const androidDevices = devices.filter(d => d.platform === 'ANDROID');
+        const requestedId = args.targetDeviceId ? String(args.targetDeviceId).trim() : '';
+        const target =
+          (requestedId ? androidDevices.find(d => d.deviceId === requestedId) : null) ||
+          androidDevices.find(d => d.status === 'ONLINE') ||
+          androidDevices[0];
+        if (!target) {
+          return {
+            result: {
+              success: false,
+              status: 'failed',
+              error: 'No paired Android phone is registered on your Hub-Mind account. Sign in on the Hub-Mind Android app first.',
+            },
+          };
+        }
+        const { targetDeviceId: _ignored, actionType: _ignoredAction, ...actionParams } = args || {};
+        const dispatchOut = await dispatchCrossDeviceCommand(user.id, target.deviceId, actionType, actionParams, 20_000);
+        return {
+          result: {
+            success: dispatchOut.success,
+            verified: dispatchOut.verified,
+            status: dispatchOut.success && dispatchOut.verified ? 'done_verified' : dispatchOut.success ? 'sent_unverified' : 'failed',
+            commandId: dispatchOut.commandId,
+            targetDeviceId: target.deviceId,
+            targetDeviceName: target.deviceName,
+            summary: dispatchOut.summary,
+            error: dispatchOut.error,
           },
         };
       }

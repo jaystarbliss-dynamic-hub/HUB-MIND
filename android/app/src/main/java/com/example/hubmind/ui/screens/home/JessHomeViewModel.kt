@@ -6,6 +6,8 @@ import com.example.hubmind.data.model.*
 import com.example.hubmind.data.repository.ConversationRepository
 import com.example.hubmind.data.repository.DeviceRegistryRepository
 import com.example.hubmind.data.repository.JessRepository
+import com.example.hubmind.data.repository.JessRepositoryImpl
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -13,7 +15,7 @@ data class JessHomeUiState(
     val currentConversation: Conversation? = null,
     val messages: List<ChatMessage> = emptyList(),
     val liveState: JessLiveState = JessLiveState.IDLE,
-    val connectionState: LiveConnectionState = LiveConnectionState.CONNECTED,
+    val connectionState: LiveConnectionState = LiveConnectionState.DISCONNECTED,
     val targetDevice: DeviceNode? = null,
     val isMicActive: Boolean = false,
     val currentInput: String = "",
@@ -28,9 +30,9 @@ class JessHomeViewModel(
 
     private val _uiState = MutableStateFlow(JessHomeUiState())
     val uiState: StateFlow<JessHomeUiState> = _uiState.asStateFlow()
+    private var messagesJob: Job? = null
 
     init {
-        // Collect current conversation
         viewModelScope.launch {
             conversationRepository.currentConversation.collect { conv ->
                 _uiState.value = _uiState.value.copy(currentConversation = conv)
@@ -38,21 +40,24 @@ class JessHomeViewModel(
             }
         }
 
-        // Collect Jess live state
         viewModelScope.launch {
             jessRepository.liveState.collect { state ->
-                _uiState.value = _uiState.value.copy(liveState = state)
+                val active = state == JessLiveState.LISTENING ||
+                    state == JessLiveState.SPEAKING ||
+                    state == JessLiveState.THINKING
+                _uiState.value = _uiState.value.copy(
+                    liveState = state,
+                    isMicActive = if (state == JessLiveState.IDLE || state == JessLiveState.ERROR) false else _uiState.value.isMicActive || active
+                )
             }
         }
 
-        // Collect connection state
         viewModelScope.launch {
             jessRepository.connectionState.collect { conn ->
                 _uiState.value = _uiState.value.copy(connectionState = conn)
             }
         }
 
-        // Collect target device
         viewModelScope.launch {
             deviceRegistryRepository.currentTargetDevice.collect { device ->
                 _uiState.value = _uiState.value.copy(targetDevice = device)
@@ -61,7 +66,8 @@ class JessHomeViewModel(
     }
 
     private fun loadMessages(conversationId: String) {
-        viewModelScope.launch {
+        messagesJob?.cancel()
+        messagesJob = viewModelScope.launch {
             conversationRepository.getMessages(conversationId).collect { msgList ->
                 _uiState.value = _uiState.value.copy(messages = msgList)
             }
@@ -77,7 +83,10 @@ class JessHomeViewModel(
         _uiState.value = _uiState.value.copy(isMicActive = next)
         viewModelScope.launch {
             if (next) {
-                jessRepository.startVoiceSession()
+                val started = jessRepository.startVoiceSession()
+                if (!started) {
+                    _uiState.value = _uiState.value.copy(isMicActive = false)
+                }
             } else {
                 jessRepository.endVoiceSession()
             }
@@ -85,31 +94,30 @@ class JessHomeViewModel(
     }
 
     fun sendPrompt(customPrompt: String? = null) {
-        val text = customPrompt ?: _uiState.value.currentInput
+        val text = (customPrompt ?: _uiState.value.currentInput).trim()
         if (text.isBlank()) return
 
-        val conv = _uiState.value.currentConversation ?: return
         val target = _uiState.value.targetDevice?.deviceId
-
         _uiState.value = _uiState.value.copy(currentInput = "", isSending = true)
 
         viewModelScope.launch {
-            // Post user message
+            val conv = _uiState.value.currentConversation
+                ?: conversationRepository.createConversation(text.take(40))
+
             conversationRepository.postUserMessage(conv.id, text, target)
 
-            // Query Jess
             val responseFlow = jessRepository.sendPrompt(text, target)
             var responseText = ""
             responseFlow.collect { chunk ->
                 responseText = chunk
             }
 
-            // Append Jess response
+            val impl = jessRepository as? JessRepositoryImpl
             conversationRepository.appendJessResponse(
                 conversationId = conv.id,
                 text = responseText,
-                toolName = if (text.contains("open", true) || text.contains("launch", true) || text.contains("pc", true)) "device_action" else null,
-                status = "done_verified"
+                toolName = impl?.lastExecutedToolName,
+                status = impl?.lastExecutionStatus
             )
 
             _uiState.value = _uiState.value.copy(isSending = false)

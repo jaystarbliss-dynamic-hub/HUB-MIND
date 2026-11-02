@@ -1,11 +1,16 @@
 package com.example.hubmind.ui.screens.settings
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.hubmind.agent.*
 import com.example.hubmind.data.model.User
 import com.example.hubmind.data.repository.*
+import com.example.hubmind.data.updater.AppUpdateManifest
+import com.example.hubmind.data.updater.HubMindUpdateChecker
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -16,18 +21,20 @@ data class SettingsUiState(
     val confirmHighRiskSpoken: Boolean = true,
     val memoryEnabled: Boolean = true,
     val contextScannerEnabled: Boolean = true,
-    val hasAudioPermission: Boolean = true,
-    val hasNotificationPermission: Boolean = true,
+    val hasAudioPermission: Boolean = false,
+    val hasNotificationPermission: Boolean = false,
     val hasOverlayPermission: Boolean = false,
     val isAccessibilityConnected: Boolean = false,
     val isAdvancedControlAvailable: Boolean = false,
     val isForegroundSessionActive: Boolean = false,
-    val batteryPercent: Int = 88,
+    val batteryPercent: Int = 100,
     val systemVolume: Int = 75,
-    val activeLeaseOwner: String? = "android",
+    val activeLeaseOwner: String? = null,
     val serverBaseUrl: String = "https://hub-mind.netlify.app",
     val testActionResult: String? = null,
-    val actionHistory: List<AndroidActionResult> = emptyList()
+    val actionHistory: List<AndroidActionResult> = emptyList(),
+    val updateStatusMessage: String? = null,
+    val availableUpdate: AppUpdateManifest? = null
 )
 
 class SettingsViewModel(
@@ -40,11 +47,14 @@ class SettingsViewModel(
 
     private val actionExecutor = AndroidUiActionExecutor(context)
     private val advancedProvider: AdvancedDeviceControlProvider = ShizukuDeviceControlProvider()
+    private val updateChecker = HubMindUpdateChecker(context)
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     init {
+        (permissionStatusRepository as? PermissionStatusRepositoryImpl)?.refreshFromSystem()
+
         viewModelScope.launch {
             authRepository.currentUser.collect { user ->
                 _uiState.value = _uiState.value.copy(user = user)
@@ -113,14 +123,25 @@ class SettingsViewModel(
         _uiState.value = _uiState.value.copy(contextScannerEnabled = enabled)
     }
 
-    fun toggleOverlayPermission() {
-        val next = !_uiState.value.hasOverlayPermission
-        permissionStatusRepository.updatePermissions(
-            audio = _uiState.value.hasAudioPermission,
-            notifications = _uiState.value.hasNotificationPermission,
-            overlay = next,
-            accessibility = _uiState.value.isAccessibilityConnected
-        )
+    fun openAccessibilitySettings(context: Context) {
+        runCatching {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+    }
+
+    fun openOverlayPermissionSettings(context: Context) {
+        runCatching {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
     }
 
     fun toggleForegroundSession(context: Context) {
@@ -144,6 +165,24 @@ class SettingsViewModel(
                 testActionResult = if (result.success) "SUCCESS: ${result.outputText}" else "ERROR: ${result.error}",
                 actionHistory = listOf(result) + _uiState.value.actionHistory.take(10)
             )
+        }
+    }
+
+    fun checkForAppUpdates() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(updateStatusMessage = "Checking https://hub-mind.netlify.app/api/app-version.json ...")
+            val manifest = updateChecker.checkForUpdate()
+            if (manifest != null) {
+                _uiState.value = _uiState.value.copy(
+                    availableUpdate = manifest,
+                    updateStatusMessage = "Update v${manifest.versionName} (build ${manifest.versionCode}) available: ${manifest.releaseNotes}"
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    availableUpdate = null,
+                    updateStatusMessage = "Hub-Mind Android v2.4.0 (build 240) is up to date."
+                )
+            }
         }
     }
 

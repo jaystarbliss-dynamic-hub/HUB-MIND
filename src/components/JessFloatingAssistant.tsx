@@ -17,6 +17,7 @@ import { scanCurrentPageContext, ContextActionSuggestion } from '../services/con
 import { startJessWorkspaceCache } from '../services/jessWorkspaceCache';
 import { hydrateGoogleCalendarConnection, isGoogleCalendarConnected, refreshGoogleCalendarEvents } from '../lib/googleCalendar';
 import { JessPcWakeListener, isJessPcWakeSupported, isJessInstalledApp } from '../services/jessWakeListener';
+import { startCrossDeviceAgentLoop } from '../services/crossDeviceService';
 import { 
   Activity, 
   Lightbulb, 
@@ -470,6 +471,25 @@ export function JessFloatingAssistant() {
   useEffect(() => {
     if (!profile) return;
     const stopCache = startJessWorkspaceCache(profile);
+    const stopCrossDevice = startCrossDeviceAgentLoop(profile, async (toolName, toolArgs) => {
+      const execution = await runJessToolExecution(
+        {
+          toolName,
+          args: toolArgs || {},
+          userId: profile.id,
+        },
+        executionId =>
+          executeJessTool(
+            toolName,
+            toolArgs || {},
+            profile,
+            name => void updatePreferredName(name),
+            jessPreferencesRef.current.contextEnabled === false ? undefined : resolveJessContext(locationPathRef.current),
+            executionId
+          )
+      );
+      return execution.value;
+    });
     let cancelled = false;
 
     void (async () => {
@@ -497,6 +517,7 @@ export function JessFloatingAssistant() {
 
     return () => {
       cancelled = true;
+      stopCrossDevice();
       stopCache();
     };
   }, [profile?.id, profile?.role]);

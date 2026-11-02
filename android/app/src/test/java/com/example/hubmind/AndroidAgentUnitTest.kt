@@ -56,4 +56,62 @@ class AndroidAgentUnitTest {
         assertEquals("Shizuku ADB Provider", provider.providerName)
         assertFalse(provider.isAvailable)
     }
+
+    @Test
+    fun testArtemisUiObservationIndexingAndHitTest() {
+        val rootTree = UiNodeInfo(
+            id = "root",
+            className = "android.widget.FrameLayout",
+            packageName = "com.aistudio.hubmind.wzyqkp",
+            boundsInScreen = NodeBounds(0, 0, 1080, 2400),
+            children = listOf(
+                UiNodeInfo(
+                    id = "card",
+                    className = "android.view.ViewGroup",
+                    packageName = "com.aistudio.hubmind.wzyqkp",
+                    isClickable = true,
+                    text = "Outer Card",
+                    boundsInScreen = NodeBounds(40, 200, 1040, 800),
+                    children = listOf(
+                        UiNodeInfo(
+                            id = "btn_inner",
+                            className = "android.widget.Button",
+                            packageName = "com.aistudio.hubmind.wzyqkp",
+                            isClickable = true,
+                            text = "Confirm Action",
+                            boundsInScreen = NodeBounds(100, 300, 400, 420)
+                        ),
+                        UiNodeInfo(
+                            id = "tiny_invisible",
+                            className = "android.view.View",
+                            packageName = "com.aistudio.hubmind.wzyqkp",
+                            isClickable = true,
+                            text = "ZeroSize",
+                            boundsInScreen = NodeBounds(0, 0, 2, 2)
+                        )
+                    )
+                )
+            )
+        )
+
+        val indexed = ArtemisUiObservationEngine.extractIndexedElements(
+            root = rootTree,
+            screenWidth = 1080,
+            screenHeight = 2400
+        )
+
+        // Tiny element (2x2) is filtered out; Outer Card and Confirm Action remain
+        assertEquals(2, indexed.size)
+        assertEquals("Outer Card", indexed[0].label)
+        assertEquals("Confirm Action", indexed[1].label)
+
+        // Smallest covering area wins at (250, 350) -> "Confirm Action" button
+        val hit = ArtemisUiObservationEngine.findElementAtPoint(indexed, 250, 350)
+        assertNotNull(hit)
+        assertEquals("Confirm Action", hit?.label)
+
+        val summary = ArtemisUiObservationEngine.formatElementIndexSummary(indexed)
+        assertTrue(summary.contains("[1] Outer Card"))
+        assertTrue(summary.contains("[2] Confirm Action"))
+    }
 }

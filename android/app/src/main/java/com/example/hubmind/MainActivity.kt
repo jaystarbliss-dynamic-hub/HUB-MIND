@@ -1,17 +1,19 @@
 package com.example.hubmind
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.hubmind.di.ServiceLocator
 import com.example.hubmind.ui.components.HubMindBottomBar
 import com.example.hubmind.ui.components.HubMindNavDestination
@@ -29,22 +31,31 @@ import com.example.hubmind.ui.theme.HubMindTheme
 import com.example.hubmind.ui.theme.Slate950
 
 class MainActivity : ComponentActivity() {
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        ServiceLocator.permissionStatusRepository.refreshFromSystem()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ServiceLocator.initialize(applicationContext)
         enableEdgeToEdge()
+        requestEssentialRuntimePermissions()
 
         setContent {
             HubMindTheme {
-                var isAuthenticated by remember { mutableStateOf(true) }
+                val isSessionValid by ServiceLocator.authRepository.isSessionValid.collectAsState()
                 var currentTab by remember { mutableStateOf(HubMindNavDestination.JESS) }
 
-                if (!isAuthenticated) {
+                if (!isSessionValid) {
                     val authViewModel = remember {
                         AuthViewModel(ServiceLocator.authRepository)
                     }
                     AuthScreen(
                         viewModel = authViewModel,
-                        onAuthSuccess = { isAuthenticated = true }
+                        onAuthSuccess = { }
                     )
                 } else {
                     BackHandler(enabled = currentTab != HubMindNavDestination.JESS) {
@@ -107,7 +118,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     SettingsScreen(
                                         viewModel = settingsViewModel,
-                                        onSignOut = { isAuthenticated = false }
+                                        onSignOut = { }
                                     )
                                 }
                             }
@@ -115,6 +126,23 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ServiceLocator.permissionStatusRepository.refreshFromSystem()
+    }
+
+    private fun requestEssentialRuntimePermissions() {
+        val perms = buildList {
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        runCatching {
+            permissionLauncher.launch(perms.toTypedArray())
         }
     }
 }

@@ -62,6 +62,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/devices/*"
+  to = "/.netlify/functions/devices"
+  status = 200
+
+[[redirects]]
+  from = "/api/devices"
+  to = "/.netlify/functions/devices"
+  status = 200
+
+[[redirects]]
   from = "/api/google-oauth-start"
   to = "/.netlify/functions/google-oauth-start"
   status = 200

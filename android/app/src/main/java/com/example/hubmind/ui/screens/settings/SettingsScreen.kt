@@ -65,7 +65,6 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            // User Profile Card
             state.user?.let { user ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -110,7 +109,6 @@ fun SettingsScreen(
                 }
             }
 
-            // Section: Android Agent Status & Active Control Session
             SettingsSectionHeader(title = "Native Android Device Agent Status")
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -119,7 +117,6 @@ fun SettingsScreen(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    // Active Foreground Control Session Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -138,34 +135,58 @@ fun SettingsScreen(
 
                     Divider(color = Slate800, thickness = 1.dp)
 
-                    // Accessibility Service Connection Status
                     PermissionRow(
                         icon = Icons.Filled.AccessibilityNew,
                         title = "Hub-Mind Accessibility Service",
-                        subtitle = "Allows Jess to dumper UI nodes & perform taps, swipes, and text entry",
+                        subtitle = "Allows Jess to inspect UI nodes & perform taps, swipes, and text entry",
                         isGranted = state.isAccessibilityConnected
                     )
 
-                    // Guided setup instructions if accessibility is disconnected
                     if (!state.isAccessibilityConnected) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = Amber400.copy(alpha = 0.12f),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Amber400.copy(alpha = 0.3f))
                         ) {
-                            Text(
-                                text = "To enable: Go to Android Settings > Accessibility > Installed / Downloaded Apps > Enable 'Hub-Mind Agent'.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Amber400,
-                                modifier = Modifier.padding(10.dp),
-                                fontSize = 12.sp
-                            )
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "To enable: Open Android Accessibility Settings > Installed Apps > Enable 'Hub-Mind'.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Amber400,
+                                    fontSize = 12.sp
+                                )
+                                Button(
+                                    onClick = { viewModel.openAccessibilitySettings(context) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Teal600, contentColor = Slate950)
+                                ) {
+                                    Text("Open Accessibility Settings", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
 
                     Divider(color = Slate800, thickness = 1.dp)
 
-                    // Advanced Control Provider Status (Shizuku / ADB)
+                    PermissionRow(
+                        icon = Icons.Filled.Layers,
+                        title = "Display Over Other Apps (Overlay)",
+                        subtitle = "Allows Jess floating assistant orb over external apps",
+                        isGranted = state.hasOverlayPermission
+                    )
+
+                    if (!state.hasOverlayPermission) {
+                        OutlinedButton(
+                            onClick = { viewModel.openOverlayPermissionSettings(context) },
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Slate700)
+                        ) {
+                            Text("Configure Overlay Permission", fontSize = 12.sp, color = Slate200)
+                        }
+                    }
+
+                    Divider(color = Slate800, thickness = 1.dp)
+
                     PermissionRow(
                         icon = Icons.Filled.DeveloperMode,
                         title = "Advanced Control Bridge (Shizuku / ADB)",
@@ -175,7 +196,6 @@ fun SettingsScreen(
                 }
             }
 
-            // Section: Test Local Android Actions
             SettingsSectionHeader(title = "Local Action Test Controls")
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -232,7 +252,6 @@ fun SettingsScreen(
                         }
                     }
 
-                    // Test Action Result Banner
                     state.testActionResult?.let { resultText ->
                         Surface(
                             shape = RoundedCornerShape(8.dp),
@@ -251,8 +270,7 @@ fun SettingsScreen(
                 }
             }
 
-            // Section: Cross-Device Control & Permission Mode
-            SettingsSectionHeader(title = "Cross-Device Control Policies")
+            SettingsSectionHeader(title = "Cross-Device Control Policies & Updates")
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -297,6 +315,30 @@ fun SettingsScreen(
                             onCheckedChange = viewModel::toggleFullControl,
                             colors = SwitchDefaults.colors(checkedThumbColor = Teal400, checkedTrackColor = Teal900)
                         )
+                    }
+
+                    Divider(color = Slate800, thickness = 1.dp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Hub-Mind Android v2.4.0 (Build 240)", style = MaterialTheme.typography.titleSmall, color = Slate100, fontWeight = FontWeight.SemiBold)
+                            Text("Canonical Project: gen-lang-client-0197530608", style = MaterialTheme.typography.bodySmall, color = Slate400)
+                        }
+                        OutlinedButton(
+                            onClick = { viewModel.checkForAppUpdates() },
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Slate700)
+                        ) {
+                            Text("Check Updates", fontSize = 11.sp, color = Teal400)
+                        }
+                    }
+
+                    state.updateStatusMessage?.let { msg ->
+                        Text(msg, style = MaterialTheme.typography.bodySmall, color = Slate300)
                     }
                 }
             }
@@ -350,4 +392,3 @@ fun PermissionRow(
         }
     }
 }
-

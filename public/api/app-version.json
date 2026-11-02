@@ -1,0 +1,8 @@
+{
+  "versionCode": 240,
+  "versionName": "2.4.0",
+  "applicationId": "com.aistudio.hubmind.wzyqkp",
+  "apkUrl": "https://hub-mind.netlify.app/downloads/hubmind-v2.4.0.apk",
+  "releaseNotes": "Unified Hub-Mind v2.4.0 Android companion with canonical Firebase Auth/Firestore, Gemini Live voice via /api/live-token, Accessibility UI automation, and two-way Windows cross-device control.",
+  "minSupportedVersionCode": 240
+}

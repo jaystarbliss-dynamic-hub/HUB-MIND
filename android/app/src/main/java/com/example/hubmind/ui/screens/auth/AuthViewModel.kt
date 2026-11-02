@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class AuthUiState(
-    val email: String = "johnrufai242@gmail.com",
-    val password: String = "••••••••••••",
+    val email: String = "",
+    val password: String = "",
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val user: User? = null
@@ -41,9 +41,15 @@ class AuthViewModel(
     }
 
     fun signIn() {
+        val email = _uiState.value.email.trim()
+        val password = _uiState.value.password
+        if (email.isBlank() || password.isBlank()) {
+            _uiState.value = _uiState.value.copy(errorMessage = "Please enter both your Hub-Mind email and password.")
+            return
+        }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            val result = authRepository.signIn(_uiState.value.email, _uiState.value.password)
+            val result = authRepository.signIn(email, password)
             result.fold(
                 onSuccess = { user ->
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)
@@ -58,10 +64,10 @@ class AuthViewModel(
         }
     }
 
-    fun signInWithGoogle() {
+    fun signInWithGoogleIdToken(idToken: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            val result = authRepository.signInWithGoogle("mock-google-token")
+            val result = authRepository.signInWithGoogle(idToken)
             result.fold(
                 onSuccess = { user ->
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)
@@ -74,5 +80,12 @@ class AuthViewModel(
                 }
             )
         }
+    }
+
+    fun onGoogleSignInError(message: String) {
+        _uiState.value = _uiState.value.copy(
+            isLoading = false,
+            errorMessage = message
+        )
     }
 }

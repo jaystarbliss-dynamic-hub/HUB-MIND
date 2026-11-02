@@ -40,6 +40,33 @@ service cloud.firestore {
       match /dailyReports/{id} { allow read, write: if self(userId) || admin(); }
       match /weeklyReports/{id} { allow read, write: if self(userId) || admin(); }
       match /jessTasks/{id} { allow read, write: if self(userId) || admin(); }
+      match /devices/{deviceId} {
+        allow read: if (self(userId) && member()) || admin();
+        allow create, update: if ((self(userId) && member()) || admin())
+          && request.resource.data.deviceId == deviceId
+          && request.resource.data.platform in ['ANDROID', 'WINDOWS', 'WEB', 'PWA']
+          && request.resource.data.deviceName is string
+          && request.resource.data.deviceName.size() <= 160;
+        allow delete: if (self(userId) && member()) || admin();
+      }
+      match /deviceCommands/{commandId} {
+        allow read: if (self(userId) && member()) || admin();
+        allow create: if ((self(userId) && member()) || admin())
+          && request.resource.data.commandId == commandId
+          && request.resource.data.issuingUserId == userId
+          && request.resource.data.sourceDeviceId is string
+          && request.resource.data.targetDeviceId is string
+          && request.resource.data.actionType is string
+          && request.resource.data.lifecycleState in ['CREATED', 'DISPATCHED'];
+        allow update: if ((self(userId) && member()) || admin())
+          && request.resource.data.commandId == resource.data.commandId
+          && request.resource.data.issuingUserId == resource.data.issuingUserId
+          && request.resource.data.sourceDeviceId == resource.data.sourceDeviceId
+          && request.resource.data.targetDeviceId == resource.data.targetDeviceId
+          && request.resource.data.actionType == resource.data.actionType
+          && request.resource.data.lifecycleState in ['DISPATCHED', 'ACCEPTED', 'EXECUTING', 'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'];
+        allow delete: if (self(userId) && member()) || admin();
+      }
     }
     match /invitations/{id} {
       allow get: if admin() || (signedIn() && resource.data.email == request.auth.token.email);

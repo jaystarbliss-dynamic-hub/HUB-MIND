@@ -6,3 +6,9 @@ test('Firestore has a deny-by-default boundary',()=>assert.match(rules,/match \/
 test('workspace resources require active membership',()=>{ for(const name of ['tasks','documents','projects','clients','meetings','followUps','knowledge']) assert.match(rules,new RegExp(`match /${name}/\\{id\\}\\s*\\{[^}]*member\\(\\)`, 's')); });
 test('invitation acceptance is bound to the authenticated email and uid',()=>{ assert.match(rules,/acceptedUid == request\.auth\.uid/); assert.match(rules,/email == request\.auth\.token\.email/); });
 test('recurring tasks are owner/admin controlled',()=>assert.match(rules,/match \/recurringTaskTemplates\/\{id\}/));
+test('device registry and cross-device command envelopes are scoped to the authenticated active user',()=>{
+  assert.match(rules,/match \/devices\/\{deviceId\}/);
+  assert.match(rules,/request\.resource\.data\.deviceId == deviceId/);
+  assert.match(rules,/match \/deviceCommands\/\{commandId\}/);
+  assert.match(rules,/request\.resource\.data\.issuingUserId == userId/);
+});

@@ -17,7 +17,7 @@ export function PublicHome() {
   const [inviteValue, setInviteValue] = useState('');
   const [error, setError] = useState('');
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [release, setRelease] = useState<{ url: string; name: string; version: string; extensionUrl?: string } | null>(null);
+  const [release, setRelease] = useState<{ url: string; name: string; version: string; extensionUrl?: string; apkUrl?: string; apkName?: string } | null>(null);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [installHelpOpen, setInstallHelpOpen] = useState(false);
 
@@ -41,7 +41,17 @@ export function PublicHome() {
       .then(data => {
         const asset = (data.assets || []).find((item: any) => /\.exe$/i.test(item.name));
         const extension = (data.assets || []).find((item: any) => /Jess-Chrome-Extension\.zip$/i.test(item.name));
-        if (active && asset) setRelease({ url: asset.browser_download_url, name: asset.name, version: data.tag_name || 'Latest', extensionUrl: extension?.browser_download_url });
+        const apk = (data.assets || []).find((item: any) => /\.apk$/i.test(item.name));
+        if (active && (asset || apk)) {
+          setRelease({
+            url: asset?.browser_download_url || '',
+            name: asset?.name || '',
+            version: data.tag_name || 'v2.4.0',
+            extensionUrl: extension?.browser_download_url,
+            apkUrl: apk?.browser_download_url,
+            apkName: apk?.name,
+          });
+        }
       })
       .catch(() => { if (active) setRelease(null); });
     return () => { active = false; };
@@ -163,13 +173,18 @@ export function PublicHome() {
         <section id="desktop" className="hm-desktop-section hm-reveal">
           <div className="hm-desktop-copy"><div className="hm-eyebrow">TAKE IT WITH YOU</div><h2>Your workspace.<br/><span>At home on Windows.</span></h2><p>{release ? 'The Hub-Mind Windows desktop installer is available now, with a dedicated window and a persistent Jess companion.' : 'A dedicated Windows desktop experience is being prepared. The installer will appear here as soon as a release is published and verified.'}</p>
           <div className="hm-desktop-points"><span><Check size={15}/> Dedicated desktop window</span><span><Check size={15}/> Floating Jess companion</span><span><Check size={15}/> Controlled system integrations</span></div>
-          {release ? <a className="hm-button hm-button-primary hm-button-large" href={release.url}><Download size={17}/> Download for Windows <span className="hm-version">{release.version}</span></a> : <button className="hm-button hm-button-disabled hm-button-large" disabled title="A verified Windows installer has not been published yet"><Download size={17}/> Windows app coming soon</button>}
+          {release?.url ? <a className="hm-button hm-button-primary hm-button-large" href={release.url}><Download size={17}/> Download for Windows <span className="hm-version">{release.version}</span></a> : <button className="hm-button hm-button-disabled hm-button-large" disabled title="A verified Windows installer has not been published yet"><Download size={17}/> Windows app coming soon</button>}
           <div className="hm-install-actions">
+            {release?.apkUrl ? (
+              <a className="hm-button hm-button-outline hm-button-large" href={release.apkUrl}><Download size={16}/> Download Android APK <span className="hm-version">v2.4.0</span></a>
+            ) : (
+              <a className="hm-button hm-button-outline hm-button-large" href="/downloads/hubmind-v2.4.0.apk"><Download size={16}/> Android Companion APK (v2.4.0)</a>
+            )}
             <button className="hm-button hm-button-outline hm-button-large" onClick={installWebApp}><Download size={16}/> Install Chrome app</button>
             <button type="button" className="hm-button hm-button-outline hm-button-large" onClick={() => window.dispatchEvent(new CustomEvent('hubmind:open-updates-panel'))}><Layers size={16}/> View Version History</button>
             <a className="hm-text-link" href={release?.extensionUrl || "https://github.com/Jaystarbliss-studios/HUB-MIND/tree/main/chrome-extension"} target="_blank" rel="noreferrer">Get Jess Chrome extension <ArrowUpRight size={15}/></a>
           </div>
-          {release && <small className="hm-release-name">{release.name}</small>}
+          {release?.name && <small className="hm-release-name">{release.name}</small>}
           </div>
           <div className="hm-desktop-art">
             <div className="hm-monitor">
@@ -194,14 +209,15 @@ export function PublicHome() {
           <div className="hm-desktop-copy">
             <div className="hm-eyebrow">GETTING STARTED</div>
             <h2>Set up Hub-Mind.<br/><span>Make it yours.</span></h2>
-            <p>Use Hub-Mind on the web, install it as a Chrome app, or use the Windows desktop client. Sign in with the account invited to your workspace to keep your work and Jess preferences connected.</p>
+            <p>Use Hub-Mind on the web, install it as a Chrome app, or pair the Windows desktop client and native Android companion app. Sign in with the account invited to your workspace to keep your work, Jess voice memory, and cross-device controls connected.</p>
             <div className="hm-desktop-points">
               <span><Check size={15}/> <strong>Web:</strong> Open Hub-Mind and sign in with your invited account.</span>
               <span><Check size={15}/> <strong>Chrome app:</strong> Use the browser's Install Hub-Mind option, then launch it from your apps.</span>
               <span><Check size={15}/> <strong>Chrome extension:</strong> Download the ZIP, extract it, open Chrome → Extensions → Manage extensions, enable Developer mode, then choose Load unpacked and select the extracted folder. Review its permissions before enabling it.</span>
               {release?.extensionUrl && <a className="hm-button hm-button-quiet" href={release.extensionUrl}><Download size={15}/> Download Jess Chrome extension</a>}
               <span><Check size={15}/> <strong>Windows:</strong> Download the installer, run it, then open Hub-Mind from the Start menu. Windows may show a publisher warning if the release is unsigned.</span>
-              <span><Check size={15}/> <strong>Jess:</strong> Allow microphone access for voice use. Configure memory, personalization, web research, and desktop permissions in Jess settings.</span>
+              <span><Check size={15}/> <strong>Android (v2.4.0, build 240):</strong> Install the Hub-Mind APK (`com.aistudio.hubmind.wzyqkp`), sign in with your workspace account, grant Microphone and Notification permissions, and enable the Hub-Mind Accessibility Service in Android Settings → Accessibility to allow Jess to inspect UI hierarchy and execute two-way phone/Windows commands.</span>
+              <span><Check size={15}/> <strong>Jess:</strong> Allow microphone access for voice use. Configure memory, personalization, web research, and cross-device permissions in Jess settings.</span>
             </div>
             <button className="hm-button hm-button-primary hm-button-large" onClick={openWorkspace}>Sign in and get started <ArrowRight size={16}/></button>
           </div>

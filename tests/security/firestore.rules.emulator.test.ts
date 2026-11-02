@@ -124,4 +124,45 @@ if (!hasEmulator) {
     const db = env.unauthenticatedContext().firestore();
     await assertFails(db.collection('documents').doc('doc1').get());
   });
+
+  test('active member can register their own device and dispatch/update device commands, while other users and suspended users are denied', async () => {
+    const ownerDb = env.authenticatedContext('owner', { email: 'owner@example.com' }).firestore();
+    const readerDb = env.authenticatedContext('reader', { email: 'reader@example.com' }).firestore();
+    const suspendedDb = env.authenticatedContext('suspended', { email: 'suspended@example.com' }).firestore();
+
+    await assertSucceeds(ownerDb.collection('users').doc('owner').collection('devices').doc('android-01').set({
+      deviceId: 'android-01',
+      deviceName: 'Pixel 8 Pro',
+      platform: 'ANDROID',
+      status: 'ONLINE',
+      lastSeen: Date.now(),
+    }));
+    await assertFails(readerDb.collection('users').doc('owner').collection('devices').doc('android-01').get());
+    await assertFails(suspendedDb.collection('users').doc('suspended').collection('devices').doc('android-02').set({
+      deviceId: 'android-02',
+      deviceName: 'Phone',
+      platform: 'ANDROID',
+      status: 'ONLINE',
+      lastSeen: Date.now(),
+    }));
+
+    await assertSucceeds(ownerDb.collection('users').doc('owner').collection('deviceCommands').doc('cmd-01').set({
+      commandId: 'cmd-01',
+      issuingUserId: 'owner',
+      sourceDeviceId: 'android-01',
+      targetDeviceId: 'win-01',
+      actionType: 'launch_windows_application',
+      lifecycleState: 'DISPATCHED',
+      issuedAt: Date.now(),
+      expirationTime: Date.now() + 30000,
+    }));
+    await assertSucceeds(ownerDb.collection('users').doc('owner').collection('deviceCommands').doc('cmd-01').update({
+      lifecycleState: 'COMPLETED',
+      resultSuccess: true,
+      resultVerified: true,
+    }));
+    await assertFails(readerDb.collection('users').doc('owner').collection('deviceCommands').doc('cmd-01').update({
+      lifecycleState: 'COMPLETED',
+    }));
+  });
 }

@@ -1,40 +1,25 @@
-# Third-Party Notices & Open Source Attribution
+# Third-Party Notices — Hub-Mind Android
 
-## Google ARTEMIS (Accessibility & UI Automation Patterns)
+This Android application incorporates open-source libraries and adapted architectural components under the following licenses:
 
-This software incorporates adapted UI hierarchy inspection, gesture dispatching, and command execution patterns from **ARTEMIS (Automated Reasoning & UI Testing Engine)** created by Google.
+## 1. Google ARTEMIS (Adapted UI Observation, Element Filtering & Hit-Testing)
+- **Source**: https://github.com/google/artemis (`artemis/utils/ui_filter.py`, `artemis/utils/element_hit_test.py`, `packages/artemis-accessibility-helper`)
+- **Copyright**: Copyright 2026 Google LLC
+- **License**: Apache License, Version 2.0 (`https://www.apache.org/licenses/LICENSE-2.0`)
+- **Integration**: Adapted into native Kotlin in `com.example.hubmind.agent.ArtemisUiObservationEngine` and `com.example.hubmind.agent.HubMindAccessibilityService` for on-device UI bounds clipping, minimum-size filtering, indexed element extraction, and smallest-covering-area coordinate hit-testing.
 
-- **Source Repository**: https://github.com/google/artemis
-- **Original Packages**:
-  - `packages/artemis-accessibility-helper/app/src/main/java/com/artemis/helper/ArtemisAccessibilityService.java`
-  - `packages/artemis-accessibility-helper/app/src/main/java/com/artemis/helper/GestureController.java`
-  - `packages/artemis-accessibility-helper/app/src/main/java/com/artemis/helper/HierarchyDumper.java`
-  - `packages/artemis-accessibility-helper/app/src/main/java/com/artemis/helper/CommandServer.java`
+## 2. Android Jetpack & Compose (Google)
+- **Packages**: `androidx.core:core-ktx`, `androidx.activity:activity-compose`, `androidx.compose.*`, `androidx.lifecycle.*`, `androidx.navigation:navigation-compose`
 - **License**: Apache License, Version 2.0
 
-```text
-                                 Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
+## 3. Firebase Android SDK & Google Play Services Auth (Google)
+- **Packages**: `com.google.firebase:firebase-bom`, `firebase-auth`, `firebase-firestore`, `com.google.android.gms:play-services-auth`
+- **License**: Apache License, Version 2.0 / Google APIs Terms of Service
 
-   Copyright (c) Google LLC
+## 4. Square OkHttp
+- **Package**: `com.squareup.okhttp3:okhttp:4.12.0`
+- **License**: Apache License, Version 2.0
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-```
-
----
-
-## Jetpack & Android Open Source Project (AOSP)
-
-- **Components**: AndroidX Core, Compose, Lifecycle, Material 3, MediaProjection, Accessibility APIs
+## 5. Kotlin Coroutines (JetBrains)
+- **Packages**: `org.jetbrains.kotlinx:kotlinx-coroutines-core`, `kotlinx-coroutines-android`, `kotlinx-coroutines-play-services`
 - **License**: Apache License, Version 2.0

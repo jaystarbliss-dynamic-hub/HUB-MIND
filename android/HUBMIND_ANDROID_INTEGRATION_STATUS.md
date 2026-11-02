@@ -1,87 +1,27 @@
-# Hub-Mind Android Integration Status & Inspection Report
+# Hub-Mind Android — Complete Technical Audit & Integration Status
 
-## 1. Components Inspected
+## 1. Repository Audit Summary (Before vs. After)
 
-### 1.1 Desktop & Electron Architecture
-- `electron/main.cjs`: Inspected the multi-window architecture (`mainWindow`, `companionWindow`, `transcriptOverlayWindow`), single-instance locking, IPC channels (`hubmind:native-action`, `hubmind:full-control-start`, `hubmind:set-companion-transcript-visible`), and preference persistence.
-- `electron/agentBridge.cjs`: Inspected the persistent PowerShell sidecar runner (`jess-agent.ps1`), process buffering, 16 MB JSON protocol boundaries, audit logger (`jess-agent-runtime.jsonl`), and startup timeout management.
-- `electron/preload.cjs`: Inspected context-isolated bridge functions, security origin verification, and display-media screen capture delegation.
-- `src/shared/jessNativeToolNames.ts`: Inspected 52 native Windows tool names (window management, mouse/keyboard automation, clipboard, audio/volume, storage scanning, process monitoring, Chrome native extension bridge).
+| Subsystem | Initial State Found in `/android` | Repaired & Integrated Production Implementation |
+| :--- | :--- | :--- |
+| **Firebase Project & Database** | Disconnected; no Firebase SDK in `build.gradle.kts`, no `/api/config` bootstrap. | Dynamically fetches `/api/config` (`HubMindBackendClient.kt`), rejects placeholder keys (`dev-api-key`/`test-api-key`), and initializes `FirebaseApp`, `FirebaseAuth`, and `FirebaseFirestore` against canonical project `gen-lang-client-0197530608` and database `ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430`. |
+| **Authentication & Session Persistence** | `AuthRepositoryImpl` hardcoded a fake signed-in user; `MainActivity` hardcoded `isAuthenticated = true`; `AuthViewModel` pre-filled `"••••••••••••"`; `signInWithGoogle` used `"mock-google-token"`. | `AuthRepositoryImpl` starts unauthenticated (`null` / `false`), restores persisted `FirebaseAuth` sessions on startup, authenticates via `signInWithEmailAndPassword` or `GoogleAuthProvider`, validates `users/{uid}` in Firestore (`status == "active"`), enforces bootstrap admin emails (`johnrufai242@gmail.com`, `rufaijohnny@gmail.com`), and rejects fake Google tokens. |
+| **Gemini Chat & Function Calling** | `JessRepositoryImpl.sendPrompt` returned canned strings after `delay(400)`. | Sends authenticated requests (`Bearer <Firebase ID Token>`) to `POST /api/chat` with conversation history, Firestore user memories, canonical Jess instructions (`JessCanonicalConfig.kt`), and tool declarations; executes returned `functionCalls` and persists transcripts to Firestore. |
+| **Jess Live Voice** | `VoiceInteractionManager` used local `SpeechRecognizer` + `TextToSpeech` stubs; `startVoiceSession` was a 400ms no-op; `AndroidManifest.xml` was missing `@xml/voice_interaction_service`. | `GeminiLiveAudioSession.kt` mints short-lived credentials from `POST /api/live-token`, claims the cross-device lease on `users/{uid}/private/jessActiveSession`, and opens a direct WebSocket to `BidiGenerateContentConstrained` (`models/gemini-3.8-live`) with 16kHz PCM mic capture (`AudioRecord` + hardware `AcousticEchoCanceler`/`NoiseSuppressor`/`AutomaticGainControl`), 24kHz PCM playback (`AudioTrack`), barge-in interruption, session resumption, and live tool execution. |
+| **Native Android Automation & ARTEMIS Integration** | Gestures returned `true` before completion; screenshot capture returned `false`; `FileProvider` missing from `AndroidManifest.xml`. | `ArtemisUiObservationEngine.kt` adapts Google ARTEMIS's Apache-2.0 UI bounds clipping, minimum-size filtering, indexed element extraction (`[1]`, `[2]`, ...), and smallest-area hit-testing (`findElementAtPoint`). `HubMindAccessibilityService.kt` and `AndroidUiActionExecutor.kt` suspend until `GestureResultCallback.onCompleted`, perform semantic node actions by `targetText`/`viewId`/`elementIndex`, refuse password fields, and capture screenshots via `AccessibilityService.takeScreenshot` (API 30+). |
+| **Two-Way Cross-Device Control** | `ControlPlaneTransport` returned simulated success after `delay(300)`; Windows/Web had no listener for phone-issued commands or tools for phone control. | Added `/users/{userId}/devices/{deviceId}` and `/users/{userId}/deviceCommands/{commandId}` in `firestore.rules`, `/netlify/functions/devices.ts`, `/src/services/crossDeviceService.ts`, `list_paired_devices` & `control_android_device` in `/src/lib/jessTools.ts`, and `HubMindControlPlaneTransportImpl` in Kotlin with 15s presence heartbeats, replay-token deduplication, TTL enforcement, and verified execution reporting. |
+| **APK Versioning & Signing** | `versionName = "1.0"` (`versionCode = 1`) conflicted with `HubMindUpdateChecker` (`240`); `release` buildType was signed with `debug.keystore`. | Unified `versionName = "2.4.0"` and `versionCode = 240` across `build.gradle.kts`, `HubMindUpdateChecker.kt`, and `/public/api/app-version.json`. Removed `debug.keystore` fallback from `release` buildType so release builds only sign when `HUBMIND_RELEASE_*` / `keystore.properties` credentials are provided. |
 
-### 1.2 Authentication & Authorization
-- `src/lib/auth.tsx`: Inspected Firebase Auth integration, user state flow, role validation (`admin` vs `staff`), and account status enforcement (`status === 'active'`).
-- `src/services/userService.ts`: Inspected profile fetching from Firestore `users/{uid}`, user invitation acceptance flow, and connection management.
-- `firestore.rules`: Inspected the zero-trust security rule structure, bootstrap admin exceptions (`johnrufai242@gmail.com`, `rufaijohnny@gmail.com`), subcollections (`/conversations/`, `/memories/`, `/private/`, `/dailyReports/`, `/weeklyReports/`, `/jessTasks/`), and workspace collections (`/tasks/`, `/projects/`, `/clients/`, `/meetings/`, `/documents/`, `/knowledge/`, `/inbox/`).
+## 2. Desktop-to-Android Capability Mapping
 
-### 1.3 Jess Conversation, Memory & Session Coordination
-- `src/services/jessSessionCoordinator.ts`: Inspected the cross-client lease coordination mechanism on `users/{userId}/private/jessActiveSession`. Found 22-second lease with 10-second heartbeat transactions.
-- `src/services/memoryService.ts`: Inspected user memory CRUD and semantic categorization (`preference`, `instruction`, `personal`, `workflow`, `fact`, `schedule`).
-- `src/lib/conversationStore.ts`: Inspected branching message trees (`rootMessageId`, `activeLeafId`, `parentMessageId`) and live transcript persistence.
-- `src/services/jessExecutionRuntime.ts`: Inspected execution trace logging, retry safety policies for idempotent read tools, and verification contract.
-
-### 1.4 Backend Server Endpoints (`server.ts` & Netlify)
-- `GET /api/config`: Dynamic client Firebase credentials provider.
-- `POST /api/live-token`: Ephemeral authentication token provider for Gemini Multimodal Live API.
-- `POST /api/chat`: Multi-turn conversational endpoint with prompt adapters and tool calling.
-- `WS /api/live-ws`: WebSocket relay for bidirectional audio streaming.
-- `GET/POST /api/memories`: Memory management endpoint.
-- `GET/POST /api/conversations`: Conversation thread retrieval and creation.
-
----
-
-## 2. Components Reused
-
-1. **User Identity & Security Context**:
-   - The Android app reuses Firebase Authentication and the `users/{userId}` Firestore profile document.
-   - Enforces the same role (`admin`/`staff`) and active status checks.
-2. **Conversation & Memory Schema**:
-   - Reuses `ChatMessage`, `UserMemory`, `StoredConversation`, and `Task` structures directly mapped to Kotlin data classes.
-3. **Cross-Client Session Coordination**:
-   - Reuses `users/{userId}/private/jessActiveSession` lease semantics.
-4. **Branding & Design Language**:
-   - Dark Slate palette (`#020617`, `#0F172A`, `#1E293B`, `#334155`) with bright Teal accent (`#14B8A6`) and amber/cyan status rings.
-   - Distinctive Jess Orb visualizer with animated pulsing states (idle, listening, thinking, speaking, error).
-
----
-
-## 3. Native Android Implementations
-
-1. **Android Application Core**:
-   - Built in Kotlin with Jetpack Compose and Material 3.
-   - Single Activity architecture with clean ViewModel layer.
-2. **Android Native Device Capabilities**:
-   - Battery level & thermal status monitoring.
-   - Volume, ringtone, and media stream controls.
-   - System clipboard manager integration.
-   - Notification management with deep linking.
-   - Screen capture and accessibility automation placeholders designed for private side-loading.
-3. **Cross-Device Controller**:
-   - `DeviceControlRepository` dispatches commands to target devices.
-   - Targets the registered Windows laptop via Firestore command queue `users/{userId}/deviceCommands/`.
-
----
-
-## 4. Configuration Status & Backend Requirements
-
-### 4.1 Firebase Android Configuration
-- In the original web repository, Firebase configuration was supplied dynamically through Vite/Netlify `/api/config` or environment variables (`FIREBASE_WEB_API_KEY`, `FIREBASE_PROJECT_ID`, etc.).
-- For native Android builds, Firebase SDKs typically consume `google-services.json`. In this private setup, Hub-Mind Android initializes Firebase either through `google-services.json` or dynamically via the `HubMindBackendApi` configuration endpoint `/api/config`.
-- **Action Required for Production Deployment**: Place `google-services.json` generated from Firebase Console (`gen-lang-client-0197530608`) inside the `app/` folder before final production signing.
-
-### 4.2 Backend Integrations
-- The REST API server at `server.ts` handles `/api/config`, `/api/chat`, `/api/live-token`, and `/api/memories`.
-- For remote device control, the Firestore collection `users/{userId}/devices` and `users/{userId}/deviceCommands` will be monitored by the desktop Electron process (via an added listener in Electron main) to execute native Windows tasks requested from the Android phone.
-
----
-
-## 5. Deliverables & Verification Checklist
-
-- [x] Repository inspected without modifying production web/Windows code.
-- [x] `HUBMIND_ANDROID_ARCHITECTURE.md` created with complete integration map.
-- [x] `HUBMIND_ANDROID_INTEGRATION_STATUS.md` created with complete audit findings.
-- [x] Android application foundation with Kotlin, Compose, Material 3, and Clean Architecture.
-- [x] Native Sign-In / Authentication Screen.
-- [x] Jess Home Screen with Orb, status indicators, live transcript, and voice controls.
-- [x] Connected Devices Screen (Android phone + Windows PC status and capabilities).
-- [x] Activity Timeline Screen (task execution logs, target devices, results).
-- [x] Settings & Android Agent Setup Screen (permissions, accessibility, voice preferences).
+| Capability | Desktop / Web Authoritative Implementation | Android Native Counterpart |
+| :--- | :--- | :--- |
+| Runtime Config | `GET /api/config` (`netlify/functions/config.ts`, `src/firebaseConfig.ts`) | `HubMindBackendClient.fetchAndValidateRuntimeConfig()` |
+| Authentication & RBAC | `src/lib/auth.tsx` + `users/{uid}` in Firestore | `AuthRepositoryImpl` + `AuthScreen` + `MainActivity` |
+| Jess System Prompt & Identity | `src/ai/prompts/jessSystemPrompt.ts` + `adapters.ts` | `JessCanonicalConfig.buildSystemInstruction()` |
+| Gemini Chat Proxy | `POST /api/chat` (`netlify/functions/chat.ts`) | `HubMindBackendClient.sendChatTurn()` + `JessRepositoryImpl.sendPrompt()` |
+| Gemini Live Ephemeral Token | `POST /api/live-token` (`netlify/functions/live-token.ts`) | `HubMindBackendClient.mintLiveEphemeralToken()` |
+| Gemini Live Audio Streaming | `src/services/liveAudioClient.ts` | `GeminiLiveAudioSession.kt` (16kHz in / 24kHz out PCM) |
+| Voice Session Lease | `users/{uid}/private/jessActiveSession` | `JessRepositoryImpl.observeSessionLease()` & `startVoiceSession()` |
+| Native Local Control | `electron/main.cjs` + `src/lib/jessTools.ts` | `HubMindAccessibilityService` + `ArtemisUiObservationEngine` + `AndroidUiActionExecutor` |
+| Cross-Device Control Plane | `src/services/crossDeviceService.ts` + `netlify/functions/devices.ts` | `HubMindControlPlaneTransportImpl` + `DeviceRegistryRepositoryImpl` |

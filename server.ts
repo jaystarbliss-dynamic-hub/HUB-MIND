@@ -101,6 +101,26 @@ async function startServer() {
     });
   });
 
+  app.all(['/api/devices', '/api/devices/*'], async (req, res) => {
+    try {
+      const { handler } = await import('./netlify/functions/devices.ts');
+      const result = await handler({
+        httpMethod: req.method,
+        path: req.path,
+        headers: req.headers,
+        queryStringParameters: req.query,
+        body: req.body && Object.keys(req.body).length > 0 ? JSON.stringify(req.body) : undefined,
+      });
+      res.status(result.statusCode || 200);
+      if (result.headers) {
+        for (const [k, v] of Object.entries(result.headers)) res.setHeader(k, String(v));
+      }
+      return res.send(result.body);
+    } catch (error: any) {
+      return res.status(500).json({ error: error?.message || 'Device API error.' });
+    }
+  });
+
   const bootstrapAdminEmails = new Set(['johnrufai242@gmail.com', 'rufaijohnny@gmail.com']);
   const verifyAdminRequest = async (req: any) => {
     const authHeader = String(req.headers.authorization || '');

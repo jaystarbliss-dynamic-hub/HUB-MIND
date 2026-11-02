@@ -1,22 +1,15 @@
-node_modules/
-coverage/
+.gradle/
+/local.properties
+local.properties
+keystore.properties
+*.jks
+*.keystore
+!debug.keystore
+/.idea/
+*.iml
 .DS_Store
-*.log
-.env*
-!.env.example
-
-# Native Windows helper build output
-native/**/bin/
-native/**/obj/
-native/**/publish/
-release/
-
-# Generated from the official logo during Windows packaging
-build-resources/icon.ico
-
-# Local backup snapshots
-jess_ai_backup/
-dist/
-build/
-out/
-
+/build/
+app/build/
+/captures/
+.externalNativeBuild/
+.cxx/

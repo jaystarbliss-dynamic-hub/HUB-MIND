@@ -1,8 +1,31 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+
+val releaseStoreFile = System.getenv("HUBMIND_RELEASE_STORE_FILE")
+    ?: keystoreProps.getProperty("storeFile")
+val releaseStorePassword = System.getenv("HUBMIND_RELEASE_STORE_PASSWORD")
+    ?: keystoreProps.getProperty("storePassword")
+val releaseKeyAlias = System.getenv("HUBMIND_RELEASE_KEY_ALIAS")
+    ?: keystoreProps.getProperty("keyAlias")
+val releaseKeyPassword = System.getenv("HUBMIND_RELEASE_KEY_PASSWORD")
+    ?: keystoreProps.getProperty("keyPassword")
+val hasDedicatedReleaseKeystore = !releaseStoreFile.isNullOrBlank()
+    && !releaseStorePassword.isNullOrBlank()
+    && !releaseKeyAlias.isNullOrBlank()
+    && !releaseKeyPassword.isNullOrBlank()
+    && file(releaseStoreFile).exists()
 
 android {
     namespace = "com.example"
@@ -12,24 +35,29 @@ android {
         applicationId = "com.aistudio.hubmind.wzyqkp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 240
+        versionName = "2.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (hasDedicatedReleaseKeystore) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
         create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            val debugKeystore = file("${rootDir}/debug.keystore")
+            if (debugKeystore.exists()) {
+                storeFile = debugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
@@ -40,10 +68,16 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            // Never sign release builds with debug.keystore; only sign if dedicated release credentials are provided
+            if (hasDedicatedReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
-            signingConfig = signingConfigs.getByName("debugConfig")
+            val debugKeystore = file("${rootDir}/debug.keystore")
+            if (debugKeystore.exists()) {
+                signingConfig = signingConfigs.getByName("debugConfig")
+            }
         }
     }
 
@@ -58,6 +92,10 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 
@@ -75,8 +113,15 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.okhttp)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.play.services.auth)
 
     testImplementation(libs.junit)
+    testImplementation(libs.org.json)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

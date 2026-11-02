@@ -10,23 +10,33 @@ import org.junit.Test
 class HubMindArchitectureUnitTest {
 
     @Test
-    fun testAuthRepositoryAdminAssignment() = runBlocking {
+    fun testAuthRepositoryAdminAndStaffAssignment() = runBlocking {
         val authRepo = AuthRepositoryImpl()
-        val result = authRepo.signIn("johnrufai242@gmail.com", "any-password")
-        assertTrue(result.isSuccess)
-        val user = result.getOrNull()
-        assertNotNull(user)
-        assertEquals("admin", user?.role)
-        assertEquals("active", user?.status)
+        val adminRes = authRepo.signIn("johnrufai242@gmail.com", "valid-password")
+        assertTrue(adminRes.isSuccess)
+        val adminUser = adminRes.getOrNull()
+        assertNotNull(adminUser)
+        assertEquals("admin", adminUser?.role)
+        assertEquals("active", adminUser?.status)
+
+        val secondAdminRes = authRepo.signIn("rufaijohnny@gmail.com", "valid-password")
+        assertEquals("admin", secondAdminRes.getOrNull()?.role)
+
+        val staffRes = authRepo.signIn("member@jaystarbliss.com", "valid-password")
+        assertEquals("staff", staffRes.getOrNull()?.role)
     }
 
     @Test
-    fun testDeviceRegistryContainsWindowsWorkstation() = runBlocking {
+    fun testMockGoogleTokenRejected() = runBlocking {
         val authRepo = AuthRepositoryImpl()
-        val convRepo = ConversationRepositoryImpl()
+        val fakeGoogleRes = authRepo.signInWithGoogle("mock-google-token")
+        assertTrue(fakeGoogleRes.isFailure)
+    }
+
+    @Test
+    fun testDeviceControlExecutionAndHistory() = runBlocking {
         val deviceControl = DeviceControlRepositoryImpl(emptyList())
 
-        // Test device command execution
         val result = deviceControl.executeTool(
             targetDeviceId = "win-main-workstation",
             toolName = "launch_windows_application",
@@ -64,9 +74,8 @@ class HubMindArchitectureUnitTest {
     fun testJessLiveStateTransitions() = runBlocking {
         val convRepo = ConversationRepositoryImpl()
         val deviceControl = DeviceControlRepositoryImpl(emptyList())
-        // Mock device registry
         val deviceRegistry = object : DeviceRegistryRepository {
-            private val win = DeviceNode("win-01", "PC", DevicePlatform.WINDOWS, "1.0", DeviceStatus.ONLINE)
+            private val win = DeviceNode("win-01", "PC", DevicePlatform.WINDOWS, "2.4.0", DeviceStatus.ONLINE)
             override val devices = kotlinx.coroutines.flow.MutableStateFlow(listOf(win))
             override val currentTargetDevice = kotlinx.coroutines.flow.MutableStateFlow<DeviceNode?>(win)
             override suspend fun selectTargetDevice(deviceId: String) {}

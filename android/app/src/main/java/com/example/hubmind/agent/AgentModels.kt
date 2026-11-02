@@ -11,16 +11,22 @@ enum class AndroidActionType {
     TYPE_TEXT,
     CLEAR_TEXT,
     OPEN_APP,
+    LAUNCH_APP,
+    OPEN_DEEP_LINK,
     GET_INSTALLED_APPS,
     GET_SCREEN_HIERARCHY,
     CAPTURE_SCREEN,
     SET_CLIPBOARD,
     GET_CLIPBOARD,
+    CLIPBOARD_WRITE,
+    CLIPBOARD_READ,
     NAVIGATE_BACK,
     GO_HOME,
     OPEN_RECENTS,
     OPEN_NOTIFICATIONS,
-    OPEN_QUICK_SETTINGS
+    OPEN_QUICK_SETTINGS,
+    SET_VOLUME,
+    GET_DEVICE_STATUS
 }
 
 data class AndroidCommand(
@@ -47,6 +53,22 @@ data class UiNodeInfo(
     val children: List<UiNodeInfo> = emptyList()
 )
 
+data class UiNodeSnapshot(
+    val nodeId: String,
+    val className: String,
+    val packageName: String,
+    val text: String? = null,
+    val contentDescription: String? = null,
+    val viewIdResourceName: String? = null,
+    val bounds: NodeBounds,
+    val isClickable: Boolean = false,
+    val isEditable: Boolean = false,
+    val isScrollable: Boolean = false,
+    val isEnabled: Boolean = true,
+    val isChecked: Boolean = false,
+    val depth: Int = 0
+)
+
 data class NodeBounds(
     val left: Int,
     val top: Int,
@@ -65,7 +87,10 @@ data class AndroidActionResult(
     val outputText: String? = null,
     val error: String? = null,
     val hierarchy: UiNodeInfo? = null,
+    val uiNodes: List<UiNodeSnapshot> = emptyList(),
+    val indexedElements: List<IndexedUiElement> = emptyList(),
     val installedApps: List<AppInfo>? = null,
+    val screenshotBase64: String? = null,
     val durationMs: Long = 0,
     val timestamp: Long = System.currentTimeMillis()
 )
