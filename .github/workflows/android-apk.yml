@@ -80,6 +80,7 @@ jobs:
         working-directory: android
         run: |
           set -euo pipefail
+          chmod +x ./gradlew
           ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
           mkdir -p ../release
           cp app/build/outputs/apk/debug/app-debug.apk ../release/Hub-Mind-Android-v2.4.0-debug.apk
