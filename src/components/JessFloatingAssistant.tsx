@@ -882,7 +882,7 @@ export function JessFloatingAssistant() {
           }
         }
 
-        if (fc.name === 'android_device_action' && result?.result?.evidence?.imageBase64) {
+        if (['android_device_action', 'control_android_device', 'control_paired_device'].includes(fc.name) && result?.result?.evidence?.imageBase64) {
           const evidence = result.result.evidence;
           const mimeType = String(evidence.mimeType || 'image/jpeg');
           const delivered = !!clientRef.current?.sendScreenFrame('data:' + mimeType + ';base64,' + String(evidence.imageBase64));
