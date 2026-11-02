@@ -322,7 +322,8 @@ class HubMindAccessibilityService : AccessibilityService() {
         val arguments = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        val accepted = targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        return accepted && targetNode.text?.toString() == text
     }
 
     private fun findFirstEditableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
