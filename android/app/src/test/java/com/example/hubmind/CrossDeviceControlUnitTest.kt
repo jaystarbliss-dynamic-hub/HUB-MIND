@@ -42,7 +42,7 @@ class CrossDeviceControlUnitTest {
     }
 
     @Test
-    fun testControlPlaneTransportDispatchAndAntiReplay() = runBlocking {
+    fun testUnconfiguredControlPlaneFailsClosedAndRejectsReplay() = runBlocking {
         val transport = HubMindControlPlaneTransportImpl()
         transport.connect("usr-01", "android-01")
 
@@ -55,8 +55,9 @@ class CrossDeviceControlUnitTest {
         )
 
         val result = transport.dispatchCommand(envelope)
-        assertTrue(result.success)
-        assertTrue(result.verified)
+        assertFalse(result.success)
+        assertFalse(result.verified)
+        assertTrue(result.error?.contains("not configured", ignoreCase = true) == true)
 
         // Re-sending the exact same replayToken must be rejected
         val replayAttempt = transport.dispatchCommand(envelope)
