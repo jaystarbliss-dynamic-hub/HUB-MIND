@@ -495,7 +495,7 @@ export function DesktopUpdatesModal({
             }`}
           >
             <Tag className="w-3.5 h-3.5" />
-            <span>Version Releases ({releases.length})</span>
+            <span>Windows ({releases.length})</span>
           </button>
           <button
             type="button"

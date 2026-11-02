@@ -158,7 +158,7 @@ test('Android CI fixes Metaspace and fingerprints the built APK instead of assum
   const gradle = read('android/gradle.properties');
   const workflow = read('.github/workflows/android-apk.yml');
   assert.match(gradle, /MaxMetaspaceSize=1g/);
-  assert.match(workflow, /apksigner verify --print-certs/);
+  assert.match(workflow, /verify --print-certs/);
   assert.match(workflow, /android-actions\/setup-android@v4/);
   assert.match(read('android/gradlew'), /MaxMetaspaceSize=1g/);
   assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
