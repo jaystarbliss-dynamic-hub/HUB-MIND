@@ -681,32 +681,48 @@ class ConversationRepositoryImpl(
         return msg
     }
 
-    suspend fun saveMemory(key: String?, content: String, category: String = "FACT") {
+    suspend fun saveMemory(key: String?, content: String, category: String = "fact") {
         val uid = boundUserId ?: return
+        val cleanContent = content.trim()
+        if (cleanContent.isBlank()) return
         val db = backendClient?.getFirebaseFirestore()?.getOrNull() ?: return
-        val memId = "mem-" + UUID.randomUUID().toString().take(8)
         val nowIso = Instant.now().toString()
+        val normalizedKey = key?.trim()?.lowercase()
+            ?.replace(Regex("[^a-z0-9]+"), "_")
+            ?.trim('_')
+            ?.takeIf { it.isNotBlank() }
+        val memoryId = normalizedKey
+            ?.let { "mem_${uid}_$it" }
+            ?: "mem_${UUID.randomUUID()}"
+        val normalizedCategory = category.trim().lowercase().let {
+            if (it in setOf("preference", "workflow", "fact", "instruction", "habit", "interaction", "personal", "business")) it
+            else "fact"
+        }
         runCatching {
             db.collection("users")
                 .document(uid)
                 .collection("memories")
-                .document(memId)
+                .document(memoryId)
                 .set(
                     mapOf(
+                        "id" to memoryId,
                         "userId" to uid,
-                        "key" to (key ?: "preference"),
-                        "content" to content,
-                        "value" to content,
-                        "category" to category.uppercase(),
+                        "key" to normalizedKey,
+                        "content" to cleanContent,
+                        "category" to normalizedCategory,
                         "importance" to "medium",
+                        "source" to "voice",
                         "createdAt" to nowIso,
-                        "updatedAt" to nowIso
-                    )
+                        "updatedAt" to nowIso,
+                        "lastReferencedAt" to nowIso
+                    ),
+                    SetOptions.merge()
                 )
                 .await()
+        }.onFailure {
+            android.util.Log.w("HubMindMemory", "Could not save shared Jess memory: ${it.message}")
         }
-    }
-}
+    }}
 
 class JessRepositoryImpl(
     private val conversationRepository: ConversationRepository,
