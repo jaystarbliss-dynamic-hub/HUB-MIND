@@ -11,8 +11,6 @@ type NativeAndroidInterface = {
   getDeviceInfo(token: string): string;
   isAccessibilityEnabled(token: string): boolean;
   openAccessibilitySettings(token: string): void;
-  startAgentSession(token: string): void;
-  stopAgentSession(token: string): void;
   beginGoogleSignIn(clientId: string, token: string, callbackId: string): void;
   executeTool(name: string, argsJson: string, userId: string, token: string, callbackId: string): void;
 };
@@ -26,8 +24,6 @@ declare global {
       getDeviceInfo: () => Promise<any>;
       isAccessibilityEnabled: () => Promise<boolean>;
       openAccessibilitySettings: () => void;
-      startAgentSession: () => void;
-      stopAgentSession: () => void;
       signInWithGoogle: (clientId: string) => Promise<AndroidNativeResult>;
       executeTool: (name: string, args: Record<string, any>, userId?: string) => Promise<AndroidNativeResult>;
       __resolve?: (id: string, resultJson: string) => void;
@@ -57,8 +53,6 @@ export function installAndroidNativeBridge(): boolean {
     openAccessibilitySettings: () => {
       try { native.openAccessibilitySettings(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {}
     },
-    startAgentSession: () => { try { native.startAgentSession(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {} },
-    stopAgentSession: () => { try { native.stopAgentSession(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {} },
     signInWithGoogle: (clientId) => new Promise(resolve => {
       const callbackId = 'google-' + Date.now().toString(36) + '-' + (++requestSequence).toString(36);
       const timeout = window.setTimeout(() => {
