@@ -337,6 +337,19 @@ fun SettingsScreen(
                         }
                     }
 
+                    state.availableUpdate?.let { update ->
+                        Button(
+                            onClick = { viewModel.downloadAndInstallUpdate(update) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Teal600, contentColor = Slate950)
+                        ) {
+                            Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Download & Install v${update.versionName}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     state.updateStatusMessage?.let { msg ->
                         Text(msg, style = MaterialTheme.typography.bodySmall, color = Slate300)
                     }

@@ -42,13 +42,14 @@ class HubMindArchitectureUnitTest {
             toolName = "launch_windows_application",
             args = mapOf("appName" to "code.exe")
         )
-        assertTrue(result.success)
-        assertTrue(result.verified)
+        assertFalse(result.success)
+        assertFalse(result.verified)
+        assertTrue(result.error?.contains("requires a signed-in Hub-Mind account", ignoreCase = true) == true)
 
         val history = deviceControl.commandHistory.value
         assertEquals(1, history.size)
         assertEquals("launch_windows_application", history[0].toolName)
-        assertEquals(CommandStatus.COMPLETED, history[0].status)
+        assertEquals(CommandStatus.FAILED, history[0].status)
     }
 
     @Test

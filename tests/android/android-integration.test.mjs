@@ -108,3 +108,104 @@ test('Two-way cross-device control plane is wired across Android, backend Netlif
   assert.match(jessTools, /name:\s*'list_paired_devices'/);
   assert.match(jessTools, /name:\s*'control_android_device'/);
 });
+
+
+test('Android device transport uses the same lifecycle, timestamp, and payload fields as Web/Windows', () => {
+  const transport = read('android/app/src/main/java/com/example/hubmind/data/transport/ControlPlaneTransport.kt');
+  assert.match(transport, /whereEqualTo\("lifecycleState", "DISPATCHED"\)/);
+  assert.match(transport, /getString\("parametersJson"\)/);
+  assert.match(transport, /getLong\("expirationTime"\)/);
+  assert.match(transport, /"issuingUserId" to uid/);
+  assert.match(transport, /"lifecycleState" to "DISPATCHED"/);
+  assert.match(transport, /"resultSuccess"/);
+  assert.match(transport, /"resultVerified"/);
+  assert.match(transport, /"resultSummary"/);
+  assert.match(transport, /"resultError"/);
+  assert.doesNotMatch(transport, /getString\("status"\)/);
+  assert.doesNotMatch(transport, /"expiresAt" to envelope\.expirationTime/);
+  assert.doesNotMatch(transport, /Executed .* successfully\./);
+});
+
+test('Android rejects confirmation-gated and unsupported native actions instead of claiming success', () => {
+  const transport = read('android/app/src/main/java/com/example/hubmind/data/transport/ControlPlaneTransport.kt');
+  const executor = read('android/app/src/main/java/com/example/hubmind/agent/AndroidUiActionExecutor.kt');
+  assert.match(transport, /envelope\.requiresConfirmation/);
+  assert.match(transport, /Unsupported Android action/);
+  assert.match(executor, /command\.requiresConfirmation/);
+  assert.match(executor, /No confirmation was provided/);
+});
+
+test('Android profile bootstrap follows the canonical invitation/admin access policy', () => {
+  const repoKt = read('android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
+  assert.match(repoKt, /if \(!isBootstrapAdmin\)/);
+  assert.match(repoKt, /has not been authorized for Hub-Mind/);
+  assert.match(repoKt, /"id" to uid/);
+});
+
+test('Android updater only offers a published matching app with a valid SHA-256 checksum', () => {
+  const checker = read('android/app/src/main/java/com/example/hubmind/data/updater/HubMindUpdateChecker.kt');
+  const manifest = JSON.parse(read('public/api/app-version.json'));
+  assert.match(checker, /releaseStatus/);
+  assert.match(checker, /applicationId != context\.packageName/);
+  assert.match(checker, /verifyApkChecksum/);
+  assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
+  assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
+  assert.equal(manifest.versionCode, 240);
+  assert.equal(manifest.versionName, '2.4.0');
+});
+
+test('Android CI fixes Metaspace and fingerprints the built APK instead of assuming a runner debug keystore', () => {
+  const gradle = read('android/gradle.properties');
+  const workflow = read('.github/workflows/android-apk.yml');
+  assert.match(gradle, /MaxMetaspaceSize=1g/);
+  assert.match(workflow, /verify --print-certs/);
+  assert.match(workflow, /android-actions\/setup-android@v4/);
+  assert.match(read('android/gradlew'), /MaxMetaspaceSize=1g/);
+  assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.doesNotMatch(workflow, /\.android\/debug\.keystore/);
+  assert.match(workflow, /if: steps\.signing\.outputs\.available == 'true'/);
+});
+
+test('Version history has separate Windows/Android tabs and uses a viewport-safe mobile modal', () => {
+  const modal = read('src/components/DesktopUpdatesModal.tsx');
+  assert.match(modal, /activeTab === 'android'/);
+  assert.match(modal, /Windows \(/);
+  assert.match(modal, /Android \(/);
+  assert.match(modal, /h-\[100dvh\]/);
+  assert.match(modal, /overflow-x-auto whitespace-nowrap/);
+  assert.match(modal, /sm:max-h-\[90vh\]/);
+  assert.match(modal, /github\.com\/jaystarbliss-dynamic-hub\/HUB-MIND/);
+});
+
+
+test('Android updater downloads to app-private cache, verifies checksum, and exposes a guarded installer action', () => {
+  const checker = read('android/app/src/main/java/com/example/hubmind/data/updater/HubMindUpdateChecker.kt');
+  const viewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsViewModel.kt');
+  const screen = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsScreen.kt');
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  assert.match(checker, /suspend fun downloadAndVerifyApk/);
+  assert.match(checker, /verifyApkChecksum\(apkFile, update\.sha256\)/);
+  assert.match(checker, /APK checksum verification failed/);
+  assert.match(checker, /canRequestPackageInstalls/);
+  assert.match(viewModel, /downloadAndInstallUpdate/);
+  assert.match(screen, /Download & Install v/);
+  assert.match(manifest, /android\.permission\.REQUEST_INSTALL_PACKAGES/);
+});
+
+test('Website lists CI-published Android debug prereleases as clearly labelled test downloads without enabling in-app updates', () => {
+  const workflow = read('.github/workflows/android-apk.yml');
+  const modal = read('src/components/DesktopUpdatesModal.tsx');
+  const manifest = JSON.parse(read('public/api/app-version.json'));
+
+  assert.match(workflow, /publish-android-debug-prerelease/);
+  assert.match(workflow, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /contents:\s*write/);
+  assert.match(workflow, /prerelease:\s*true/);
+  assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.match(modal, /isPrerelease:\s*Boolean\(rel\.prerelease\)/);
+  assert.match(modal, /TEST BUILD · DEBUG SIGNED/);
+  assert.match(modal, /cannot update an installation signed with a different certificate/i);
+  assert.match(modal, /Download Android test APK/);
+  assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
+  assert.equal(manifest.apkUrl, '');
+});

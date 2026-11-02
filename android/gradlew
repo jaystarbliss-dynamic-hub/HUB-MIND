@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Hub-Mind Android Gradle Wrapper
 APP_HOME=$( cd "${0%/*}" && pwd -P )
-export GRADLE_OPTS="${GRADLE_OPTS:-"-Xmx512m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -Dfile.encoding=UTF-8"}"
+export GRADLE_OPTS="${GRADLE_OPTS:-"-Xmx3g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8"}"
 if [ -x "/opt/gradle-8.9/bin/gradle" ]; then
   exec /opt/gradle-8.9/bin/gradle -p "$APP_HOME" "$@"
 elif command -v gradle >/dev/null 2>&1; then

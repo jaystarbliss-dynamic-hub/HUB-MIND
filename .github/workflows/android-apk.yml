@@ -7,18 +7,22 @@ on:
       - main
     paths:
       - 'android/**'
+      - 'tests/android/**'
+      - 'src/services/crossDeviceService.ts'
+      - 'src/components/DesktopUpdatesModal.tsx'
       - '.github/workflows/android-apk.yml'
   push:
     branches:
       - main
-    tags:
-      - 'v*'
     paths:
       - 'android/**'
+      - 'tests/android/**'
+      - 'src/services/crossDeviceService.ts'
+      - 'src/components/DesktopUpdatesModal.tsx'
       - '.github/workflows/android-apk.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -27,6 +31,7 @@ concurrency:
 jobs:
   build-android-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,43 +41,124 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android 35 platform and build tools
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+          cache-disabled: false
 
       - name: Decode optional Android release keystore
+        id: signing
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
           HUBMIND_RELEASE_STORE_PASSWORD: ${{ secrets.HUBMIND_RELEASE_STORE_PASSWORD }}
           HUBMIND_RELEASE_KEY_ALIAS: ${{ secrets.HUBMIND_RELEASE_KEY_ALIAS }}
           HUBMIND_RELEASE_KEY_PASSWORD: ${{ secrets.HUBMIND_RELEASE_KEY_PASSWORD }}
         run: |
-          if [ -n "$ANDROID_RELEASE_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 -d > "${RUNNER_TEMP}/hubmind-release.jks"
+          set -euo pipefail
+          if [[ -n "$ANDROID_RELEASE_KEYSTORE_BASE64" && -n "$HUBMIND_RELEASE_STORE_PASSWORD" && -n "$HUBMIND_RELEASE_KEY_ALIAS" && -n "$HUBMIND_RELEASE_KEY_PASSWORD" ]]; then
+            echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/hubmind-release.jks"
+            test -s "${RUNNER_TEMP}/hubmind-release.jks"
             echo "HUBMIND_RELEASE_STORE_FILE=${RUNNER_TEMP}/hubmind-release.jks" >> "$GITHUB_ENV"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Release signing secrets are not configured; this run will produce a debug test APK only."
           fi
 
-      - name: Run Android JVM unit tests and build APKs
+      - name: Run Android JVM tests and build debug test APK
+        working-directory: android
+        run: |
+          set -euo pipefail
+          ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
+          mkdir -p ../release
+          cp app/build/outputs/apk/debug/app-debug.apk ../release/Hub-Mind-Android-v2.4.0-debug.apk
+
+      - name: Build signed release APK when signing secrets are available
+        if: steps.signing.outputs.available == 'true'
         working-directory: android
         env:
           HUBMIND_RELEASE_STORE_PASSWORD: ${{ secrets.HUBMIND_RELEASE_STORE_PASSWORD }}
           HUBMIND_RELEASE_KEY_ALIAS: ${{ secrets.HUBMIND_RELEASE_KEY_ALIAS }}
           HUBMIND_RELEASE_KEY_PASSWORD: ${{ secrets.HUBMIND_RELEASE_KEY_PASSWORD }}
         run: |
-          gradle testDebugUnitTest assembleDebug assembleRelease --no-daemon --stacktrace
-          mkdir -p ../release
-          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk ../release/Hub-Mind-Android-v2.4.0.apk
-          else
-            cp app/build/outputs/apk/debug/app-debug.apk ../release/Hub-Mind-Android-v2.4.0.apk
-          fi
+          set -euo pipefail
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          test -s app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk ../release/Hub-Mind-Android-v2.4.0-release.apk
 
-      - name: Upload Android APK artifact
+      - name: Verify APK metadata and print signing certificate fingerprints
+        env:
+          EXPECTED_APPLICATION_ID: com.aistudio.hubmind.wzyqkp
+          EXPECTED_VERSION_CODE: '240'
+          EXPECTED_VERSION_NAME: '2.4.0'
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/.android/sdk}}"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$SDK_ROOT/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          for APK in release/*.apk; do
+            echo "Verifying $APK"
+            "$APKSIGNER" verify --verbose "$APK"
+            BADGING="$("$AAPT" dump badging "$APK")"
+            echo "$BADGING" | grep -F "name='$EXPECTED_APPLICATION_ID'"
+            echo "$BADGING" | grep -F "versionCode='$EXPECTED_VERSION_CODE'"
+            echo "$BADGING" | grep -F "versionName='$EXPECTED_VERSION_NAME'"
+            "$APKSIGNER" verify --print-certs "$APK"
+          done
+
+      - name: Upload Android APK build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hub-mind-android-apk
-          path: release/Hub-Mind-Android-v2.4.0.apk
+          name: hub-mind-android-v2.4.0-build
+          path: release/*.apk
           if-no-files-found: error
           retention-days: 30
+
+  publish-android-debug-prerelease:
+    name: Publish Android debug APK as a testing prerelease
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-android-apk
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified Android build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hub-mind-android-v2.4.0-build
+          path: release
+
+      - name: Publish the debug APK as a clearly labelled prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v2.4.0-debug-${{ github.run_number }}
+          name: Hub-Mind Android v2.4.0 — Debug Test Build #${{ github.run_number }}
+          body: |
+            **TEST BUILD ONLY — NOT AN OFFICIAL PRODUCTION RELEASE.**
+
+            This APK is built and verified by CI using Android's debug signing configuration.
+            It is published so the Hub-Mind website can provide a direct test download.
+
+            - It is not a production-signed APK.
+            - It cannot update an installation signed with a different certificate.
+            - It is not offered through the in-app automatic updater.
+            - Use only for owner-controlled device testing.
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: release/Hub-Mind-Android-v2.4.0-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

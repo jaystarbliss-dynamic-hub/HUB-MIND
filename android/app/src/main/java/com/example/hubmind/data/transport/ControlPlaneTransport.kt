@@ -25,6 +25,7 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.security.KeyPairGenerator
+import java.security.MessageDigest
 import java.security.KeyStore
 import java.util.Collections
 import java.util.UUID
@@ -33,15 +34,13 @@ import kotlin.coroutines.resume
 
 enum class CommandLifecycle {
     CREATED,
-    AUTHENTICATED,
-    ROUTED,
-    RECEIVED,
-    AWAITING_CONFIRMATION,
+    DISPATCHED,
+    ACCEPTED,
     EXECUTING,
     COMPLETED,
     FAILED,
     CANCELLED,
-    EXPIRED
+    TIMED_OUT
 }
 
 data class CommandEnvelope(
@@ -88,15 +87,16 @@ object KeystorePairingManager {
         }
     }
 
-    fun getPublicKeyFingerprint(): String {
-        return try {
+    fun getPublicKeyFingerprint(): String? {
+        return runCatching {
             val keyStore = KeyStore.getInstance("AndroidKeyStore")
             keyStore.load(null)
             val cert = keyStore.getCertificate(KEY_ALIAS)
-            cert?.publicKey?.encoded?.take(8)?.joinToString("") { "%02x".format(it) } ?: "hw-sec-key"
-        } catch (e: Exception) {
-            "hw-sec-key"
-        }
+                ?: throw IllegalStateException("Android Keystore pairing certificate is unavailable.")
+            MessageDigest.getInstance("SHA-256")
+                .digest(cert.publicKey.encoded)
+                .joinToString("") { "%02x".format(it) }
+        }.getOrNull()
     }
 }
 
@@ -156,6 +156,7 @@ class HubMindControlPlaneTransportImpl(
             .document(userId)
             .collection("deviceCommands")
             .whereEqualTo("targetDeviceId", deviceId)
+            .whereEqualTo("lifecycleState", "DISPATCHED")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     _isConnected.value = false
@@ -164,18 +165,20 @@ class HubMindControlPlaneTransportImpl(
                 _isConnected.value = true
                 val docs = snapshot?.documents ?: return@addSnapshotListener
                 for (doc in docs) {
-                    val status = doc.getString("status") ?: continue
-                    if (status != "DISPATCHED" && status != "PENDING") continue
+                    val status = doc.getString("lifecycleState") ?: continue
+                    if (status != "DISPATCHED") continue
                     val cmdId = doc.getString("commandId") ?: doc.id
                     if (!processedCommandIds.add(cmdId)) continue
 
-                    val replayToken = doc.getString("replayToken") ?: "nonce-$cmdId"
-                    if (!processedReplayTokens.add(replayToken)) {
+                    val replayToken = doc.getString("replayToken") ?: ""
+                    if (replayToken.isBlank() || !processedReplayTokens.add(replayToken)) {
                         scope.launch {
                             doc.reference.update(
                                 mapOf(
-                                    "status" to "FAILED",
-                                    "error" to "Replay token rejected.",
+                                    "lifecycleState" to "FAILED",
+                                    "resultSuccess" to false,
+                                    "resultVerified" to false,
+                                    "resultError" to "Replay token rejected.",
                                     "completedAt" to System.currentTimeMillis()
                                 )
                             )
@@ -183,13 +186,15 @@ class HubMindControlPlaneTransportImpl(
                         continue
                     }
 
-                    val expiresAt = doc.getLong("expiresAt") ?: (System.currentTimeMillis() + 30_000L)
-                    if (expiresAt < System.currentTimeMillis()) {
+                    val expiresAt = doc.getLong("expirationTime") ?: 0L
+                    if (expiresAt <= System.currentTimeMillis()) {
                         scope.launch {
                             doc.reference.update(
                                 mapOf(
-                                    "status" to "EXPIRED",
-                                    "error" to "Command expired before execution.",
+                                    "lifecycleState" to "TIMED_OUT",
+                                    "resultSuccess" to false,
+                                    "resultVerified" to false,
+                                    "resultError" to "Command expired before execution.",
                                     "completedAt" to System.currentTimeMillis()
                                 )
                             )
@@ -197,22 +202,47 @@ class HubMindControlPlaneTransportImpl(
                         continue
                     }
 
-                    val actionType = doc.getString("actionType") ?: doc.getString("toolName") ?: ""
-                    @Suppress("UNCHECKED_CAST")
-                    val rawParams = (doc.get("parameters") as? Map<String, Any>) ?: emptyMap()
+                    val issuingUserId = doc.getString("issuingUserId") ?: ""
+                    if (issuingUserId != userId) {
+                        scope.launch {
+                            doc.reference.update(
+                                mapOf(
+                                    "lifecycleState" to "FAILED",
+                                    "resultSuccess" to false,
+                                    "resultVerified" to false,
+                                    "resultError" to "Command issuer does not match the authenticated account.",
+                                    "completedAt" to System.currentTimeMillis()
+                                )
+                            )
+                        }
+                        continue
+                    }
+
+                    val actionType = doc.getString("actionType") ?: ""
+                    val rawParams = runCatching {
+                        val json = JSONObject(doc.getString("parametersJson") ?: "{}")
+                        val values = mutableMapOf<String, Any>()
+                        val keys = json.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            val value = json.opt(key)
+                            if (value != null && value != JSONObject.NULL) values[key] = value
+                        }
+                        values
+                    }.getOrDefault(emptyMap())
                     val envelope = CommandEnvelope(
                         commandId = cmdId,
-                        issuingUserId = doc.getString("userId") ?: userId,
+                        issuingUserId = issuingUserId,
                         sourceDeviceId = doc.getString("sourceDeviceId") ?: "remote",
                         targetDeviceId = deviceId,
                         actionType = actionType,
                         parameters = rawParams,
-                        creationTime = doc.getLong("createdAt") ?: System.currentTimeMillis(),
+                        creationTime = doc.getLong("issuedAt") ?: System.currentTimeMillis(),
                         expirationTime = expiresAt,
                         replayToken = replayToken,
                         requiresConfirmation = doc.getBoolean("requiresConfirmation") ?: false,
                         correlationId = doc.getString("correlationId") ?: "corr-$cmdId",
-                        lifecycleState = CommandLifecycle.RECEIVED
+                        lifecycleState = CommandLifecycle.ACCEPTED
                     )
                     _incomingCommands.tryEmit(envelope)
                     scope.launch {
@@ -232,7 +262,7 @@ class HubMindControlPlaneTransportImpl(
         val startMs = System.currentTimeMillis()
 
         runCatching {
-            cmdRef.update(mapOf("status" to "EXECUTING", "acknowledgedAt" to startMs)).await()
+            cmdRef.update(mapOf("lifecycleState" to "EXECUTING", "acknowledgedAt" to startMs)).await()
         }
 
         if (envelope.actionType.equals("ping_device", ignoreCase = true) ||
@@ -242,9 +272,10 @@ class HubMindControlPlaneTransportImpl(
             runCatching {
                 cmdRef.update(
                     mapOf(
-                        "status" to "COMPLETED",
-                        "verified" to true,
-                        "output" to "Android agent online and responsive.",
+                        "lifecycleState" to "COMPLETED",
+                        "resultSuccess" to true,
+                        "resultVerified" to true,
+                        "resultSummary" to "Android agent online and responsive.",
                         "durationMs" to dur,
                         "completedAt" to System.currentTimeMillis()
                     )
@@ -258,9 +289,10 @@ class HubMindControlPlaneTransportImpl(
             runCatching {
                 cmdRef.update(
                     mapOf(
-                        "status" to "FAILED",
-                        "verified" to false,
-                        "error" to "AndroidUiActionExecutor is not initialized on this device.",
+                        "lifecycleState" to "FAILED",
+                        "resultSuccess" to false,
+                        "resultVerified" to false,
+                        "resultError" to "AndroidUiActionExecutor is not initialized on this device.",
                         "completedAt" to System.currentTimeMillis()
                     )
                 ).await()
@@ -269,6 +301,30 @@ class HubMindControlPlaneTransportImpl(
         }
 
         val mappedAction = mapActionName(envelope.actionType, envelope.parameters)
+        if (mappedAction == null) {
+            cmdRef.update(
+                mapOf(
+                    "lifecycleState" to "FAILED",
+                    "resultSuccess" to false,
+                    "resultVerified" to false,
+                    "resultError" to "Unsupported Android action. No fallback action was run.",
+                    "completedAt" to System.currentTimeMillis()
+                )
+            )
+            return
+        }
+        if (envelope.requiresConfirmation) {
+            cmdRef.update(
+                mapOf(
+                    "lifecycleState" to "FAILED",
+                    "resultSuccess" to false,
+                    "resultVerified" to false,
+                    "resultError" to "This action requires explicit confirmation on the target device. No confirmation was provided, so it was not executed.",
+                    "completedAt" to System.currentTimeMillis()
+                )
+            )
+            return
+        }
         val androidCmd = AndroidCommand(
             commandId = commandId,
             actionType = mappedAction,
@@ -281,10 +337,11 @@ class HubMindControlPlaneTransportImpl(
         val statusStr = if (actionResult.success) "COMPLETED" else "FAILED"
 
         val updateMap = mutableMapOf<String, Any?>(
-            "status" to statusStr,
-            "verified" to actionResult.verified,
-            "output" to (actionResult.outputText ?: ""),
-            "error" to actionResult.error,
+            "lifecycleState" to statusStr,
+            "resultSuccess" to actionResult.success,
+            "resultVerified" to actionResult.verified,
+            "resultSummary" to (actionResult.outputText ?: ""),
+            "resultError" to (actionResult.error ?: ""),
             "durationMs" to duration,
             "completedAt" to System.currentTimeMillis(),
             "result" to mapOf(
@@ -304,10 +361,12 @@ class HubMindControlPlaneTransportImpl(
                     token,
                     JSONObject().apply {
                         put("commandId", commandId)
-                        put("status", statusStr)
-                        put("verified", actionResult.verified)
-                        put("output", actionResult.outputText ?: "")
-                        put("error", actionResult.error ?: "")
+                        put("deviceId", activeDeviceId.orEmpty())
+                        put("lifecycleState", statusStr)
+                        put("resultSuccess", actionResult.success)
+                        put("resultVerified", actionResult.verified)
+                        put("resultSummary", actionResult.outputText ?: "")
+                        put("resultError", actionResult.error ?: "")
                         put("durationMs", duration)
                     }
                 )
@@ -315,7 +374,7 @@ class HubMindControlPlaneTransportImpl(
         }
     }
 
-    private fun mapActionName(rawAction: String, params: Map<String, Any>): AndroidActionType {
+    private fun mapActionName(rawAction: String, params: Map<String, Any>): AndroidActionType? {
         val candidate = (params["actionType"] as? String)?.ifBlank { null } ?: rawAction
         return when (candidate.uppercase().trim()) {
             "LAUNCH_APP", "OPEN_APP", "OPEN_APPLICATION" -> AndroidActionType.OPEN_APP
@@ -336,7 +395,7 @@ class HubMindControlPlaneTransportImpl(
             "OPEN_RECENTS", "RECENTS" -> AndroidActionType.OPEN_RECENTS
             "OPEN_NOTIFICATIONS", "NOTIFICATIONS" -> AndroidActionType.OPEN_NOTIFICATIONS
             "OPEN_QUICK_SETTINGS", "QUICK_SETTINGS" -> AndroidActionType.OPEN_QUICK_SETTINGS
-            else -> AndroidActionType.GET_SCREEN_HIERARCHY
+            else -> null
         }
     }
 
@@ -365,26 +424,39 @@ class HubMindControlPlaneTransportImpl(
             )
         }
 
-        // Unit test fallback when no Android Context / HubMindBackendClient is wired
         if (backendClient == null) {
             return CommandResult(
-                success = true,
-                verified = true,
-                output = "Target ${envelope.targetDeviceId} executed ${envelope.actionType} successfully.",
-                durationMs = 25
+                success = false,
+                verified = false,
+                error = "Android control plane is not configured. No command was sent."
             )
         }
 
         val startMs = System.currentTimeMillis()
         val db = backendClient.getFirebaseFirestore().getOrNull()
         val auth = backendClient.getFirebaseAuth().getOrNull()
-        val uid = auth?.currentUser?.uid ?: envelope.issuingUserId
+        val uid = auth?.currentUser?.uid
+        if (uid.isNullOrBlank() || uid != envelope.issuingUserId) {
+            return CommandResult(false, false, error = "The command issuer does not match the signed-in Hub-Mind account.")
+        }
 
-        if (db == null || uid.isBlank()) {
+        if (db == null) {
             return CommandResult(
                 success = false,
                 verified = false,
                 error = "Not authenticated with Hub-Mind Firestore control plane.",
+                durationMs = System.currentTimeMillis() - startMs
+            )
+        }
+
+        val devicesRef = db.collection("users").document(uid).collection("devices")
+        val sourceDevice = runCatching { devicesRef.document(envelope.sourceDeviceId).get().await() }.getOrNull()
+        val targetDevice = runCatching { devicesRef.document(envelope.targetDeviceId).get().await() }.getOrNull()
+        if (sourceDevice?.exists() != true || targetDevice?.exists() != true) {
+            return CommandResult(
+                success = false,
+                verified = false,
+                error = "The source and target devices must both be registered to this Hub-Mind account.",
                 durationMs = System.currentTimeMillis() - startMs
             )
         }
@@ -396,18 +468,18 @@ class HubMindControlPlaneTransportImpl(
 
         val cmdDoc = mapOf(
             "commandId" to envelope.commandId,
-            "userId" to uid,
+            "protocolVersion" to envelope.protocolVersion,
+            "issuingUserId" to uid,
             "sourceDeviceId" to envelope.sourceDeviceId,
             "targetDeviceId" to envelope.targetDeviceId,
             "actionType" to envelope.actionType,
-            "toolName" to envelope.actionType,
-            "parameters" to envelope.parameters,
-            "status" to "DISPATCHED",
+            "parametersJson" to JSONObject(envelope.parameters).toString(),
+            "lifecycleState" to "DISPATCHED",
             "replayToken" to envelope.replayToken,
             "correlationId" to envelope.correlationId,
             "requiresConfirmation" to envelope.requiresConfirmation,
-            "createdAt" to envelope.creationTime,
-            "expiresAt" to envelope.expirationTime
+            "issuedAt" to envelope.creationTime,
+            "expirationTime" to envelope.expirationTime
         )
 
         val writeRes = runCatching { cmdRef.set(cmdDoc).await() }
@@ -426,10 +498,13 @@ class HubMindControlPlaneTransportImpl(
                 put("sourceDeviceId", envelope.sourceDeviceId)
                 put("targetDeviceId", envelope.targetDeviceId)
                 put("actionType", envelope.actionType)
+                put("protocolVersion", envelope.protocolVersion)
                 put("parameters", JSONObject(envelope.parameters))
+                put("requiresConfirmation", envelope.requiresConfirmation)
+                put("issuedAt", envelope.creationTime)
+                put("expirationTime", envelope.expirationTime)
                 put("replayToken", envelope.replayToken)
                 put("correlationId", envelope.correlationId)
-                put("expiresAt", envelope.expirationTime)
             }
             val apiRes = backendClient.dispatchDeviceCommandOnBackend(idToken, payload)
             if (apiRes.isFailure) {
@@ -460,18 +535,18 @@ class HubMindControlPlaneTransportImpl(
                         return@addSnapshotListener
                     }
                     if (snap == null || !snap.exists()) return@addSnapshotListener
-                    val status = snap.getString("status") ?: return@addSnapshotListener
+                    val status = snap.getString("lifecycleState") ?: return@addSnapshotListener
                     when (status) {
                         "COMPLETED" -> {
-                            val verified = snap.getBoolean("verified") ?: false
-                            val output = snap.getString("output")
-                                ?: (snap.get("result") as? Map<*, *>)?.get("output")?.toString()
+                            val succeeded = snap.getBoolean("resultSuccess") ?: false
+                            val verified = snap.getBoolean("resultVerified") ?: false
+                            val output = snap.getString("resultSummary")
                                 ?: "Action completed on ${envelope.targetDeviceId}."
                             val dur = snap.getLong("durationMs") ?: (System.currentTimeMillis() - startMs)
                             if (cont.isActive) {
                                 cont.resume(
                                     CommandResult(
-                                        success = true,
+                                        success = succeeded,
                                         verified = verified,
                                         output = output,
                                         durationMs = dur
@@ -479,9 +554,8 @@ class HubMindControlPlaneTransportImpl(
                                 )
                             }
                         }
-                        "FAILED", "CANCELLED", "EXPIRED" -> {
-                            val errMsg = snap.getString("error")
-                                ?: (snap.get("result") as? Map<*, *>)?.get("error")?.toString()
+                        "FAILED", "CANCELLED", "TIMED_OUT" -> {
+                            val errMsg = snap.getString("resultError")
                                 ?: "Command $status on ${envelope.targetDeviceId}."
                             val dur = snap.getLong("durationMs") ?: (System.currentTimeMillis() - startMs)
                             if (cont.isActive) {
@@ -501,10 +575,23 @@ class HubMindControlPlaneTransportImpl(
             }
         }
 
-        return finalResult ?: CommandResult(
+        if (finalResult != null) return finalResult
+
+        runCatching {
+            cmdRef.update(
+                mapOf(
+                    "lifecycleState" to "TIMED_OUT",
+                    "resultSuccess" to false,
+                    "resultVerified" to false,
+                    "resultError" to "Timed out waiting for target device (${envelope.targetDeviceId}).",
+                    "completedAt" to System.currentTimeMillis()
+                )
+            ).await()
+        }
+        return CommandResult(
             success = false,
             verified = false,
-            error = "Timed out waiting for target device (${envelope.targetDeviceId}) to execute ${envelope.actionType}. Verify the target device is online with Full Control enabled.",
+            error = "Timed out waiting for target device (${envelope.targetDeviceId}) to execute ${envelope.actionType}. Verify the target device is online with Hub-Mind open.",
             durationMs = System.currentTimeMillis() - startMs
         )
     }

@@ -216,7 +216,39 @@ export const handler = async (event: any) => {
         };
       }
 
+      const [sourceRes, targetRes] = await Promise.all([
+        fetch(userFirestoreUrl('users/' + encodeURIComponent(caller.uid) + '/devices/' + encodeURIComponent(sourceDeviceId)), {
+          headers: { Authorization: 'Bearer ' + caller.idToken },
+          signal: AbortSignal.timeout(10_000),
+        }),
+        fetch(userFirestoreUrl('users/' + encodeURIComponent(caller.uid) + '/devices/' + encodeURIComponent(targetDeviceId)), {
+          headers: { Authorization: 'Bearer ' + caller.idToken },
+          signal: AbortSignal.timeout(10_000),
+        }),
+      ]);
+      if (!sourceRes.ok || !targetRes.ok) {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({ error: 'Both source and target devices must be registered to this Hub-Mind account before dispatch.' }),
+        };
+      }
+      const [sourceDoc, targetDoc] = await Promise.all([sourceRes.json(), targetRes.json()]);
+      const source = decodeFirestoreFields(sourceDoc.fields || {});
+      const target = decodeFirestoreFields(targetDoc.fields || {});
+      if (source.deviceId !== sourceDeviceId || target.deviceId !== targetDeviceId) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'The requested source or target device identity is invalid.' }) };
+      }
+
       const now = Date.now();
+      const expirationTime = Number(body.expirationTime || now + 30_000);
+      if (!Number.isFinite(expirationTime) || expirationTime <= now || expirationTime > now + 120_000) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'Command expiry must be in the next two minutes.' }) };
+      }
+      const replayToken = String(body.replayToken || '').trim();
+      if (!replayToken || replayToken.length > 256) {
+        return { statusCode: 400, headers, body: JSON.stringify({ error: 'A valid replay token is required.' }) };
+      }
       const envelope: Record<string, any> = {
         commandId,
         protocolVersion: String(body.protocolVersion || '1.0'),
@@ -228,8 +260,8 @@ export const handler = async (event: any) => {
         lifecycleState: 'DISPATCHED',
         requiresConfirmation: Boolean(body.requiresConfirmation),
         issuedAt: Number(body.issuedAt || now),
-        expirationTime: Number(body.expirationTime || now + 30_000),
-        replayToken: String(body.replayToken || `nonce-${commandId}`),
+        expirationTime,
+        replayToken,
       };
 
       const saveRes = await fetch(
@@ -273,6 +305,24 @@ export const handler = async (event: any) => {
       }
       const existingDoc: any = await existingRes.json();
       const existing = decodeFirestoreFields(existingDoc.fields || {});
+      const reportingDeviceId = String(body.deviceId || '').trim();
+      const terminalStates = ['COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'];
+      const allowedReporters = lifecycleState === 'TIMED_OUT' || lifecycleState === 'CANCELLED'
+        ? [existing.sourceDeviceId, existing.targetDeviceId]
+        : [existing.targetDeviceId];
+      if (!terminalStates.includes(lifecycleState) || !reportingDeviceId || !allowedReporters.includes(reportingDeviceId)) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Only a registered source/target device may report a terminal result for this command.' }) };
+      }
+      const reporterRes = await fetch(
+        userFirestoreUrl('users/' + encodeURIComponent(caller.uid) + '/devices/' + encodeURIComponent(reportingDeviceId)),
+        {
+          headers: { Authorization: 'Bearer ' + caller.idToken },
+          signal: AbortSignal.timeout(10_000),
+        }
+      );
+      if (!reporterRes.ok) {
+        return { statusCode: 403, headers, body: JSON.stringify({ error: 'Reporting device is not registered to this account.' }) };
+      }
       const updated = {
         ...existing,
         lifecycleState,

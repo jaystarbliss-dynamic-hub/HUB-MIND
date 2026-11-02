@@ -34,7 +34,9 @@ interface RepoRelease {
   htmlUrl: string;
   body: string;
   isLatest: boolean;
+  isPrerelease?: boolean;
   installerAsset?: RepoReleaseAsset;
+  apkAsset?: RepoReleaseAsset;
   extensionAsset?: RepoReleaseAsset;
 }
 
@@ -69,7 +71,8 @@ export function DesktopUpdatesModal({
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = propIsOpen !== undefined ? propIsOpen : internalOpen;
 
-  const [activeTab, setActiveTab] = useState<'releases' | 'commits' | 'codebase'>('releases');
+  const [activeTab, setActiveTab] = useState<'releases' | 'android' | 'commits' | 'codebase'>('releases');
+  const [androidReleases, setAndroidReleases] = useState<RepoRelease[]>([]);
   const [loading, setLoading] = useState(false);
   const [releases, setReleases] = useState<RepoRelease[]>([]);
   const [commits, setCommits] = useState<RepoCommit[]>([]);
@@ -149,7 +152,34 @@ export function DesktopUpdatesModal({
       const rawCommits = comRes && comRes.ok ? await comRes.json().catch(() => []) : [];
       const rawRepo = repoRes && repoRes.ok ? await repoRes.json().catch(() => null) : null;
 
-      let mappedReleases: RepoRelease[] = (Array.isArray(rawReleases) ? rawReleases : []).map((rel: any, idx: number) => {
+      const nonDraftReleases = (Array.isArray(rawReleases) ? rawReleases : []).filter((rel: any) => !rel.draft);
+      const publishedReleases = nonDraftReleases.filter((rel: any) => !rel.prerelease);
+      let mappedAndroidReleases: RepoRelease[] = nonDraftReleases
+        .map((rel: any) => {
+          const apk = (Array.isArray(rel.assets) ? rel.assets : []).find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
+          if (!apk) return null;
+          return {
+            id: rel.id,
+            tag: rel.tag_name || `release-${rel.id}`,
+            name: rel.name || rel.tag_name || 'Hub-Mind Android Release',
+            publishedAt: rel.published_at || rel.created_at || new Date().toISOString(),
+            htmlUrl: rel.html_url || `https://github.com/${repoSlug}/releases`,
+            body: rel.body || 'No release notes provided for this Android version.',
+            isLatest: false,
+            isPrerelease: Boolean(rel.prerelease),
+            apkAsset: {
+              id: apk.id,
+              name: apk.name || 'Hub-Mind-Android.apk',
+              sizeFormatted: formatAssetBytes(apk.size || 0),
+              downloadUrl: apk.browser_download_url || '',
+            },
+          } as RepoRelease;
+        })
+        .filter((release: RepoRelease | null): release is RepoRelease => Boolean(release));
+      const latestStableAndroidRelease = mappedAndroidReleases.find((release) => !release.isPrerelease);
+      if (latestStableAndroidRelease) latestStableAndroidRelease.isLatest = true;
+
+      let mappedReleases: RepoRelease[] = publishedReleases.map((rel: any, idx: number) => {
         const rawAssets = Array.isArray(rel.assets) ? rel.assets : [];
         const assets: RepoReleaseAsset[] = rawAssets.map((a: any) => ({
           id: a.id,
@@ -159,6 +189,7 @@ export function DesktopUpdatesModal({
         }));
         const installerAsset = assets.find((a) => /\.exe$/i.test(a.name));
         const extensionAsset = assets.find((a) => /extension\.zip$/i.test(a.name) || /Jess-Chrome-Extension/i.test(a.name));
+        const apkAsset = assets.find((a) => /\.apk$/i.test(a.name));
         return {
           id: rel.id,
           tag: rel.tag_name || `release-${rel.id}`,
@@ -168,9 +199,10 @@ export function DesktopUpdatesModal({
           body: rel.body || 'No release notes provided for this version.',
           isLatest: idx === 0,
           installerAsset,
+          apkAsset,
           extensionAsset,
         };
-      });
+      }).filter((release) => Boolean(release.installerAsset) || /^desktop-/i.test(release.tag));
 
       if (mappedReleases.length === 0) {
         mappedReleases = BUNDLED_FALLBACK_RELEASES;
@@ -186,6 +218,7 @@ export function DesktopUpdatesModal({
       }));
 
       setReleases(mappedReleases);
+      setAndroidReleases(mappedAndroidReleases);
       setCommits(mappedCommits);
       if (rawRepo) {
         setOverview({
@@ -205,13 +238,53 @@ export function DesktopUpdatesModal({
       }
     } catch {
       setReleases(BUNDLED_FALLBACK_RELEASES);
+      setAndroidReleases([]);
       setExpandedRelease(BUNDLED_FALLBACK_RELEASES[0].tag);
+    }
+  };
+
+  const fetchAndroidReleaseHistory = async () => {
+    try {
+      const response = await fetch('https://api.github.com/repos/jaystarbliss-dynamic-hub/HUB-MIND/releases?per_page=50', {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (!response.ok) return;
+      const raw = await response.json();
+      const mapped: RepoRelease[] = (Array.isArray(raw) ? raw : [])
+        .filter((rel: any) => !rel.draft)
+        .map((rel: any) => {
+          const apk = (Array.isArray(rel.assets) ? rel.assets : []).find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
+          if (!apk) return null;
+          return {
+            id: rel.id,
+            tag: rel.tag_name || `release-${rel.id}`,
+            name: rel.name || rel.tag_name || 'Hub-Mind Android Release',
+            publishedAt: rel.published_at || rel.created_at || new Date().toISOString(),
+            htmlUrl: rel.html_url || 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases',
+            body: rel.body || 'No release notes provided for this Android version.',
+            isLatest: false,
+            isPrerelease: Boolean(rel.prerelease),
+            apkAsset: {
+              id: apk.id,
+              name: apk.name || 'Hub-Mind-Android.apk',
+              sizeFormatted: formatAssetBytes(apk.size || 0),
+              downloadUrl: apk.browser_download_url || '',
+            },
+          } as RepoRelease;
+        })
+        .filter((release: RepoRelease | null): release is RepoRelease => Boolean(release));
+      const latestStableRelease = mapped.find((release) => !release.isPrerelease);
+      if (latestStableRelease) latestStableRelease.isLatest = true;
+      setAndroidReleases(mapped);
+    } catch {
+      // Preserve the last successful result when GitHub is unavailable.
     }
   };
 
   const loadRepositoryData = async (forceFresh = false) => {
     setLoading(true);
     setError(null);
+    void fetchAndroidReleaseHistory();
     try {
       const res = await fetch(`/api/repository-context${forceFresh ? '?fresh=true' : ''}`, {
         headers: { Accept: 'application/json' },
@@ -318,26 +391,26 @@ export function DesktopUpdatesModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="desktop-updates-title"
-      className="fixed inset-0 z-[10001] flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[10001] flex items-stretch justify-center p-0 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200 sm:items-center sm:p-5"
     >
-      <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl bg-slate-900 border border-teal-500/30 shadow-2xl shadow-teal-950/60 overflow-hidden text-slate-100">
+      <div className="relative flex h-[100dvh] max-h-[100dvh] w-full flex-col overflow-hidden rounded-none border-0 bg-slate-900 text-slate-100 shadow-2xl shadow-teal-950/60 sm:h-auto sm:max-h-[90vh] sm:max-w-4xl sm:rounded-3xl sm:border sm:border-teal-500/30">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-teal-500/20 bg-slate-950/60">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-teal-500/20 bg-slate-950/60 px-4 py-3 sm:items-center sm:px-6 sm:py-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-300">
               <Layers className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 id="desktop-updates-title" className="text-base sm:text-lg font-bold text-teal-300 tracking-wide">
+                <h2 id="desktop-updates-title" className="text-sm font-bold leading-tight text-teal-300 tracking-wide sm:text-lg">
                   Desktop Releases & Version History
                 </h2>
                 <span className="px-2 py-0.5 text-[10px] font-semibold bg-teal-500/10 text-teal-300 rounded-full border border-teal-500/20">
                   Live GitHub
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Official releases, Windows desktop installers, and changelogs for Hub-Mind
+              <p className="hidden text-xs text-slate-400 sm:block">
+                Windows and Android releases, installers, APKs and changelogs for Hub-Mind
               </p>
             </div>
           </div>
@@ -353,7 +426,7 @@ export function DesktopUpdatesModal({
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-teal-400' : ''}`} />
             </button>
             <a
-              href="https://github.com/Jaystarbliss-studios/HUB-MIND"
+              href="https://github.com/jaystarbliss-dynamic-hub/HUB-MIND"
               target="_blank"
               rel="noreferrer"
               title="Open GitHub Repository"
@@ -376,7 +449,7 @@ export function DesktopUpdatesModal({
 
         {/* Latest Version Hero Banner */}
         {latestRelease && (
-          <div className="mx-6 mt-4 p-4 rounded-2xl bg-gradient-to-r from-teal-950/60 via-slate-900 to-slate-950 border border-teal-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="mx-3 mt-3 p-3 rounded-2xl sm:mx-6 sm:mt-4 sm:p-4 rounded-2xl bg-gradient-to-r from-teal-950/60 via-slate-900 to-slate-950 border border-teal-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-teal-500/20 border border-teal-500/40 text-teal-300 shrink-0">
                 <Zap className="w-5 h-5" />
@@ -417,7 +490,7 @@ export function DesktopUpdatesModal({
         )}
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-2 px-6 mt-4 border-b border-slate-800">
+        <div className="mt-3 flex shrink-0 items-center gap-2 overflow-x-auto whitespace-nowrap border-b border-slate-800 px-3 sm:mt-4 sm:px-6">
           <button
             type="button"
             onClick={() => setActiveTab('releases')}
@@ -428,7 +501,19 @@ export function DesktopUpdatesModal({
             }`}
           >
             <Tag className="w-3.5 h-3.5" />
-            <span>Version Releases ({releases.length})</span>
+            <span>Windows ({releases.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('android')}
+            className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'android'
+                ? 'border-teal-400 text-teal-300'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Android ({androidReleases.length})</span>
           </button>
           <button
             type="button"
@@ -460,7 +545,7 @@ export function DesktopUpdatesModal({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 space-y-4 sm:p-6">
           {error && (
             <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -486,7 +571,7 @@ export function DesktopUpdatesModal({
                   >
                     <div
                       onClick={() => setExpandedRelease(isExpanded ? null : release.tag)}
-                      className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-slate-900/50 transition-colors"
+                      className="flex flex-col gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-slate-900/50 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="w-8 h-8 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 font-mono text-xs font-bold shrink-0">
@@ -524,7 +609,7 @@ export function DesktopUpdatesModal({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center justify-end gap-2 sm:shrink-0">
                         {release.installerAsset && (
                           <a
                             href={release.installerAsset.downloadUrl}
@@ -589,6 +674,76 @@ export function DesktopUpdatesModal({
             </div>
           )}
 
+          {activeTab === 'android' && (
+            <div className="space-y-3">
+              {androidReleases.some((release) => release.isPrerelease) && (
+                <div role="note" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs leading-relaxed text-amber-100">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                  <p>
+                    <strong>Testing downloads only.</strong> The debug-signed APK is not an official production release and cannot update an installation signed with a different certificate. It is not offered through the in-app automatic updater.
+                  </p>
+                </div>
+              )}
+              {androidReleases.length === 0 && !loading && (
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-8 text-center">
+                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-400">
+                    <Download className="h-5 w-5" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-slate-200">No Android release published yet</h3>
+                  <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-slate-400">
+                    No Android APK has been uploaded yet. Once CI publishes a verified test build or an official signed release, it will appear here for direct download.
+                  </p>
+                </div>
+              )}
+              {androidReleases.map((release) => {
+                const isExpanded = expandedRelease === release.tag;
+                return (
+                  <article key={release.id} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/70">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedRelease(isExpanded ? null : release.tag)}
+                      className="flex w-full min-w-0 items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-900/50"
+                    >
+                      <span className="flex min-w-0 items-start gap-3">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-teal-500/20 bg-teal-500/10 text-teal-400">
+                          <Tag className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="break-words text-sm font-bold text-slate-100">{release.name}</span>
+                            <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[11px] text-teal-300">{release.tag}</span>
+                            {release.isPrerelease && <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">TEST BUILD · DEBUG SIGNED</span>}
+                            {release.isLatest && <span className="rounded border border-teal-500/30 bg-teal-500/20 px-2 py-0.5 text-[10px] font-bold text-teal-300">LATEST</span>}
+                          </span>
+                          <span className="mt-1 block text-xs text-slate-400">
+                            {new Date(release.publishedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                            {release.apkAsset ? ` · ${release.apkAsset.name} (${release.apkAsset.sizeFormatted})` : ''}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="shrink-0 pt-1 text-slate-400">{isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+                    </button>
+                    {isExpanded && (
+                      <div className="space-y-3 border-t border-slate-800/80 bg-slate-900/40 px-4 pb-4 pt-3">
+                        <p className="whitespace-pre-wrap break-words rounded-xl border border-slate-800/80 bg-slate-950/50 p-3 text-xs leading-relaxed text-slate-300">{release.body || 'No detailed changelog provided.'}</p>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          {release.apkAsset && (
+                            <a href={release.apkAsset.downloadUrl} download className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-teal-500/30 bg-teal-500/10 px-4 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-500/20">
+                              <Download className="h-4 w-4" />
+                              {release.isPrerelease ? 'Download Android test APK' : 'Download Android APK'} ({release.apkAsset.sizeFormatted})
+                            </a>
+                          )}
+                          <a href={release.htmlUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300">
+                            View release on GitHub <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
           {/* TAB 2: COMMITS */}
           {activeTab === 'commits' && (
             <div className="space-y-2">
@@ -598,7 +753,7 @@ export function DesktopUpdatesModal({
               {commits.map((commit) => (
                 <div
                   key={commit.fullSha}
-                  className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 flex items-start justify-between gap-3"
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-800 bg-slate-950/70 p-3 sm:flex-row sm:items-start sm:justify-between"
                 >
                   <div className="flex items-start gap-2.5 min-w-0">
                     <GitCommit className="w-4 h-4 text-teal-400 mt-0.5 shrink-0" />
@@ -666,10 +821,10 @@ export function DesktopUpdatesModal({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-800 bg-slate-950/60 px-4 py-2 text-[11px] text-slate-400 sm:px-6 sm:py-3 sm:text-xs">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
-            <span>Jaystarbliss Studios • Hub-Mind Operations</span>
+            <span className="hidden sm:inline">Jaystarbliss Studios • Hub-Mind Operations</span>
           </div>
           <button
             type="button"
