@@ -42,7 +42,9 @@ jobs:
           : "${ANDROID_HOME:?GitHub runner Android SDK is not configured}"
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | sort | tail -n 1)"
           test -n "$SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses >/dev/null
+          set +o pipefail
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>/dev/null
+          set -o pipefail
           "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
