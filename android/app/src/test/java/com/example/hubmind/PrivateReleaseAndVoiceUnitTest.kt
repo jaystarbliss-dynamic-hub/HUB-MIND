@@ -21,13 +21,17 @@ class PrivateReleaseAndVoiceUnitTest {
         val manifest = AppUpdateManifest(
             versionCode = 250,
             versionName = "2.5.0",
-            apkUrl = "https://hub-mind.netlify.app/downloads/hubmind-release.apk",
+            applicationId = "com.aistudio.hubmind.wzyqkp",
+            apkUrl = "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.5.0/Hub-Mind-Android-v2.5.0.apk",
+            sha256 = "a".repeat(64),
             releaseNotes = "New hands-free features and bug fixes."
         )
 
         assertTrue(manifest.versionCode > currentCode)
         assertEquals("2.5.0", manifest.versionName)
-        assertEquals("https://hub-mind.netlify.app/downloads/hubmind-release.apk", manifest.apkUrl)
+        assertEquals("com.aistudio.hubmind.wzyqkp", manifest.applicationId)
+        assertEquals("a".repeat(64), manifest.sha256)
+        assertTrue(manifest.apkUrl.startsWith("https://github.com/"))
     }
 
     @Test

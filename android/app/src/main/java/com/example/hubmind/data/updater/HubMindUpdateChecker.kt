@@ -93,7 +93,91 @@ class HubMindUpdateChecker(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    suspend fun downloadAndVerifyApk(update: AppUpdateManifest): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(update.applicationId == context.packageName) {
+                "This update is for a different Android application."
+            }
+            val apkUri = Uri.parse(update.apkUrl)
+            require(apkUri.scheme.equals("https", ignoreCase = true) && !apkUri.host.isNullOrBlank()) {
+                "The update URL is not a valid HTTPS address."
+            }
+            require(update.sha256.matches(Regex("(?i)^[a-f0-9]{64}$"))) {
+                "The release manifest does not contain a valid SHA-256 checksum."
+            }
+
+            val updateDirectory = File(context.cacheDir, "updates").apply {
+                if (!exists() && !mkdirs()) throw IllegalStateException("Could not create the update cache directory.")
+            }
+            val safeVersion = update.versionName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)
+            val apkFile = File(updateDirectory, "hub-mind-$safeVersion.apk")
+            var connection: HttpURLConnection? = null
+            try {
+                connection = URL(update.apkUrl).openConnection() as HttpURLConnection
+                connection.connectTimeout = 15_000
+                connection.readTimeout = 45_000
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("Accept", "application/vnd.android.package-archive")
+                connection.instanceFollowRedirects = true
+                if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                    throw IllegalStateException("APK download failed (HTTP ${connection.responseCode}).")
+                }
+                val finalUrl = connection.url
+                require(finalUrl.protocol.equals("https", ignoreCase = true)) {
+                    "The APK download redirected to an insecure URL."
+                }
+                val contentLength = connection.contentLengthLong
+                require(contentLength <= 250L * 1024L * 1024L) {
+                    "The APK exceeds the 250 MB update size limit."
+                }
+                connection.inputStream.use { input ->
+                    apkFile.outputStream().use { output ->
+                        val buffer = ByteArray(32 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            require(total <= 250L * 1024L * 1024L) {
+                                "The APK exceeded the 250 MB update size limit."
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+                require(apkFile.length() > 0L && (contentLength <= 0L || apkFile.length() == contentLength)) {
+                    "The downloaded APK is incomplete."
+                }
+            } finally {
+                connection?.disconnect()
+            }
+
+            if (!verifyApkChecksum(apkFile, update.sha256)) {
+                apkFile.delete()
+                throw IllegalStateException("APK checksum verification failed. The file was deleted and will not be installed.")
+            }
+            apkFile
+        }
+    }
+
+    fun canInstallUnknownApps(): Boolean {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+    }
+
+    fun openInstallPermissionSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !canInstallUnknownApps()) {
+            val intent = Intent(
+                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:${context.packageName}")
+            ).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+    }
+
     fun promptPackageInstall(apkFile: File) {
+        require(apkFile.isFile && apkFile.length() > 0L) { "A verified APK file is required for installation." }
         val intent = Intent(Intent.ACTION_VIEW).apply {
             val uri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apkFile)

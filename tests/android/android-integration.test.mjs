@@ -176,3 +176,18 @@ test('Version history has separate Windows/Android tabs and uses a viewport-safe
   assert.match(modal, /sm:max-h-\[90vh\]/);
   assert.match(modal, /github\.com\/jaystarbliss-dynamic-hub\/HUB-MIND/);
 });
+
+
+test('Android updater downloads to app-private cache, verifies checksum, and exposes a guarded installer action', () => {
+  const checker = read('android/app/src/main/java/com/example/hubmind/data/updater/HubMindUpdateChecker.kt');
+  const viewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsViewModel.kt');
+  const screen = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsScreen.kt');
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  assert.match(checker, /suspend fun downloadAndVerifyApk/);
+  assert.match(checker, /verifyApkChecksum\(apkFile, update\.sha256\)/);
+  assert.match(checker, /APK checksum verification failed/);
+  assert.match(checker, /canRequestPackageInstalls/);
+  assert.match(viewModel, /downloadAndInstallUpdate/);
+  assert.match(screen, /Download & Install v/);
+  assert.match(manifest, /android\.permission\.REQUEST_INSTALL_PACKAGES/);
+});

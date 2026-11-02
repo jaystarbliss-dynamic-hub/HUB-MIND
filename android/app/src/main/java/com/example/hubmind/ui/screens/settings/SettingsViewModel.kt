@@ -47,7 +47,8 @@ class SettingsViewModel(
 
     private val actionExecutor = AndroidUiActionExecutor(context)
     private val advancedProvider: AdvancedDeviceControlProvider = ShizukuDeviceControlProvider()
-    private val updateChecker = HubMindUpdateChecker(context)
+    private val context = context.applicationContext
+    private val updateChecker = HubMindUpdateChecker(this.context)
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
@@ -180,7 +181,45 @@ class SettingsViewModel(
             } else {
                 _uiState.value = _uiState.value.copy(
                     availableUpdate = null,
-                    updateStatusMessage = "Hub-Mind Android v2.4.0 (build 240) is up to date."
+                    updateStatusMessage = "No newer published Android release is available. Current installed build: 240."
+                )
+            }
+        }
+    }
+
+    fun downloadAndInstallUpdate(update: AppUpdateManifest) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                updateStatusMessage = "Downloading v${update.versionName} and verifying its SHA-256 checksum..."
+            )
+            val download = updateChecker.downloadAndVerifyApk(update)
+            download.onSuccess { apkFile ->
+                if (!updateChecker.canInstallUnknownApps()) {
+                    _uiState.value = _uiState.value.copy(
+                        updateStatusMessage = "The APK passed checksum verification. Allow Hub-Mind to install updates from this source, then tap Download & Install again."
+                    )
+                    runCatching { updateChecker.openInstallPermissionSettings() }
+                        .onFailure { err ->
+                            _uiState.value = _uiState.value.copy(
+                                updateStatusMessage = "APK verified, but Android installation permission settings could not be opened: ${err.message}"
+                            )
+                        }
+                } else {
+                    runCatching { updateChecker.promptPackageInstall(apkFile) }
+                        .onSuccess {
+                            _uiState.value = _uiState.value.copy(
+                                updateStatusMessage = "APK checksum verified. Android's package installer has been opened."
+                            )
+                        }
+                        .onFailure { err ->
+                            _uiState.value = _uiState.value.copy(
+                                updateStatusMessage = "APK verified, but Android could not open the installer: ${err.message}"
+                            )
+                        }
+                }
+            }.onFailure { err ->
+                _uiState.value = _uiState.value.copy(
+                    updateStatusMessage = "Update download or verification failed: ${err.message ?: "Unknown error"}"
                 )
             }
         }
