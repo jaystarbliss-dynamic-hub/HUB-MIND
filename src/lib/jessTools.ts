@@ -254,6 +254,8 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
   { name: 'open_visual_updates_panel', description: 'Open the visual Desktop Releases & Version History panel on screen for the user so they can visually view all releases, download desktop installers, and review changelogs.', parameters: object({}) },
   { name: 'list_paired_devices', description: 'List all paired and registered Hub-Mind devices on this user account (Android phones, Windows workstations, and web sessions) with online/offline status, battery, capabilities, and permission mode.', parameters: object({}) },
   { name: 'control_android_device', description: 'Dispatch an authenticated native action to the user’s paired Android phone via the Hub-Mind cross-device control plane and await the verified result from the phone agent. Supported actions: LAUNCH_APP, OPEN_DEEP_LINK, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, CLIPBOARD_READ, CLIPBOARD_WRITE, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, SET_VOLUME, GET_DEVICE_STATUS, GET_INSTALLED_APPS.', parameters: object({ targetDeviceId: { type: 'string', description: 'Optional specific Android deviceId from list_paired_devices; defaults to the primary online Android device.' }, actionType: { type: 'string', enum: ['LAUNCH_APP', 'OPEN_DEEP_LINK', 'TAP', 'DOUBLE_TAP', 'LONG_PRESS', 'SWIPE', 'SCROLL', 'TYPE_TEXT', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS', 'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS', 'CLIPBOARD_READ', 'CLIPBOARD_WRITE', 'GET_SCREEN_HIERARCHY', 'CAPTURE_SCREEN', 'SET_VOLUME', 'GET_DEVICE_STATUS', 'GET_INSTALLED_APPS'] }, packageName: { type: 'string' }, appName: { type: 'string' }, uri: { type: 'string' }, text: { type: 'string' }, targetText: { type: 'string' }, viewId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, startX: { type: 'number' }, startY: { type: 'number' }, endX: { type: 'number' }, endY: { type: 'number' }, direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, level: { type: 'number' } }, ['actionType']) },
+  { name: 'android_device_action', description: 'Execute an owner-authorized action on this Android phone using the installed Hub-Mind native agent. Actions include launching an app, tapping/swiping/scrolling, typing into the focused field, Android navigation, reading the visible accessibility hierarchy, reading device status, clipboard actions and volume control. Accessibility actions require the user to enable Hub-Mind Accessibility in Android Settings. Never claim success without a positive native result.', parameters: object({ actionType: { type: 'string', enum: ['LAUNCH_APP','OPEN_DEEP_LINK','TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS','CLIPBOARD_READ','CLIPBOARD_WRITE','GET_SCREEN_HIERARCHY','CAPTURE_SCREEN','SET_VOLUME','GET_DEVICE_STATUS','GET_INSTALLED_APPS'] }, packageName: { type: 'string' }, appName: { type: 'string' }, uri: { type: 'string' }, text: { type: 'string' }, targetText: { type: 'string' }, viewId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, startX: { type: 'number' }, startY: { type: 'number' }, endX: { type: 'number' }, endY: { type: 'number' }, direction: { type: 'string', enum: ['up','down','left','right'] }, level: { type: 'number' } }, ['actionType']) },
+  { name: 'control_paired_device', description: 'Send a command to another paired Hub-Mind device, such as the Windows laptop, and wait for its execution result. Use list_paired_devices first when the target is ambiguous. The actionType must be a tool supported by the target device. The remote device must be online and its Hub-Mind agent active.', parameters: object({ targetDeviceId: { type: 'string' }, actionType: { type: 'string' }, arguments: { type: 'object' }, timeoutMs: { type: 'number' } }, ['targetDeviceId','actionType']) },
   
   // Workspace Users & Directory
   { name: 'list_workspace_users', description: 'List and search colleagues, team members, and users in the Hub-Mind workspace to find usernames, roles, and contacts for sharing resources, assigning tasks, and sending schedules.', parameters: object({ query: { type: 'string', description: 'Optional search query by name, username, or email' }, limit: { type: 'number' } }) },
@@ -696,6 +698,48 @@ export async function executeJessTool(
         if (!desktop?.isDesktopApp || typeof desktop.showMain !== 'function') return { result: { success: false, error: 'Bringing the Hub-Mind workspace to the foreground is available only in the installed Windows desktop app.' } };
         const shown = await desktop.showMain();
         return { result: { success: shown === true, verified: shown === true, message: shown === true ? 'Hub-Mind workspace foreground request completed.' : 'Hub-Mind workspace foreground could not be confirmed.' } };
+      }
+      case 'list_paired_devices': {
+        const devices = await listUserDevices(user.id);
+        return { result: { success: true, total: devices.length, devices } };
+      }
+      case 'control_android_device': {
+        const devices = await listUserDevices(user.id);
+        const onlineAndroid = devices.filter((device: any) => device.platform === 'ANDROID' && device.status === 'ONLINE');
+        const requestedId = String(args?.targetDeviceId || '').trim();
+        const target = requestedId
+          ? onlineAndroid.find((device: any) => device.deviceId === requestedId)
+          : onlineAndroid[0];
+        if (!target) {
+          return { result: { success: false, verified: false, error: requestedId
+            ? 'The selected Android device is not currently online or is not paired to this account.'
+            : 'No online Android phone is paired. Open Hub-Mind on the phone and enable its device agent.' } };
+        }
+        const action = String(args?.actionType || '').trim().toUpperCase();
+        const allowed = new Set(['LAUNCH_APP','OPEN_DEEP_LINK','TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS','CLIPBOARD_READ','CLIPBOARD_WRITE','GET_SCREEN_HIERARCHY','CAPTURE_SCREEN','SET_VOLUME','GET_DEVICE_STATUS','GET_INSTALLED_APPS']);
+        if (!allowed.has(action)) return { result: { success: false, verified: false, error: 'Unsupported Android action.' } };
+        const dispatched = await dispatchCrossDeviceCommand(user.id, target.deviceId, 'android_device_action', { ...args, actionType: action }, Number(args?.timeoutMs) || 30000);
+        return { result: { success: dispatched.success, verified: dispatched.verified, commandId: dispatched.commandId, targetDeviceId: dispatched.targetDeviceId, message: dispatched.summary, error: dispatched.error } };
+      }
+      case 'control_paired_device': {
+        const targetDeviceId = String(args?.targetDeviceId || '').trim();
+        const actionType = String(args?.actionType || '').trim();
+        if (!targetDeviceId || !actionType) return { result: { success: false, verified: false, error: 'A target device and action type are required.' } };
+        const devices = await listUserDevices(user.id);
+        const target = devices.find((device: any) => device.deviceId === targetDeviceId);
+        if (!target || target.status !== 'ONLINE') return { result: { success: false, verified: false, error: 'The selected device is not online or is not paired to this account.' } };
+        const payload = args?.arguments && typeof args.arguments === 'object' && !Array.isArray(args.arguments) ? args.arguments : {};
+        const dispatched = await dispatchCrossDeviceCommand(user.id, targetDeviceId, actionType, payload, Math.max(5000, Math.min(60000, Number(args?.timeoutMs) || 30000)));
+        return { result: { success: dispatched.success, verified: dispatched.verified, commandId: dispatched.commandId, targetDeviceId, message: dispatched.summary, error: dispatched.error } };
+      }
+      case 'android_device_action': {
+        const android = (window as any).hubMindAndroid;
+        if (!android?.isAndroidApp || typeof android.executeTool !== 'function') {
+          return { result: { success: false, verified: false, error: 'The native Android control bridge is not available on this device.' } };
+        }
+        const nativeResult = await android.executeTool('android_device_action', args || {}, user.id);
+        const ok = nativeResult?.success === true || nativeResult?.ok === true;
+        return { result: { ...nativeResult, success: ok, verified: nativeResult?.verified === true, status: ok ? (nativeResult?.verified === true ? 'done_verified' : 'sent_unverified') : 'failed' } };
       }
       case 'start_hubmind_auto_scroll': {
         const result = startHubMindAutoScroll({ direction: args?.direction === 'up' ? 'up' : 'down', speed: args?.speed ?? 4 });
