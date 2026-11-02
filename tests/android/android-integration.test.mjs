@@ -169,7 +169,7 @@ test('Android CI fixes Metaspace and fingerprints the built APK instead of assum
 test('Version history has separate Windows/Android tabs and uses a viewport-safe mobile modal', () => {
   const modal = read('src/components/DesktopUpdatesModal.tsx');
   assert.match(modal, /activeTab === 'android'/);
-  assert.match(modal, /Windows \\(/);
+  assert.match(modal, /Windows \(/);
   assert.match(modal, /Android \(/);
   assert.match(modal, /h-\[100dvh\]/);
   assert.match(modal, /overflow-x-auto whitespace-nowrap/);
