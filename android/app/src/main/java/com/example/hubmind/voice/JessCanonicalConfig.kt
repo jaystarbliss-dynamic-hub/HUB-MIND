@@ -13,8 +13,8 @@ object JessCanonicalConfig {
         memories: List<UserMemory>,
         devices: List<DeviceNode>,
         targetDevice: DeviceNode?,
-        permissionMode: String = "allow-routine",
-        fullControlEnabled: Boolean = true
+        permissionMode: String = "ask",
+        fullControlEnabled: Boolean = false
     ): String {
         val userName = user?.preferredName?.takeIf { it.isNotBlank() }
             ?: user?.displayName?.takeIf { it.isNotBlank() }
@@ -80,7 +80,7 @@ object JessCanonicalConfig {
                         put("type", "STRING")
                         put(
                             "description",
-                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
+                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, SET_VOLUME, GET_DEVICE_STATUS, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
                         )
                     })
                     put("packageName", JSONObject().put("type", "STRING").put("description", "Android package name (e.g. com.android.chrome)"))
@@ -91,6 +91,7 @@ object JessCanonicalConfig {
                     put("x", JSONObject().put("type", "NUMBER").put("description", "Screen X coordinate in pixels"))
                     put("y", JSONObject().put("type", "NUMBER").put("description", "Screen Y coordinate in pixels"))
                     put("direction", JSONObject().put("type", "STRING").put("description", "Scroll or swipe direction: up, down, left, right"))
+                    put("level", JSONObject().put("type", "NUMBER").put("description", "Media volume level from 0 to 100 when using SET_VOLUME"))
                 })
                 put("required", JSONArray().put("actionType"))
             })
