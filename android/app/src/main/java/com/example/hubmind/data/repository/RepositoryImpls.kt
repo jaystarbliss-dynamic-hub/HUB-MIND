@@ -80,7 +80,8 @@ class AuthRepositoryImpl(
         val loaded = loadAndValidateFirestoreUser(
             uid = fbUser.uid,
             email = fbUser.email ?: "",
-            displayName = fbUser.displayName ?: ""
+            displayName = fbUser.displayName ?: "",
+            invitationId = null
         )
         loaded.onSuccess { user ->
             _currentUser.value = user
@@ -96,18 +97,17 @@ class AuthRepositoryImpl(
     private suspend fun loadAndValidateFirestoreUser(
         uid: String,
         email: String,
-        displayName: String
+        displayName: String,
+        invitationId: String? = null
     ): Result<User> = runCatching {
         val normalizedEmail = email.trim().lowercase()
+        require(normalizedEmail.isNotBlank()) { "Firebase did not return an email address for this Hub-Mind account." }
         val isBootstrapAdmin = normalizedEmail in BOOTSTRAP_ADMIN_EMAILS
         val client = backendClient
             ?: return@runCatching User(
                 id = uid,
                 email = normalizedEmail,
-                displayName = displayName.ifBlank {
-                    if (isBootstrapAdmin) "John Rufai" else normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
-                },
-                preferredName = if (isBootstrapAdmin) "Johnny" else "",
+                displayName = displayName.ifBlank { normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() } },
                 role = if (isBootstrapAdmin) "admin" else "staff",
                 status = "active",
                 lastSeenAt = Instant.now().toString()
@@ -116,55 +116,126 @@ class AuthRepositoryImpl(
         val db = client.getFirebaseFirestore().getOrThrow()
         val userRef = db.collection("users").document(uid)
         val snap = userRef.get().await()
-        val nowIso = Instant.now().toString()
+        val now = Instant.now()
+        val nowIso = now.toString()
 
         if (!snap.exists()) {
-            val defaultRole = if (isBootstrapAdmin) "admin" else "staff"
-            val defaultName = displayName.ifBlank {
-                if (isBootstrapAdmin) "John Rufai" else normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
+            if (isBootstrapAdmin) {
+                val baseUsername = normalizedEmail.substringBefore("@")
+                    .lowercase()
+                    .replace(Regex("[^a-z0-9_]"), "_")
+                    .trim('_')
+                    .take(18)
+                    .let { if (it.length >= 3) it else "admin" }
+                val usernameQuery = db.collection("users")
+                    .whereEqualTo("username", baseUsername)
+                    .limit(1)
+                    .get()
+                    .await()
+                val username = if (usernameQuery.isEmpty) baseUsername
+                    else "${baseUsername.take(18)}_${uid.takeLast(8).lowercase()}"
+                val adminName = displayName.ifBlank { "Administrator" }
+                val adminDoc = mapOf(
+                    "id" to uid,
+                    "username" to username,
+                    "name" to adminName,
+                    "displayName" to adminName,
+                    "email" to normalizedEmail,
+                    "role" to "admin",
+                    "status" to "active",
+                    "preferredName" to adminName.substringBefore(" ").ifBlank { "Admin" },
+                    "createdAt" to nowIso,
+                    "approvedAt" to nowIso,
+                    "defaultVisibility" to "workspace"
+                )
+                userRef.set(adminDoc).await()
+            } else {
+                val inviteId = invitationId?.trim().orEmpty()
+                if (inviteId.isBlank()) {
+                    throw IllegalStateException("This Google account is not yet authorized for Hub-Mind. Enter the invitation code supplied by your administrator.")
+                }
+
+                val invitationRef = db.collection("invitations").document(inviteId)
+                val invitationSnap = invitationRef.get().await()
+                if (!invitationSnap.exists()) throw IllegalStateException("Hub-Mind invitation was not found.")
+                val invitedUsername = invitationSnap.getString("username")?.trim()?.lowercase().orEmpty()
+                val invitedName = invitationSnap.getString("displayName")?.trim().orEmpty()
+                val invitationEmail = invitationSnap.getString("email")?.trim()?.lowercase().orEmpty()
+                val invitationStatus = invitationSnap.getString("status")?.lowercase().orEmpty()
+                val expiresAt = invitationSnap.getString("expiresAt")?.let {
+                    runCatching { Instant.parse(it).toEpochMilli() }.getOrDefault(0L)
+                } ?: 0L
+                if (invitationStatus != "invited") throw IllegalStateException("This Hub-Mind invitation is no longer active.")
+                if (invitationEmail != normalizedEmail) throw IllegalStateException("Sign in with the exact Google account that received this invitation.")
+                if (expiresAt <= System.currentTimeMillis()) throw IllegalStateException("This Hub-Mind invitation has expired.")
+                if (invitedUsername.length !in 3..30 || !invitedUsername.matches(Regex("[a-z0-9_]+"))) {
+                    throw IllegalStateException("The invitation contains an invalid username. Ask an administrator to issue a new invitation.")
+                }
+
+                // Match the web acceptance flow: claim the invitation atomically before creating users/{uid}.
+                db.runTransaction { transaction ->
+                    val current = transaction.get(invitationRef)
+                    if (!current.exists() || current.getString("status") != "invited") {
+                        throw IllegalStateException("This Hub-Mind invitation has already been used.")
+                    }
+                    val currentEmail = current.getString("email")?.trim()?.lowercase().orEmpty()
+                    val currentExpiry = current.getString("expiresAt")?.let {
+                        runCatching { Instant.parse(it).toEpochMilli() }.getOrDefault(0L)
+                    } ?: 0L
+                    if (currentEmail != normalizedEmail || currentExpiry <= System.currentTimeMillis()) {
+                        throw IllegalStateException("This Hub-Mind invitation is invalid, expired, or belongs to another account.")
+                    }
+                    transaction.update(invitationRef, mapOf(
+                        "status" to "accepted",
+                        "acceptedAt" to nowIso,
+                        "acceptedUid" to uid
+                    ))
+                    true
+                }.await()
+
+                val staffName = invitedName.ifBlank { displayName.ifBlank { invitedUsername } }
+                val staffDoc = mutableMapOf<String, Any>(
+                    "id" to uid,
+                    "username" to invitedUsername,
+                    "name" to staffName,
+                    "displayName" to staffName,
+                    "email" to normalizedEmail,
+                    "role" to "staff",
+                    "status" to "active",
+                    "createdAt" to nowIso,
+                    "approvedAt" to nowIso,
+                    "approvedBy" to invitationSnap.getString("invitedBy").orEmpty().ifBlank { "administrator" },
+                    "invitationId" to inviteId
+                )
+                invitationSnap.getString("phone")?.takeIf { it.isNotBlank() }?.let { staffDoc["phone"] = it }
+                userRef.set(staffDoc).await()
             }
-            val newDoc = mapOf(
-                "email" to normalizedEmail,
-                "displayName" to defaultName,
-                "preferredName" to (if (isBootstrapAdmin) "Johnny" else defaultName.substringBefore(" ")),
-                "role" to defaultRole,
-                "status" to "active",
-                "createdAt" to nowIso,
-                "lastSeenAt" to nowIso
-            )
-            runCatching { userRef.set(newDoc, SetOptions.merge()).await() }
-            return@runCatching User(
-                id = uid,
-                email = normalizedEmail,
-                displayName = defaultName,
-                preferredName = if (isBootstrapAdmin) "Johnny" else defaultName.substringBefore(" "),
-                role = defaultRole,
-                status = "active",
-                lastSeenAt = nowIso
-            )
+
+            val created = userRef.get().await()
+            if (!created.exists()) throw IllegalStateException("Hub-Mind profile creation could not be verified.")
+            return@runCatching created.toHubMindUser(uid, normalizedEmail, displayName, nowIso)
         }
 
-        val status = (snap.getString("status") ?: "active").lowercase()
+        val existingEmail = snap.getString("email")?.trim()?.lowercase()
+        if (!existingEmail.isNullOrBlank() && existingEmail != normalizedEmail) {
+            throw IllegalStateException("This Hub-Mind profile is linked to a different sign-in email.")
+        }
+        val status = (snap.getString("status") ?: "inactive").lowercase()
         if (status != "active") {
             throw IllegalStateException("Your Hub-Mind account status is '$status'. Active status is required.")
         }
 
-        val roleFromDoc = (snap.getString("role") ?: "staff").lowercase()
-        val effectiveRole = if (isBootstrapAdmin) "admin" else roleFromDoc
         val nameFromDoc = snap.getString("displayName")?.takeIf { it.isNotBlank() }
+            ?: snap.getString("name")?.takeIf { it.isNotBlank() }
             ?: displayName.ifBlank { normalizedEmail.substringBefore("@") }
-        val preferredFromDoc = snap.getString("preferredName") ?: ""
-
-        runCatching {
-            userRef.update("lastSeenAt", nowIso).await()
-        }
+        runCatching { userRef.update("lastSeenAt", nowIso).await() }
 
         User(
             id = uid,
-            email = snap.getString("email")?.ifBlank { normalizedEmail } ?: normalizedEmail,
+            email = normalizedEmail,
             displayName = nameFromDoc,
-            preferredName = preferredFromDoc,
-            role = effectiveRole,
+            preferredName = snap.getString("preferredName") ?: "",
+            role = (snap.getString("role") ?: "staff").lowercase(),
             status = status,
             photoUrl = snap.getString("photoUrl"),
             phone = snap.getString("phone"),
@@ -172,7 +243,24 @@ class AuthRepositoryImpl(
         )
     }
 
-    override suspend fun signIn(email: String, password: String): Result<User> {
+    private fun com.google.firebase.firestore.DocumentSnapshot.toHubMindUser(
+        uid: String,
+        email: String,
+        fallbackName: String,
+        lastSeenAt: String
+    ): User = User(
+        id = uid,
+        email = getString("email") ?: email,
+        displayName = getString("displayName") ?: getString("name") ?: fallbackName.ifBlank { email.substringBefore("@") },
+        preferredName = getString("preferredName") ?: "",
+        role = (getString("role") ?: "staff").lowercase(),
+        status = (getString("status") ?: "inactive").lowercase(),
+        photoUrl = getString("photoUrl"),
+        phone = getString("phone"),
+        lastSeenAt = lastSeenAt
+    )
+
+    override suspend fun signIn(email: String, password: String, invitationId: String?): Result<User> {
         val normalized = email.trim().lowercase()
         if (normalized.isBlank() || password.isBlank()) {
             return Result.failure(IllegalArgumentException("Email and password are required."))
@@ -205,7 +293,8 @@ class AuthRepositoryImpl(
             val profile = loadAndValidateFirestoreUser(
                 uid = fbUser.uid,
                 email = fbUser.email ?: normalized,
-                displayName = fbUser.displayName ?: ""
+                displayName = fbUser.displayName ?: "",
+                invitationId = invitationId
             ).getOrElse { err ->
                 runCatching { auth.signOut() }
                 throw err
@@ -217,7 +306,7 @@ class AuthRepositoryImpl(
         }
     }
 
-    override suspend fun signInWithGoogle(idToken: String): Result<User> {
+    override suspend fun signInWithGoogle(idToken: String, invitationId: String?): Result<User> {
         if (idToken.isBlank() || idToken == "mock-google-token") {
             return Result.failure(
                 IllegalArgumentException(
@@ -238,7 +327,8 @@ class AuthRepositoryImpl(
             val profile = loadAndValidateFirestoreUser(
                 uid = fbUser.uid,
                 email = fbUser.email ?: "",
-                displayName = fbUser.displayName ?: ""
+                displayName = fbUser.displayName ?: "",
+                invitationId = invitationId
             ).getOrElse { err ->
                 runCatching { auth.signOut() }
                 throw err
