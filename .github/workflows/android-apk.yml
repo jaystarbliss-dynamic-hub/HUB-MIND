@@ -1,78 +1,104 @@
-name: Hub-Mind Android APK
+name: Hub-Mind Android Test APK
 
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'android/**'
       - '.github/workflows/android-apk.yml'
   push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+    branches: [main]
     paths:
       - 'android/**'
       - '.github/workflows/android-apk.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: hub-mind-android-\${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-android-apk:
+  build-android-test-apk:
+    name: Test and package Android APK
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup JDK 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle 8.9
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 35 SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Decode optional Android release keystore
-        env:
-          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
-          HUBMIND_RELEASE_STORE_PASSWORD: ${{ secrets.HUBMIND_RELEASE_STORE_PASSWORD }}
-          HUBMIND_RELEASE_KEY_ALIAS: ${{ secrets.HUBMIND_RELEASE_KEY_ALIAS }}
-          HUBMIND_RELEASE_KEY_PASSWORD: ${{ secrets.HUBMIND_RELEASE_KEY_PASSWORD }}
-        run: |
-          if [ -n "$ANDROID_RELEASE_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 -d > "${RUNNER_TEMP}/hubmind-release.jks"
-            echo "HUBMIND_RELEASE_STORE_FILE=${RUNNER_TEMP}/hubmind-release.jks" >> "$GITHUB_ENV"
-          fi
-
-      - name: Run Android JVM unit tests and build APKs
+      - name: Run Android unit tests and assemble debug APK
         working-directory: android
-        env:
-          HUBMIND_RELEASE_STORE_PASSWORD: ${{ secrets.HUBMIND_RELEASE_STORE_PASSWORD }}
-          HUBMIND_RELEASE_KEY_ALIAS: ${{ secrets.HUBMIND_RELEASE_KEY_ALIAS }}
-          HUBMIND_RELEASE_KEY_PASSWORD: ${{ secrets.HUBMIND_RELEASE_KEY_PASSWORD }}
-        run: |
-          gradle testDebugUnitTest assembleDebug assembleRelease --no-daemon --stacktrace
-          mkdir -p ../release
-          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk ../release/Hub-Mind-Android-v2.4.0.apk
-          else
-            cp app/build/outputs/apk/debug/app-debug.apk ../release/Hub-Mind-Android-v2.4.0.apk
-          fi
+        run: gradle --no-daemon --max-workers=2 --stacktrace :app:testDebugUnitTest :app:assembleDebug
 
-      - name: Upload Android APK artifact
+      - name: Verify APK identity, signature and SHA fingerprints
+        id: apk
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          echo "$BADGING" | grep -F "package: name='com.aistudio.hubmind.wzyqkp'"
+          echo "$BADGING" | grep -F "versionCode='240'"
+          echo "$BADGING" | grep -F "versionName='2.4.0'"
+          CERT="$("$APKSIGNER" verify --print-certs "$APK")"
+          echo "$CERT"
+          SHA1="$(printf '%s\n' "$CERT" | sed -n 's/.*certificate SHA-1 digest: //p' | head -n 1)"
+          SHA256="$(printf '%s\n' "$CERT" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1)"
+          test -n "$SHA1"
+          test -n "$SHA256"
+          echo "sha1=$SHA1" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          APK_SHA256="$(sha256sum "$APK" | awk '{print $1}')"
+          echo "apk_sha256=$APK_SHA256" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Hub-Mind Android test APK"
+            echo ""
+            echo "- Application ID: \`com.aistudio.hubmind.wzyqkp\`"
+            echo "- Version: \`2.4.0 (240)\`"
+            echo "- APK signer SHA-1: \`$SHA1\`"
+            echo "- APK signer SHA-256: \`$SHA256\`"
+            echo "- APK file SHA-256: \`$APK_SHA256\`"
+            echo ""
+            echo "This is a CI debug/test APK, not a production-signed release."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare clearly labelled test artifact
+        working-directory: android
+        run: |
+          mkdir -p ../release
+          cp app/build/outputs/apk/debug/app-debug.apk ../release/Hub-Mind-Android-TEST-v2.4.0-240-debug.apk
+          sha256sum ../release/Hub-Mind-Android-TEST-v2.4.0-240-debug.apk > ../release/Hub-Mind-Android-TEST-v2.4.0-240-debug.apk.sha256
+
+      - name: Upload installable Android test APK
         uses: actions/upload-artifact@v4
         with:
-          name: hub-mind-android-apk
-          path: release/Hub-Mind-Android-v2.4.0.apk
+          name: Hub-Mind-Android-TEST-v2.4.0-240-debug
+          path: |
+            release/Hub-Mind-Android-TEST-v2.4.0-240-debug.apk
+            release/Hub-Mind-Android-TEST-v2.4.0-240-debug.apk.sha256
           if-no-files-found: error
           retention-days: 30
