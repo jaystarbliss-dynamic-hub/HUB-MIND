@@ -380,13 +380,18 @@ class AndroidUiActionExecutor(private val context: Context) {
             AndroidActionType.SET_CLIPBOARD, AndroidActionType.CLIPBOARD_WRITE -> {
                 val text = command.parameters["text"] as? String ?: ""
                 val success = clipboardController.setClipboardText("HubMind", text)
+                val verified = success && clipboardController.getClipboardText() == text
                 AndroidActionResult(
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Copied text to Android clipboard (${text.length} chars)." else null,
-                    error = if (!success) "Failed to write to Android clipboard." else null
+                    verified = verified,
+                    outputText = if (success) "Android accepted the clipboard write (${text.length} chars)." else null,
+                    error = when {
+                        !success -> "Failed to write to Android clipboard."
+                        !verified -> "Clipboard write was accepted but the resulting clipboard value could not be verified."
+                        else -> null
+                    }
                 )
             }
 
