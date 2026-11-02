@@ -8,10 +8,12 @@ type AndroidNativeResult = {
 
 type NativeAndroidInterface = {
   isAndroidApp(): boolean;
-  getDeviceInfo(): string;
-  isAccessibilityEnabled(): boolean;
-  openAccessibilitySettings(): void;
-  executeTool(name: string, argsJson: string, userId: string, callbackId: string): void;
+  getDeviceInfo(token: string): string;
+  isAccessibilityEnabled(token: string): boolean;
+  openAccessibilitySettings(token: string): void;
+  startAgentSession(token: string): void;
+  stopAgentSession(token: string): void;
+  executeTool(name: string, argsJson: string, userId: string, token: string, callbackId: string): void;
 };
 
 declare global {
@@ -44,12 +46,14 @@ export function installAndroidNativeBridge(): boolean {
       catch { return {}; }
     },
     isAccessibilityEnabled: async () => {
-      try { return native.isAccessibilityEnabled() === true; }
+      try { return native.isAccessibilityEnabled(String(window.__HUBMIND_NATIVE_TOKEN__ || '')) === true; }
       catch { return false; }
     },
     openAccessibilitySettings: () => {
-      try { native.openAccessibilitySettings(); } catch {}
+      try { native.openAccessibilitySettings(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {}
     },
+    startAgentSession: () => { try { native.startAgentSession(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {} },
+    stopAgentSession: () => { try { native.stopAgentSession(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {} },
     executeTool: (name, args, userId = '') => new Promise(resolve => {
       const callbackId = 'android-' + Date.now().toString(36) + '-' + (++requestSequence).toString(36);
       const timeout = window.setTimeout(() => {
@@ -62,7 +66,7 @@ export function installAndroidNativeBridge(): boolean {
         resolve(result);
       });
       try {
-        native.executeTool(name, JSON.stringify(args || {}), String(userId || ''), callbackId);
+        native.executeTool(name, JSON.stringify(args || {}), String(userId || ''), String(window.__HUBMIND_NATIVE_TOKEN__ || ''), callbackId);
       } catch (error: any) {
         window.clearTimeout(timeout);
         pending.delete(callbackId);
