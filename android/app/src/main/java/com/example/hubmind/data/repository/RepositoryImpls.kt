@@ -26,6 +26,7 @@ import com.example.hubmind.voice.GeminiLiveAudioSession
 import com.example.hubmind.voice.GeminiLiveCallbacks
 import com.example.hubmind.voice.JessCanonicalConfig
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
@@ -467,41 +468,44 @@ class ConversationRepositoryImpl(
         val client = backendClient ?: return
         scope.launch {
             val db = client.getFirebaseFirestore().getOrNull() ?: return@launch
-            val reg = db.collection("users")
+            // Canonical Hub-Mind conversations embed their messages in the conversation document.
+            // Do not create a mobile-only messages subcollection: Web and Windows read this same array.
+            val conversationRef = db.collection("users")
                 .document(userId)
                 .collection("conversations")
                 .document(conversationId)
-                .collection("messages")
-                .orderBy("timestamp", Query.Direction.ASCENDING)
-                .addSnapshotListener { snap, err ->
-                    if (err != null || snap == null) return@addSnapshotListener
-                    val msgs = snap.documents.map { doc ->
-                        val roleStr = (doc.getString("role") ?: doc.getString("sender") ?: "user").lowercase()
-                        val sender = if (roleStr == "model" || roleStr == "assistant" || roleStr == "jess") {
-                            MessageSender.JESS
-                        } else {
-                            MessageSender.USER
-                        }
-                        val tsRaw = doc.get("timestamp") ?: doc.get("createdAt")
-                        val ts = when (tsRaw) {
-                            is Number -> tsRaw.toLong()
-                            is String -> runCatching { Instant.parse(tsRaw).toEpochMilli() }.getOrDefault(System.currentTimeMillis())
-                            else -> System.currentTimeMillis()
-                        }
-                        ChatMessage(
-                            id = doc.id,
-                            sender = sender,
-                            text = doc.getString("text") ?: doc.getString("content") ?: "",
-                            timestamp = ts,
-                            targetDeviceId = doc.getString("targetDeviceId"),
-                            toolCallName = doc.getString("toolCallName"),
-                            toolCallArgs = doc.getString("toolCallArgs"),
-                            executionStatus = doc.getString("executionStatus")
-                        )
+            val registration = conversationRef.addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                val rawMessages = snapshot.get("messages") as? List<*>
+                val parsed = rawMessages.orEmpty().mapNotNull { raw ->
+                    val item = raw as? Map<*, *> ?: return@mapNotNull null
+                    val id = item["id"] as? String ?: return@mapNotNull null
+                    val senderValue = (item["sender"] as? String ?: item["role"] as? String ?: "user").lowercase()
+                    val sender = if (senderValue in setOf("jess", "assistant", "model")) {
+                        MessageSender.JESS
+                    } else {
+                        MessageSender.USER
                     }
-                    messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }.value = msgs
-                }
-            messageListeners[conversationId] = reg
+                    val ts = when (val rawTimestamp = item["timestamp"]) {
+                        is Number -> rawTimestamp.toLong()
+                        is String -> runCatching { Instant.parse(rawTimestamp).toEpochMilli() }.getOrDefault(System.currentTimeMillis())
+                        else -> System.currentTimeMillis()
+                    }
+                    ChatMessage(
+                        id = id,
+                        sender = sender,
+                        text = (item["text"] as? String) ?: (item["content"] as? String).orEmpty(),
+                        timestamp = ts,
+                        parentMessageId = item["parentMessageId"] as? String,
+                        targetDeviceId = item["targetDeviceId"] as? String,
+                        toolCallName = item["toolCallName"] as? String,
+                        toolCallArgs = item["toolCallArgs"] as? String,
+                        executionStatus = item["executionStatus"] as? String
+                    )
+                }.sortedBy { it.timestamp }
+                messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }.value = parsed
+            }
+            messageListeners[conversationId] = registration
         }
     }
 
@@ -520,13 +524,15 @@ class ConversationRepositoryImpl(
 
     override suspend fun createConversation(title: String): Conversation {
         val now = System.currentTimeMillis()
+        val nowIso = Instant.ofEpochMilli(now).toString()
         val newConv = Conversation(
             id = "conv-" + UUID.randomUUID().toString().take(8),
             title = title.ifBlank { "New Jess Conversation" },
             summary = "Active Hub-Mind conversation",
             messageCount = 0,
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
+            isLiveSession = false
         )
         _conversations.value = listOf(newConv) + _conversations.value.filter { it.id != newConv.id }
         _currentConversation.value = newConv
@@ -542,16 +548,24 @@ class ConversationRepositoryImpl(
                     .document(newConv.id)
                     .set(
                         mapOf(
+                            "id" to newConv.id,
+                            "userId" to uid,
                             "title" to newConv.title,
                             "summary" to newConv.summary,
                             "messageCount" to 0,
-                            "createdAt" to now,
-                            "updatedAt" to now,
+                            "messages" to emptyList<Map<String, Any?>>(),
+                            "rootMessageId" to null,
+                            "activeLeafId" to null,
+                            "createdAt" to nowIso,
+                            "updatedAt" to nowIso,
                             "isLiveSession" to false
                         ),
                         SetOptions.merge()
                     )
                     .await()
+            }.onFailure {
+                // Keep the local conversation visible but surface the persistence error in logs.
+                android.util.Log.w("HubMindConversation", "Could not create shared conversation: ${it.message}")
             }
             attachMessageListener(uid, newConv.id)
         }
@@ -564,39 +578,48 @@ class ConversationRepositoryImpl(
         targetDeviceId: String?
     ): ChatMessage {
         val now = System.currentTimeMillis()
+        val nowIso = Instant.ofEpochMilli(now).toString()
+        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
+        val previousMessages = flow.value
+        val parentId = previousMessages.lastOrNull()?.id
         val msg = ChatMessage(
             id = "msg-" + UUID.randomUUID().toString().take(8),
             sender = MessageSender.USER,
             text = text,
             timestamp = now,
+            parentMessageId = parentId,
             targetDeviceId = targetDeviceId
         )
-        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
-        flow.value = flow.value + msg
+        flow.value = previousMessages + msg
 
         val uid = boundUserId
         val db = backendClient?.getFirebaseFirestore()?.getOrNull()
         if (uid != null && db != null) {
             val convRef = db.collection("users").document(uid).collection("conversations").document(conversationId)
+            val canonicalMessage = mapOf<String, Any?>(
+                "id" to msg.id,
+                "sender" to "user",
+                "text" to text,
+                "timestamp" to nowIso,
+                "parentMessageId" to parentId,
+                "targetDeviceId" to targetDeviceId
+            )
             runCatching {
-                convRef.collection("messages").document(msg.id).set(
-                    mapOf(
-                        "role" to "user",
-                        "sender" to "USER",
-                        "text" to text,
-                        "content" to text,
-                        "timestamp" to now,
-                        "createdAt" to Instant.ofEpochMilli(now).toString(),
-                        "targetDeviceId" to targetDeviceId
-                    )
-                ).await()
                 convRef.set(
                     mapOf(
-                        "updatedAt" to now,
+                        "id" to conversationId,
+                        "userId" to uid,
+                        "messages" to FieldValue.arrayUnion(canonicalMessage),
+                        "messageCount" to FieldValue.increment(1),
+                        "rootMessageId" to (previousMessages.firstOrNull()?.id ?: msg.id),
+                        "activeLeafId" to msg.id,
+                        "updatedAt" to nowIso,
                         "summary" to text.take(120)
                     ),
                     SetOptions.merge()
                 ).await()
+            }.onFailure {
+                android.util.Log.w("HubMindConversation", "Could not persist shared user message: ${it.message}")
             }
         }
         return msg
@@ -609,41 +632,50 @@ class ConversationRepositoryImpl(
         status: String?
     ): ChatMessage {
         val now = System.currentTimeMillis()
+        val nowIso = Instant.ofEpochMilli(now).toString()
+        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
+        val previousMessages = flow.value
+        val parentId = previousMessages.lastOrNull()?.id
         val msg = ChatMessage(
             id = "msg-" + UUID.randomUUID().toString().take(8),
             sender = MessageSender.JESS,
             text = text,
             timestamp = now,
+            parentMessageId = parentId,
             toolCallName = toolName,
             executionStatus = status
         )
-        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
-        flow.value = flow.value + msg
+        flow.value = previousMessages + msg
 
         val uid = boundUserId
         val db = backendClient?.getFirebaseFirestore()?.getOrNull()
         if (uid != null && db != null) {
             val convRef = db.collection("users").document(uid).collection("conversations").document(conversationId)
+            val canonicalMessage = mapOf<String, Any?>(
+                "id" to msg.id,
+                "sender" to "jess",
+                "text" to text,
+                "timestamp" to nowIso,
+                "parentMessageId" to parentId,
+                "toolCallName" to toolName,
+                "executionStatus" to status
+            )
             runCatching {
-                convRef.collection("messages").document(msg.id).set(
-                    mapOf(
-                        "role" to "model",
-                        "sender" to "JESS",
-                        "text" to text,
-                        "content" to text,
-                        "timestamp" to now,
-                        "createdAt" to Instant.ofEpochMilli(now).toString(),
-                        "toolCallName" to toolName,
-                        "executionStatus" to status
-                    )
-                ).await()
                 convRef.set(
                     mapOf(
-                        "updatedAt" to now,
+                        "id" to conversationId,
+                        "userId" to uid,
+                        "messages" to FieldValue.arrayUnion(canonicalMessage),
+                        "messageCount" to FieldValue.increment(1),
+                        "rootMessageId" to (previousMessages.firstOrNull()?.id ?: msg.id),
+                        "activeLeafId" to msg.id,
+                        "updatedAt" to nowIso,
                         "summary" to text.take(120)
                     ),
                     SetOptions.merge()
                 ).await()
+            }.onFailure {
+                android.util.Log.w("HubMindConversation", "Could not persist shared Jess response: ${it.message}")
             }
         }
         return msg
