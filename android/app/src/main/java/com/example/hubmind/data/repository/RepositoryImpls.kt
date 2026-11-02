@@ -1247,10 +1247,11 @@ class DeviceControlRepositoryImpl(
 
         val isLocalTarget = targetDeviceId == localId
 
-        val result: CommandResult = when {
-            isLocalTarget -> {
-                val executor = localExecutor
-                    ?: return CommandResult(false, false, error = "Android native executor is not initialized.")
+        val result: CommandResult = if (isLocalTarget) {
+            val executor = localExecutor
+            if (executor == null) {
+                CommandResult(false, false, error = "Android native executor is not initialized. No command was sent.")
+            } else {
                 val actionStr = (args["actionType"] as? String)?.ifBlank { null } ?: toolName
                 val actionType = runCatching { AndroidActionType.valueOf(actionStr.uppercase()) }
                     .getOrElse {
@@ -1261,43 +1262,56 @@ class DeviceControlRepositoryImpl(
                             "CAPTURE_SCREEN", "SCREENSHOT" -> AndroidActionType.CAPTURE_SCREEN
                             else -> null
                         }
-                    } ?: return CommandResult(
+                    }
+                if (actionType == null) {
+                    CommandResult(
                         false, false,
                         error = "Unsupported Android action '$actionStr'. No fallback action was run."
                     )
-                val androidRes = executor.executeCommand(
-                    AndroidCommand(
+                } else {
+                    val androidRes = executor.executeCommand(
+                        AndroidCommand(
+                            commandId = cmdId,
+                            actionType = actionType,
+                            parameters = args,
+                            requiresConfirmation = args["requiresConfirmation"] == true
+                        )
+                    )
+                    CommandResult(
+                        success = androidRes.success,
+                        verified = androidRes.verified,
+                        output = androidRes.outputText,
+                        error = androidRes.error,
+                        durationMs = androidRes.durationMs
+                    )
+                }
+            }
+        } else {
+            val uid = authRepository?.currentUser?.value?.id
+            val transport = controlPlaneTransport
+            when {
+                uid.isNullOrBlank() -> CommandResult(
+                    false, false,
+                    error = "Cross-device control requires a signed-in Hub-Mind account. No command was sent."
+                )
+                transport == null -> CommandResult(
+                    false, false,
+                    error = "Cross-device control is not available on this build. No command was sent."
+                )
+                else -> {
+                    val envelope = CommandEnvelope(
                         commandId = cmdId,
-                        actionType = actionType,
+                        issuingUserId = uid,
+                        sourceDeviceId = localId,
+                        targetDeviceId = targetDeviceId,
+                        actionType = toolName,
                         parameters = args,
+                        creationTime = startMs,
+                        expirationTime = startMs + 20_000L,
                         requiresConfirmation = args["requiresConfirmation"] == true
                     )
-                )
-                CommandResult(
-                    success = androidRes.success,
-                    verified = androidRes.verified,
-                    output = androidRes.outputText,
-                    error = androidRes.error,
-                    durationMs = androidRes.durationMs
-                )
-            }
-            else -> {
-                val uid = authRepository?.currentUser?.value?.id
-                    ?: return CommandResult(false, false, error = "Sign in before controlling a paired device.")
-                val transport = controlPlaneTransport
-                    ?: return CommandResult(false, false, error = "Cross-device control is not available on this build.")
-                val envelope = CommandEnvelope(
-                    commandId = cmdId,
-                    issuingUserId = uid,
-                    sourceDeviceId = localId,
-                    targetDeviceId = targetDeviceId,
-                    actionType = toolName,
-                    parameters = args,
-                    creationTime = startMs,
-                    expirationTime = startMs + 20_000L,
-                    requiresConfirmation = args["requiresConfirmation"] == true
-                )
-                transport.dispatchCommand(envelope)
+                    transport.dispatchCommand(envelope)
+                }
             }
         }
 

@@ -44,7 +44,7 @@ class HubMindArchitectureUnitTest {
         )
         assertFalse(result.success)
         assertFalse(result.verified)
-        assertTrue(result.error?.contains("Cross-device control is not available", ignoreCase = true) == true)
+        assertTrue(result.error?.contains("requires a signed-in Hub-Mind account", ignoreCase = true) == true)
 
         val history = deviceControl.commandHistory.value
         assertEquals(1, history.size)
