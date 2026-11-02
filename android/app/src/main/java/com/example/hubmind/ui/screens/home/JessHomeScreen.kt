@@ -86,13 +86,102 @@ fun JessHomeScreen(
                             <!doctype html>
                             <html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
                             <style>
-                              html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
-                              #hubmind-unicorn-bg{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;}
-                              canvas{pointer-events:none!important;}
+                              html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#080b12;}
+                              canvas{display:block;width:100%;height:100%;pointer-events:none;}
                             </style></head><body>
-                            <div id="hubmind-unicorn-bg" data-us-project="1AfwBht7npSsvDW0cDU5" data-us-production="true"></div>
-                            <script src="https://cdn.jsdelivr.net/gh/hiunicornstudio/unicornstudio.js@v2.4.3/dist/unicornStudio.umd.js"></script>
-                            <script>window.addEventListener('load',function(){if(window.UnicornStudio&&window.UnicornStudio.init){window.UnicornStudio.init();}});</script>
+                            <canvas id="c"></canvas>
+                            <script>
+                            (function(){
+                              var canvas = document.getElementById('c');
+                              var ctx = canvas.getContext('2d');
+                              var w, h;
+                              function resize(){ w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; }
+                              resize(); window.addEventListener('resize', resize);
+                              function getVP() { return { x: w / 2, y: h * 0.44 }; }
+                              var count = 8;
+                              function getPaths() {
+                                var paths = []; var vp = getVP();
+                                for (var side = -1; side <= 1; side += 2) {
+                                  if (side === 0) continue;
+                                  for (var i = 0; i < count; i++) {
+                                    var norm = (i + 1) / count;
+                                    var startX = vp.x + side * (w * 0.08 + norm * w * 0.45);
+                                    var startY = h + 40;
+                                    var step1Y = h * (0.82 - i * 0.025); var step1X = startX;
+                                    var step2X = vp.x + side * (w * 0.04 + norm * w * 0.28); var step2Y = step1Y;
+                                    var step3Y = h * (0.64 - i * 0.02); var step3X = step2X;
+                                    var step4X = vp.x + side * (w * 0.015 + norm * w * 0.12); var step4Y = step3Y;
+                                    var apexX = vp.x + side * (norm * 2); var apexY = vp.y;
+                                    var pts = [{x: startX, y: startY},{x: step1X, y: step1Y},{x: step2X, y: step2Y},{x: step3X, y: step3Y},{x: step4X, y: step4Y},{x: apexX, y: apexY}];
+                                    var totalLen = 0; var segs = [];
+                                    for (var p = 0; p < pts.length - 1; p++) {
+                                      var dx = pts[p+1].x - pts[p].x; var dy = pts[p+1].y - pts[p].y;
+                                      var len = Math.hypot(dx, dy); segs.push(len); totalLen += len;
+                                    }
+                                    paths.push({ points: pts, totalLen: totalLen, segs: segs });
+                                  }
+                                }
+                                return paths;
+                              }
+                              var paths = getPaths(); var particles = [];
+                              var colors = ['#75e4d2', '#5eead4', '#6de0c9', '#10b981', '#34d399'];
+                              for (var i = 0; i < 10; i++) {
+                                particles.push({
+                                  pathIndex: Math.floor(Math.random() * paths.length),
+                                  progress: Math.random(), speed: 0.0014 + Math.random() * 0.002,
+                                  size: 2.2 + Math.random() * 1.6, color: colors[i % colors.length], trail: []
+                                });
+                              }
+                              function getPt(path, prog) {
+                                var target = prog * path.totalLen; var accum = 0;
+                                for (var i = 0; i < path.segs.length; i++) {
+                                  var segLen = path.segs[i];
+                                  if (accum + segLen >= target || i === path.segs.length - 1) {
+                                    var segProg = segLen > 0 ? (target - accum) / segLen : 0;
+                                    var p1 = path.points[i]; var p2 = path.points[i+1];
+                                    return { x: p1.x + (p2.x - p1.x)*segProg, y: p1.y + (p2.y - p1.y)*segProg };
+                                  }
+                                  accum += segLen;
+                                }
+                                return path.points[path.points.length - 1];
+                              }
+                              var t = 0;
+                              function loop() {
+                                t += 0.025; ctx.clearRect(0, 0, w, h);
+                                var bg = ctx.createRadialGradient(w/2, h*0.44, 10, w/2, h/2, Math.max(w,h)*0.85);
+                                bg.addColorStop(0, '#0a131c'); bg.addColorStop(0.5, '#070b12'); bg.addColorStop(1, '#04060a');
+                                ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+                                var vp = getVP(); paths = getPaths(); ctx.lineWidth = 1.2;
+                                for (var k = 0; k < paths.length; k++) {
+                                  var path = paths[k]; ctx.beginPath(); ctx.moveTo(path.points[0].x, path.points[0].y);
+                                  for (var i = 1; i < path.points.length; i++) { ctx.lineTo(path.points[i].x, path.points[i].y); }
+                                  var grad = ctx.createLinearGradient(path.points[0].x, path.points[0].y, vp.x, vp.y);
+                                  grad.addColorStop(0, 'rgba(16, 185, 129, 0.35)'); grad.addColorStop(0.5, 'rgba(94, 215, 193, 0.25)'); grad.addColorStop(1, 'rgba(117, 228, 210, 0.65)');
+                                  ctx.strokeStyle = grad; ctx.stroke();
+                                  for (var idx = 1; idx < path.points.length - 1; idx++) {
+                                    var pt = path.points[idx]; ctx.beginPath(); ctx.arc(pt.x, pt.y, 1.8, 0, Math.PI * 2);
+                                    ctx.fillStyle = 'rgba(117, 228, 210, 0.5)'; ctx.fill();
+                                  }
+                                }
+                                for (var p = 0; p < particles.length; p++) {
+                                  var ptc = particles[p]; ptc.progress += ptc.speed;
+                                  if (ptc.progress >= 1) { ptc.progress = 0; ptc.pathIndex = Math.floor(Math.random() * paths.length); ptc.trail = []; }
+                                  var curPath = paths[ptc.pathIndex % paths.length]; var pos = getPt(curPath, ptc.progress);
+                                  ptc.trail.unshift({ x: pos.x, y: pos.y }); if (ptc.trail.length > 7) ptc.trail.pop();
+                                  for (var tr = ptc.trail.length - 1; tr >= 0; tr--) {
+                                    var trPt = ptc.trail[tr]; ctx.beginPath(); ctx.arc(trPt.x, trPt.y, ptc.size * (1 - tr/ptc.trail.length * 0.35), 0, Math.PI * 2);
+                                    ctx.fillStyle = ptc.color; ctx.globalAlpha = (1 - tr/ptc.trail.length) * 0.5; ctx.fill();
+                                  }
+                                  ctx.globalAlpha = 1.0; ctx.beginPath(); ctx.arc(pos.x, pos.y, ptc.size * 0.8, 0, Math.PI * 2); ctx.fillStyle = '#f0fdfa'; ctx.fill();
+                                }
+                                var r = 32 + Math.sin(t) * 6; var fl = ctx.createRadialGradient(vp.x, vp.y, 0, vp.x, vp.y, r * 2);
+                                fl.addColorStop(0, 'rgba(240, 253, 250, 0.95)'); fl.addColorStop(0.3, 'rgba(117, 228, 210, 0.8)'); fl.addColorStop(0.7, 'rgba(16, 185, 129, 0.35)'); fl.addColorStop(1, 'transparent');
+                                ctx.beginPath(); ctx.arc(vp.x, vp.y, r * 2, 0, Math.PI * 2); ctx.fillStyle = fl; ctx.fill();
+                                requestAnimationFrame(loop);
+                              }
+                              loop();
+                            })();
+                            </script>
                             </body></html>
                         """.trimIndent()
                         loadDataWithBaseURL(
