@@ -3253,6 +3253,7 @@ export async function executeJessTool(
             targetDeviceId: target.deviceId,
             targetDeviceName: target.deviceName,
             summary: dispatchOut.summary,
+            evidence: dispatchOut.payload?.evidence,
             error: dispatchOut.error,
           },
         };

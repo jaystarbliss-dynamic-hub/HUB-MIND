@@ -4,6 +4,7 @@ import {
   getDocs,
   onSnapshot,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where,
@@ -43,6 +44,7 @@ export interface CrossDeviceCommandEnvelope {
   resultSuccess?: boolean;
   resultVerified?: boolean;
   resultSummary?: string;
+  resultPayloadJson?: string;
   resultError?: string;
   completedAt?: number;
 }
@@ -135,6 +137,7 @@ export async function dispatchCrossDeviceCommand(
   commandId: string;
   targetDeviceId: string;
   summary: string;
+  payload?: Record<string, any>;
   error?: string;
 }> {
   const commandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -206,6 +209,13 @@ export async function dispatchCrossDeviceCommand(
             commandId,
             targetDeviceId,
             summary: String(data.resultSummary || ''),
+            payload: (() => {
+              try {
+                return data.resultPayloadJson ? JSON.parse(data.resultPayloadJson) : undefined;
+              } catch {
+                return undefined;
+              }
+            })(),
             error: data.resultError ? String(data.resultError) : undefined,
           });
         }
@@ -274,15 +284,56 @@ export function startCrossDeviceAgentLoop(
             return;
           }
 
-          await updateDoc(cmdRef, {
-            lifecycleState: 'EXECUTING',
-          }).catch(() => {});
+          if (cmd.issuingUserId !== user.id || cmd.targetDeviceId !== deviceId || !cmd.sourceDeviceId) {
+            await updateDoc(cmdRef, {
+              lifecycleState: 'FAILED',
+              resultSuccess: false,
+              resultVerified: false,
+              resultSummary: '',
+              resultError: 'Command issuer, source, or target identity did not match the authenticated workspace.',
+              completedAt: Date.now(),
+            }).catch(() => {});
+            return;
+          }
 
-          let parsedParams: Record<string, any> = {};
+          if (cmd.requiresConfirmation) {
+            await updateDoc(cmdRef, {
+              lifecycleState: 'FAILED',
+              resultSuccess: false,
+              resultVerified: false,
+              resultSummary: '',
+              resultError: 'This command requires explicit confirmation. The cross-device receiver did not receive a valid approval, so it was not executed.',
+              completedAt: Date.now(),
+            }).catch(() => {});
+            return;
+          }
+
+          const claimed = await runTransaction(db, async transaction => {
+            const current = await transaction.get(cmdRef);
+            if (!current.exists() || current.data()?.lifecycleState !== 'DISPATCHED') return false;
+            if (current.data()?.issuingUserId !== user.id || current.data()?.targetDeviceId !== deviceId) return false;
+            const currentExpiry = Number(current.data()?.expirationTime || 0);
+            if (currentExpiry <= Date.now()) return false;
+            transaction.update(cmdRef, { lifecycleState: 'EXECUTING', claimedAt: Date.now(), claimedByDeviceId: deviceId });
+            return true;
+          }).catch(() => false);
+          if (!claimed) return;
+
+          let parsedParams: Record<string, any>;
           try {
-            parsedParams = cmd.parametersJson ? JSON.parse(cmd.parametersJson) : {};
-          } catch {
-            parsedParams = {};
+            const parsed = cmd.parametersJson ? JSON.parse(cmd.parametersJson) : {};
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected an object.');
+            parsedParams = parsed as Record<string, any>;
+          } catch (error: any) {
+            await updateDoc(cmdRef, {
+              lifecycleState: 'FAILED',
+              resultSuccess: false,
+              resultVerified: false,
+              resultSummary: '',
+              resultError: 'Command parameters were invalid JSON: ' + String(error?.message || error),
+              completedAt: Date.now(),
+            }).catch(() => {});
+            return;
           }
 
           if (cmd.actionType === 'ping_device' || cmd.actionType === 'PING') {
@@ -304,18 +355,25 @@ export function startCrossDeviceAgentLoop(
             const execOut = await toolExecutor(cmd.actionType, normalizedArgs);
             const resObj = execOut?.result || {};
             const ok = resObj.success === true || resObj.ok === true || resObj.status === 'done_verified';
-            const verified = resObj.verified === true || resObj.status === 'done_verified' || ok;
+            const verified = resObj.verified === true || resObj.status === 'done_verified';
             const summary =
               resObj.message ||
               resObj.summary ||
               (resObj.evidence ? JSON.stringify(resObj.evidence).slice(0, 4000) : JSON.stringify(resObj).slice(0, 4000));
 
+            const evidence = resObj.evidence && typeof resObj.evidence === 'object'
+              ? resObj.evidence
+              : undefined;
+            const serializedEvidence = evidence ? JSON.stringify({ evidence }) : '';
+            // Never persist truncated JSON; malformed evidence cannot be parsed by the sender.
+            const resultPayloadJson = serializedEvidence.length <= 500_000 ? serializedEvidence : '';
             await updateDoc(cmdRef, {
               lifecycleState: ok ? 'COMPLETED' : 'FAILED',
               resultSuccess: ok,
               resultVerified: verified,
-              resultSummary: ok ? String(summary) : '',
-              resultError: ok ? '' : String(resObj.error || resObj.message || 'Execution failed on target workstation.'),
+              resultSummary: ok ? String(summary).slice(0, 10_000) : '',
+              resultPayloadJson,
+              resultError: ok ? '' : String(resObj.error || resObj.message || 'Execution failed on target workstation.').slice(0, 5_000),
               completedAt: Date.now(),
             }).catch(() => {});
           } catch (err: any) {

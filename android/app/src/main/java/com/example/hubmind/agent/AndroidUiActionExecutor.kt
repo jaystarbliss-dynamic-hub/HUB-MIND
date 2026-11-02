@@ -32,6 +32,16 @@ class AndroidUiActionExecutor(private val context: Context) {
             )
         }
 
+        if (command.requiresConfirmation) {
+            return AndroidActionResult(
+                commandId = command.commandId,
+                actionType = command.actionType,
+                success = false,
+                verified = false,
+                error = "This Android action requires explicit user confirmation. It was not executed because no approval token was supplied to the native executor."
+            )
+        }
+
         val result: AndroidActionResult = when (command.actionType) {
             AndroidActionType.OPEN_APP, AndroidActionType.LAUNCH_APP -> {
                 val pkg = command.parameters["packageName"] as? String
@@ -47,13 +57,17 @@ class AndroidUiActionExecutor(private val context: Context) {
                 }
                 val hierarchy = HubMindAccessibilityService.instance.value?.dumpActiveHierarchy()
                 val activePkg = hierarchy?.firstOrNull()?.packageName
-                val verified = success && (activePkg == null || activePkg.equals(resolvedPkg, ignoreCase = true))
+                val verified = success && activePkg?.equals(resolvedPkg, ignoreCase = true) == true
                 AndroidActionResult(
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = verified || success,
-                    outputText = if (success) "Launched application ${appName ?: resolvedPkg}." else null,
+                    verified = verified,
+                    outputText = when {
+                        !success -> null
+                        verified -> "Launched and confirmed foreground application ${appName ?: resolvedPkg}."
+                        else -> "Android accepted the launch request for ${appName ?: resolvedPkg}, but the foreground application could not be confirmed."
+                    },
                     error = if (!success) "Target application (${appName ?: pkg}) not found or could not be launched." else null
                 )
             }
@@ -72,8 +86,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Opened URI: $uriStr" else null,
+                    verified = false,
+                    outputText = if (success) "Android accepted the request to open URI: $uriStr; destination confirmation is not available." else null,
                     error = if (!success) "Failed to resolve intent for URI: $uriStr" else null
                 )
             }
@@ -97,7 +111,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                             commandId = command.commandId,
                             actionType = command.actionType,
                             success = tapOk,
-                            verified = tapOk,
+                            verified = false,
                             outputText = if (tapOk) "Tapped element [$elementIndex] '${targetEl.label}' at (${targetEl.bounds.centerX}, ${targetEl.bounds.centerY})." else null,
                             error = if (!tapOk) "Gesture cancelled while tapping element [$elementIndex]." else null,
                             durationMs = System.currentTimeMillis() - startTime
@@ -114,8 +128,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                             commandId = command.commandId,
                             actionType = command.actionType,
                             success = true,
-                            verified = true,
-                            outputText = "Clicked UI element '$matchedLabel' via Accessibility node action.",
+                            verified = false,
+                            outputText = "Android accepted the accessibility click for UI element '$matchedLabel'; the resulting screen state is not yet confirmed.",
                             durationMs = System.currentTimeMillis() - startTime
                         )
                     }
@@ -132,8 +146,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                             commandId = command.commandId,
                             actionType = command.actionType,
                             success = tapOk,
-                            verified = tapOk,
-                            outputText = if (tapOk) "Tapped center (${node.bounds.centerX}, ${node.bounds.centerY}) of '$targetText'." else null,
+                            verified = false,
+                            outputText = if (tapOk) "Android accepted the tap at center (${node.bounds.centerX}, ${node.bounds.centerY}) of '$targetText'." else null,
                             error = if (!tapOk) "Gesture dispatch cancelled while tapping '$targetText'." else null,
                             durationMs = System.currentTimeMillis() - startTime
                         )
@@ -166,7 +180,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = tapCompleted,
-                    verified = tapCompleted,
+                    verified = false,
                     outputText = if (tapCompleted) {
                         if (hitElement != null) "Tapped '${hitElement.label}' at ($x, $y)."
                         else "Tapped at coordinates ($x, $y)."
@@ -188,7 +202,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = firstTap && secondTap,
-                    verified = firstTap && secondTap,
+                    verified = false,
                     outputText = if (firstTap && secondTap) "Double-tapped at ($x, $y)." else null,
                     error = if (!(firstTap && secondTap)) "Double-tap gesture failed or was cancelled." else null
                 )
@@ -207,8 +221,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                             commandId = command.commandId,
                             actionType = command.actionType,
                             success = true,
-                            verified = true,
-                            outputText = "Long-pressed UI element '$label'."
+                            verified = false,
+                            outputText = "Android accepted the long-press action for UI element '$label'; the resulting state is not yet confirmed."
                         )
                     }
                 }
@@ -220,7 +234,7 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = completed,
-                    verified = completed,
+                    verified = false,
                     outputText = if (completed) "Long-pressed at ($x, $y)." else null,
                     error = if (!completed) "Long-press gesture was cancelled." else null
                 )
@@ -301,8 +315,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Navigated Back." else null,
+                    verified = false,
+                    outputText = if (success) "Android accepted Back navigation." else null,
                     error = if (!success) "Accessibility Service not connected; enable Hub-Mind in Android Accessibility Settings." else null
                 )
             }
@@ -313,8 +327,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Navigated to Android Home screen." else null,
+                    verified = false,
+                    outputText = if (success) "Android accepted Home navigation." else null,
                     error = if (!success) "Accessibility Service not connected; enable Hub-Mind in Android Accessibility Settings." else null
                 )
             }
@@ -325,8 +339,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Opened Recent Apps overview." else null,
+                    verified = false,
+                    outputText = if (success) "Android accepted the Recent Apps action." else null,
                     error = if (!success) "Accessibility Service not connected." else null
                 )
             }
@@ -337,8 +351,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Expanded Notification Shade." else null,
+                    verified = false,
+                    outputText = if (success) "Android accepted the Notification Shade action." else null,
                     error = if (!success) "Accessibility Service not connected." else null
                 )
             }
@@ -349,8 +363,8 @@ class AndroidUiActionExecutor(private val context: Context) {
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Opened Quick Settings panel." else null,
+                    verified = false,
+                    outputText = if (success) "Android accepted the Quick Settings action." else null,
                     error = if (!success) "Accessibility Service not connected." else null
                 )
             }
@@ -370,13 +384,18 @@ class AndroidUiActionExecutor(private val context: Context) {
             AndroidActionType.SET_CLIPBOARD, AndroidActionType.CLIPBOARD_WRITE -> {
                 val text = command.parameters["text"] as? String ?: ""
                 val success = clipboardController.setClipboardText("HubMind", text)
+                val verified = success && clipboardController.getClipboardText() == text
                 AndroidActionResult(
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
-                    verified = success,
-                    outputText = if (success) "Copied text to Android clipboard (${text.length} chars)." else null,
-                    error = if (!success) "Failed to write to Android clipboard." else null
+                    verified = verified,
+                    outputText = if (success) "Android accepted the clipboard write (${text.length} chars)." else null,
+                    error = when {
+                        !success -> "Failed to write to Android clipboard."
+                        !verified -> "Clipboard write was accepted but the resulting clipboard value could not be verified."
+                        else -> null
+                    }
                 )
             }
 

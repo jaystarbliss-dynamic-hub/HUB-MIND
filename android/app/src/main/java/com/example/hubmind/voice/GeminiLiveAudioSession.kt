@@ -107,12 +107,19 @@ class GeminiLiveAudioSession(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                isConnected.set(false)
+                val wasUnexpectedlyConnected = isConnected.getAndSet(false)
                 isSetupComplete.set(false)
                 stopAudioCapture()
                 stopAudioPlayback()
-                callbacks.onConnectionStateChanged(LiveConnectionState.DISCONNECTED)
-                callbacks.onJessStateChanged(JessLiveState.IDLE)
+                if (wasUnexpectedlyConnected) {
+                    callbacks.onError(
+                        if (reason.isNotBlank()) "Gemini Live session closed unexpectedly ($code): $reason"
+                        else "Gemini Live session closed unexpectedly ($code)."
+                    )
+                } else {
+                    callbacks.onConnectionStateChanged(LiveConnectionState.DISCONNECTED)
+                    callbacks.onJessStateChanged(JessLiveState.IDLE)
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

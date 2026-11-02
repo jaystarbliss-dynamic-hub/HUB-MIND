@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 interface AuthRepository {
     val currentUser: StateFlow<User?>
     val isSessionValid: StateFlow<Boolean>
-    suspend fun signIn(email: String, password: String): Result<User>
-    suspend fun signInWithGoogle(idToken: String): Result<User>
+    suspend fun signIn(email: String, password: String, invitationId: String? = null): Result<User>
+    suspend fun signInWithGoogle(idToken: String, invitationId: String? = null): Result<User>
     suspend fun signOut()
     suspend fun checkHealth(): Boolean
 }

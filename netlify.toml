@@ -17,6 +17,12 @@
   node_bundler = "esbuild"
 
 [[redirects]]
+  from = "/api/app-version.json"
+  to = "/app-version.json"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/config"
   to = "/.netlify/functions/config"
   status = 200

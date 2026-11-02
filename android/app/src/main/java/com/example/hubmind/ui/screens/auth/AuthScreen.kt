@@ -178,6 +178,25 @@ fun AuthScreen(
                 )
             )
 
+            OutlinedTextField(
+                value = state.invitationId,
+                onValueChange = viewModel::onInvitationIdChange,
+                label = { Text("Invitation code (staff only)", color = Slate400) },
+                supportingText = { Text("Administrator accounts do not need an invitation.", color = Slate500) },
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("invitation_code_input"),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Teal400,
+                    unfocusedBorderColor = Slate700,
+                    focusedTextColor = Slate50,
+                    unfocusedTextColor = Slate200,
+                    focusedContainerColor = Slate900,
+                    unfocusedContainerColor = Slate900
+                )
+            )
+
             Button(
                 onClick = viewModel::signIn,
                 enabled = !state.isLoading && state.email.isNotBlank() && state.password.isNotBlank(),

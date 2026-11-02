@@ -26,6 +26,7 @@ import com.example.hubmind.voice.GeminiLiveAudioSession
 import com.example.hubmind.voice.GeminiLiveCallbacks
 import com.example.hubmind.voice.JessCanonicalConfig
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
@@ -80,7 +81,8 @@ class AuthRepositoryImpl(
         val loaded = loadAndValidateFirestoreUser(
             uid = fbUser.uid,
             email = fbUser.email ?: "",
-            displayName = fbUser.displayName ?: ""
+            displayName = fbUser.displayName ?: "",
+            invitationId = null
         )
         loaded.onSuccess { user ->
             _currentUser.value = user
@@ -96,18 +98,17 @@ class AuthRepositoryImpl(
     private suspend fun loadAndValidateFirestoreUser(
         uid: String,
         email: String,
-        displayName: String
+        displayName: String,
+        invitationId: String? = null
     ): Result<User> = runCatching {
         val normalizedEmail = email.trim().lowercase()
+        require(normalizedEmail.isNotBlank()) { "Firebase did not return an email address for this Hub-Mind account." }
         val isBootstrapAdmin = normalizedEmail in BOOTSTRAP_ADMIN_EMAILS
         val client = backendClient
             ?: return@runCatching User(
                 id = uid,
                 email = normalizedEmail,
-                displayName = displayName.ifBlank {
-                    if (isBootstrapAdmin) "John Rufai" else normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
-                },
-                preferredName = if (isBootstrapAdmin) "Johnny" else "",
+                displayName = displayName.ifBlank { normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() } },
                 role = if (isBootstrapAdmin) "admin" else "staff",
                 status = "active",
                 lastSeenAt = Instant.now().toString()
@@ -116,55 +117,126 @@ class AuthRepositoryImpl(
         val db = client.getFirebaseFirestore().getOrThrow()
         val userRef = db.collection("users").document(uid)
         val snap = userRef.get().await()
-        val nowIso = Instant.now().toString()
+        val now = Instant.now()
+        val nowIso = now.toString()
 
         if (!snap.exists()) {
-            val defaultRole = if (isBootstrapAdmin) "admin" else "staff"
-            val defaultName = displayName.ifBlank {
-                if (isBootstrapAdmin) "John Rufai" else normalizedEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
+            if (isBootstrapAdmin) {
+                val baseUsername = normalizedEmail.substringBefore("@")
+                    .lowercase()
+                    .replace(Regex("[^a-z0-9_]"), "_")
+                    .trim('_')
+                    .take(18)
+                    .let { if (it.length >= 3) it else "admin" }
+                val usernameQuery = db.collection("users")
+                    .whereEqualTo("username", baseUsername)
+                    .limit(1)
+                    .get()
+                    .await()
+                val username = if (usernameQuery.isEmpty) baseUsername
+                    else "${baseUsername.take(18)}_${uid.takeLast(8).lowercase()}"
+                val adminName = displayName.ifBlank { "Administrator" }
+                val adminDoc = mapOf(
+                    "id" to uid,
+                    "username" to username,
+                    "name" to adminName,
+                    "displayName" to adminName,
+                    "email" to normalizedEmail,
+                    "role" to "admin",
+                    "status" to "active",
+                    "preferredName" to adminName.substringBefore(" ").ifBlank { "Admin" },
+                    "createdAt" to nowIso,
+                    "approvedAt" to nowIso,
+                    "defaultVisibility" to "workspace"
+                )
+                userRef.set(adminDoc).await()
+            } else {
+                val inviteId = invitationId?.trim().orEmpty()
+                if (inviteId.isBlank()) {
+                    throw IllegalStateException("This Google account is not yet authorized for Hub-Mind. Enter the invitation code supplied by your administrator.")
+                }
+
+                val invitationRef = db.collection("invitations").document(inviteId)
+                val invitationSnap = invitationRef.get().await()
+                if (!invitationSnap.exists()) throw IllegalStateException("Hub-Mind invitation was not found.")
+                val invitedUsername = invitationSnap.getString("username")?.trim()?.lowercase().orEmpty()
+                val invitedName = invitationSnap.getString("displayName")?.trim().orEmpty()
+                val invitationEmail = invitationSnap.getString("email")?.trim()?.lowercase().orEmpty()
+                val invitationStatus = invitationSnap.getString("status")?.lowercase().orEmpty()
+                val expiresAt = invitationSnap.getString("expiresAt")?.let {
+                    runCatching { Instant.parse(it).toEpochMilli() }.getOrDefault(0L)
+                } ?: 0L
+                if (invitationStatus != "invited") throw IllegalStateException("This Hub-Mind invitation is no longer active.")
+                if (invitationEmail != normalizedEmail) throw IllegalStateException("Sign in with the exact Google account that received this invitation.")
+                if (expiresAt <= System.currentTimeMillis()) throw IllegalStateException("This Hub-Mind invitation has expired.")
+                if (invitedUsername.length !in 3..30 || !invitedUsername.matches(Regex("[a-z0-9_]+"))) {
+                    throw IllegalStateException("The invitation contains an invalid username. Ask an administrator to issue a new invitation.")
+                }
+
+                // Match the web acceptance flow: claim the invitation atomically before creating users/{uid}.
+                db.runTransaction { transaction ->
+                    val current = transaction.get(invitationRef)
+                    if (!current.exists() || current.getString("status") != "invited") {
+                        throw IllegalStateException("This Hub-Mind invitation has already been used.")
+                    }
+                    val currentEmail = current.getString("email")?.trim()?.lowercase().orEmpty()
+                    val currentExpiry = current.getString("expiresAt")?.let {
+                        runCatching { Instant.parse(it).toEpochMilli() }.getOrDefault(0L)
+                    } ?: 0L
+                    if (currentEmail != normalizedEmail || currentExpiry <= System.currentTimeMillis()) {
+                        throw IllegalStateException("This Hub-Mind invitation is invalid, expired, or belongs to another account.")
+                    }
+                    transaction.update(invitationRef, mapOf(
+                        "status" to "accepted",
+                        "acceptedAt" to nowIso,
+                        "acceptedUid" to uid
+                    ))
+                    true
+                }.await()
+
+                val staffName = invitedName.ifBlank { displayName.ifBlank { invitedUsername } }
+                val staffDoc = mutableMapOf<String, Any>(
+                    "id" to uid,
+                    "username" to invitedUsername,
+                    "name" to staffName,
+                    "displayName" to staffName,
+                    "email" to normalizedEmail,
+                    "role" to "staff",
+                    "status" to "active",
+                    "createdAt" to nowIso,
+                    "approvedAt" to nowIso,
+                    "approvedBy" to invitationSnap.getString("invitedBy").orEmpty().ifBlank { "administrator" },
+                    "invitationId" to inviteId
+                )
+                invitationSnap.getString("phone")?.takeIf { it.isNotBlank() }?.let { staffDoc["phone"] = it }
+                userRef.set(staffDoc).await()
             }
-            val newDoc = mapOf(
-                "email" to normalizedEmail,
-                "displayName" to defaultName,
-                "preferredName" to (if (isBootstrapAdmin) "Johnny" else defaultName.substringBefore(" ")),
-                "role" to defaultRole,
-                "status" to "active",
-                "createdAt" to nowIso,
-                "lastSeenAt" to nowIso
-            )
-            runCatching { userRef.set(newDoc, SetOptions.merge()).await() }
-            return@runCatching User(
-                id = uid,
-                email = normalizedEmail,
-                displayName = defaultName,
-                preferredName = if (isBootstrapAdmin) "Johnny" else defaultName.substringBefore(" "),
-                role = defaultRole,
-                status = "active",
-                lastSeenAt = nowIso
-            )
+
+            val created = userRef.get().await()
+            if (!created.exists()) throw IllegalStateException("Hub-Mind profile creation could not be verified.")
+            return@runCatching created.toHubMindUser(uid, normalizedEmail, displayName, nowIso)
         }
 
-        val status = (snap.getString("status") ?: "active").lowercase()
+        val existingEmail = snap.getString("email")?.trim()?.lowercase()
+        if (!existingEmail.isNullOrBlank() && existingEmail != normalizedEmail) {
+            throw IllegalStateException("This Hub-Mind profile is linked to a different sign-in email.")
+        }
+        val status = (snap.getString("status") ?: "inactive").lowercase()
         if (status != "active") {
             throw IllegalStateException("Your Hub-Mind account status is '$status'. Active status is required.")
         }
 
-        val roleFromDoc = (snap.getString("role") ?: "staff").lowercase()
-        val effectiveRole = if (isBootstrapAdmin) "admin" else roleFromDoc
         val nameFromDoc = snap.getString("displayName")?.takeIf { it.isNotBlank() }
+            ?: snap.getString("name")?.takeIf { it.isNotBlank() }
             ?: displayName.ifBlank { normalizedEmail.substringBefore("@") }
-        val preferredFromDoc = snap.getString("preferredName") ?: ""
-
-        runCatching {
-            userRef.update("lastSeenAt", nowIso).await()
-        }
+        runCatching { userRef.update("lastSeenAt", nowIso).await() }
 
         User(
             id = uid,
-            email = snap.getString("email")?.ifBlank { normalizedEmail } ?: normalizedEmail,
+            email = normalizedEmail,
             displayName = nameFromDoc,
-            preferredName = preferredFromDoc,
-            role = effectiveRole,
+            preferredName = snap.getString("preferredName") ?: "",
+            role = (snap.getString("role") ?: "staff").lowercase(),
             status = status,
             photoUrl = snap.getString("photoUrl"),
             phone = snap.getString("phone"),
@@ -172,7 +244,24 @@ class AuthRepositoryImpl(
         )
     }
 
-    override suspend fun signIn(email: String, password: String): Result<User> {
+    private fun com.google.firebase.firestore.DocumentSnapshot.toHubMindUser(
+        uid: String,
+        email: String,
+        fallbackName: String,
+        lastSeenAt: String
+    ): User = User(
+        id = uid,
+        email = getString("email") ?: email,
+        displayName = getString("displayName") ?: getString("name") ?: fallbackName.ifBlank { email.substringBefore("@") },
+        preferredName = getString("preferredName") ?: "",
+        role = (getString("role") ?: "staff").lowercase(),
+        status = (getString("status") ?: "inactive").lowercase(),
+        photoUrl = getString("photoUrl"),
+        phone = getString("phone"),
+        lastSeenAt = lastSeenAt
+    )
+
+    override suspend fun signIn(email: String, password: String, invitationId: String?): Result<User> {
         val normalized = email.trim().lowercase()
         if (normalized.isBlank() || password.isBlank()) {
             return Result.failure(IllegalArgumentException("Email and password are required."))
@@ -205,7 +294,8 @@ class AuthRepositoryImpl(
             val profile = loadAndValidateFirestoreUser(
                 uid = fbUser.uid,
                 email = fbUser.email ?: normalized,
-                displayName = fbUser.displayName ?: ""
+                displayName = fbUser.displayName ?: "",
+                invitationId = invitationId
             ).getOrElse { err ->
                 runCatching { auth.signOut() }
                 throw err
@@ -217,7 +307,7 @@ class AuthRepositoryImpl(
         }
     }
 
-    override suspend fun signInWithGoogle(idToken: String): Result<User> {
+    override suspend fun signInWithGoogle(idToken: String, invitationId: String?): Result<User> {
         if (idToken.isBlank() || idToken == "mock-google-token") {
             return Result.failure(
                 IllegalArgumentException(
@@ -238,7 +328,8 @@ class AuthRepositoryImpl(
             val profile = loadAndValidateFirestoreUser(
                 uid = fbUser.uid,
                 email = fbUser.email ?: "",
-                displayName = fbUser.displayName ?: ""
+                displayName = fbUser.displayName ?: "",
+                invitationId = invitationId
             ).getOrElse { err ->
                 runCatching { auth.signOut() }
                 throw err
@@ -377,41 +468,44 @@ class ConversationRepositoryImpl(
         val client = backendClient ?: return
         scope.launch {
             val db = client.getFirebaseFirestore().getOrNull() ?: return@launch
-            val reg = db.collection("users")
+            // Canonical Hub-Mind conversations embed their messages in the conversation document.
+            // Do not create a mobile-only messages subcollection: Web and Windows read this same array.
+            val conversationRef = db.collection("users")
                 .document(userId)
                 .collection("conversations")
                 .document(conversationId)
-                .collection("messages")
-                .orderBy("timestamp", Query.Direction.ASCENDING)
-                .addSnapshotListener { snap, err ->
-                    if (err != null || snap == null) return@addSnapshotListener
-                    val msgs = snap.documents.map { doc ->
-                        val roleStr = (doc.getString("role") ?: doc.getString("sender") ?: "user").lowercase()
-                        val sender = if (roleStr == "model" || roleStr == "assistant" || roleStr == "jess") {
-                            MessageSender.JESS
-                        } else {
-                            MessageSender.USER
-                        }
-                        val tsRaw = doc.get("timestamp") ?: doc.get("createdAt")
-                        val ts = when (tsRaw) {
-                            is Number -> tsRaw.toLong()
-                            is String -> runCatching { Instant.parse(tsRaw).toEpochMilli() }.getOrDefault(System.currentTimeMillis())
-                            else -> System.currentTimeMillis()
-                        }
-                        ChatMessage(
-                            id = doc.id,
-                            sender = sender,
-                            text = doc.getString("text") ?: doc.getString("content") ?: "",
-                            timestamp = ts,
-                            targetDeviceId = doc.getString("targetDeviceId"),
-                            toolCallName = doc.getString("toolCallName"),
-                            toolCallArgs = doc.getString("toolCallArgs"),
-                            executionStatus = doc.getString("executionStatus")
-                        )
+            val registration = conversationRef.addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+                val rawMessages = snapshot.get("messages") as? List<*>
+                val parsed = rawMessages.orEmpty().mapNotNull { raw ->
+                    val item = raw as? Map<*, *> ?: return@mapNotNull null
+                    val id = item["id"] as? String ?: return@mapNotNull null
+                    val senderValue = (item["sender"] as? String ?: item["role"] as? String ?: "user").lowercase()
+                    val sender = if (senderValue in setOf("jess", "assistant", "model")) {
+                        MessageSender.JESS
+                    } else {
+                        MessageSender.USER
                     }
-                    messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }.value = msgs
-                }
-            messageListeners[conversationId] = reg
+                    val ts = when (val rawTimestamp = item["timestamp"]) {
+                        is Number -> rawTimestamp.toLong()
+                        is String -> runCatching { Instant.parse(rawTimestamp).toEpochMilli() }.getOrDefault(System.currentTimeMillis())
+                        else -> System.currentTimeMillis()
+                    }
+                    ChatMessage(
+                        id = id,
+                        sender = sender,
+                        text = (item["text"] as? String) ?: (item["content"] as? String).orEmpty(),
+                        timestamp = ts,
+                        parentMessageId = item["parentMessageId"] as? String,
+                        targetDeviceId = item["targetDeviceId"] as? String,
+                        toolCallName = item["toolCallName"] as? String,
+                        toolCallArgs = item["toolCallArgs"] as? String,
+                        executionStatus = item["executionStatus"] as? String
+                    )
+                }.sortedBy { it.timestamp }
+                messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }.value = parsed
+            }
+            messageListeners[conversationId] = registration
         }
     }
 
@@ -430,13 +524,15 @@ class ConversationRepositoryImpl(
 
     override suspend fun createConversation(title: String): Conversation {
         val now = System.currentTimeMillis()
+        val nowIso = Instant.ofEpochMilli(now).toString()
         val newConv = Conversation(
             id = "conv-" + UUID.randomUUID().toString().take(8),
             title = title.ifBlank { "New Jess Conversation" },
             summary = "Active Hub-Mind conversation",
             messageCount = 0,
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
+            isLiveSession = false
         )
         _conversations.value = listOf(newConv) + _conversations.value.filter { it.id != newConv.id }
         _currentConversation.value = newConv
@@ -452,16 +548,24 @@ class ConversationRepositoryImpl(
                     .document(newConv.id)
                     .set(
                         mapOf(
+                            "id" to newConv.id,
+                            "userId" to uid,
                             "title" to newConv.title,
                             "summary" to newConv.summary,
                             "messageCount" to 0,
-                            "createdAt" to now,
-                            "updatedAt" to now,
+                            "messages" to emptyList<Map<String, Any?>>(),
+                            "rootMessageId" to null,
+                            "activeLeafId" to null,
+                            "createdAt" to nowIso,
+                            "updatedAt" to nowIso,
                             "isLiveSession" to false
                         ),
                         SetOptions.merge()
                     )
                     .await()
+            }.onFailure {
+                // Keep the local conversation visible but surface the persistence error in logs.
+                android.util.Log.w("HubMindConversation", "Could not create shared conversation: ${it.message}")
             }
             attachMessageListener(uid, newConv.id)
         }
@@ -474,39 +578,48 @@ class ConversationRepositoryImpl(
         targetDeviceId: String?
     ): ChatMessage {
         val now = System.currentTimeMillis()
+        val nowIso = Instant.ofEpochMilli(now).toString()
+        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
+        val previousMessages = flow.value
+        val parentId = previousMessages.lastOrNull()?.id
         val msg = ChatMessage(
             id = "msg-" + UUID.randomUUID().toString().take(8),
             sender = MessageSender.USER,
             text = text,
             timestamp = now,
+            parentMessageId = parentId,
             targetDeviceId = targetDeviceId
         )
-        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
-        flow.value = flow.value + msg
+        flow.value = previousMessages + msg
 
         val uid = boundUserId
         val db = backendClient?.getFirebaseFirestore()?.getOrNull()
         if (uid != null && db != null) {
             val convRef = db.collection("users").document(uid).collection("conversations").document(conversationId)
+            val canonicalMessage = mapOf<String, Any?>(
+                "id" to msg.id,
+                "sender" to "user",
+                "text" to text,
+                "timestamp" to nowIso,
+                "parentMessageId" to parentId,
+                "targetDeviceId" to targetDeviceId
+            )
             runCatching {
-                convRef.collection("messages").document(msg.id).set(
-                    mapOf(
-                        "role" to "user",
-                        "sender" to "USER",
-                        "text" to text,
-                        "content" to text,
-                        "timestamp" to now,
-                        "createdAt" to Instant.ofEpochMilli(now).toString(),
-                        "targetDeviceId" to targetDeviceId
-                    )
-                ).await()
                 convRef.set(
                     mapOf(
-                        "updatedAt" to now,
+                        "id" to conversationId,
+                        "userId" to uid,
+                        "messages" to FieldValue.arrayUnion(canonicalMessage),
+                        "messageCount" to FieldValue.increment(1),
+                        "rootMessageId" to (previousMessages.firstOrNull()?.id ?: msg.id),
+                        "activeLeafId" to msg.id,
+                        "updatedAt" to nowIso,
                         "summary" to text.take(120)
                     ),
                     SetOptions.merge()
                 ).await()
+            }.onFailure {
+                android.util.Log.w("HubMindConversation", "Could not persist shared user message: ${it.message}")
             }
         }
         return msg
@@ -519,69 +632,95 @@ class ConversationRepositoryImpl(
         status: String?
     ): ChatMessage {
         val now = System.currentTimeMillis()
+        val nowIso = Instant.ofEpochMilli(now).toString()
+        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
+        val previousMessages = flow.value
+        val parentId = previousMessages.lastOrNull()?.id
         val msg = ChatMessage(
             id = "msg-" + UUID.randomUUID().toString().take(8),
             sender = MessageSender.JESS,
             text = text,
             timestamp = now,
+            parentMessageId = parentId,
             toolCallName = toolName,
             executionStatus = status
         )
-        val flow = messagesMap.getOrPut(conversationId) { MutableStateFlow(emptyList()) }
-        flow.value = flow.value + msg
+        flow.value = previousMessages + msg
 
         val uid = boundUserId
         val db = backendClient?.getFirebaseFirestore()?.getOrNull()
         if (uid != null && db != null) {
             val convRef = db.collection("users").document(uid).collection("conversations").document(conversationId)
+            val canonicalMessage = mapOf<String, Any?>(
+                "id" to msg.id,
+                "sender" to "jess",
+                "text" to text,
+                "timestamp" to nowIso,
+                "parentMessageId" to parentId,
+                "toolCallName" to toolName,
+                "executionStatus" to status
+            )
             runCatching {
-                convRef.collection("messages").document(msg.id).set(
-                    mapOf(
-                        "role" to "model",
-                        "sender" to "JESS",
-                        "text" to text,
-                        "content" to text,
-                        "timestamp" to now,
-                        "createdAt" to Instant.ofEpochMilli(now).toString(),
-                        "toolCallName" to toolName,
-                        "executionStatus" to status
-                    )
-                ).await()
                 convRef.set(
                     mapOf(
-                        "updatedAt" to now,
+                        "id" to conversationId,
+                        "userId" to uid,
+                        "messages" to FieldValue.arrayUnion(canonicalMessage),
+                        "messageCount" to FieldValue.increment(1),
+                        "rootMessageId" to (previousMessages.firstOrNull()?.id ?: msg.id),
+                        "activeLeafId" to msg.id,
+                        "updatedAt" to nowIso,
                         "summary" to text.take(120)
                     ),
                     SetOptions.merge()
                 ).await()
+            }.onFailure {
+                android.util.Log.w("HubMindConversation", "Could not persist shared Jess response: ${it.message}")
             }
         }
         return msg
     }
 
-    suspend fun saveMemory(key: String?, content: String, category: String = "FACT") {
+    suspend fun saveMemory(key: String?, content: String, category: String = "fact") {
         val uid = boundUserId ?: return
+        val cleanContent = content.trim()
+        if (cleanContent.isBlank()) return
         val db = backendClient?.getFirebaseFirestore()?.getOrNull() ?: return
-        val memId = "mem-" + UUID.randomUUID().toString().take(8)
         val nowIso = Instant.now().toString()
+        val normalizedKey = key?.trim()?.lowercase()
+            ?.replace(Regex("[^a-z0-9]+"), "_")
+            ?.trim('_')
+            ?.takeIf { it.isNotBlank() }
+        val memoryId = normalizedKey
+            ?.let { "mem_${uid}_$it" }
+            ?: "mem_${UUID.randomUUID()}"
+        val normalizedCategory = category.trim().lowercase().let {
+            if (it in setOf("preference", "workflow", "fact", "instruction", "habit", "interaction", "personal", "business")) it
+            else "fact"
+        }
         runCatching {
             db.collection("users")
                 .document(uid)
                 .collection("memories")
-                .document(memId)
+                .document(memoryId)
                 .set(
                     mapOf(
+                        "id" to memoryId,
                         "userId" to uid,
-                        "key" to (key ?: "preference"),
-                        "content" to content,
-                        "value" to content,
-                        "category" to category.uppercase(),
+                        "key" to normalizedKey,
+                        "content" to cleanContent,
+                        "category" to normalizedCategory,
                         "importance" to "medium",
+                        "source" to "voice",
                         "createdAt" to nowIso,
-                        "updatedAt" to nowIso
-                    )
+                        "updatedAt" to nowIso,
+                        "lastReferencedAt" to nowIso
+                    ),
+                    SetOptions.merge()
                 )
                 .await()
+        }.onFailure {
+            android.util.Log.w("HubMindMemory", "Could not save shared Jess memory: ${it.message}")
         }
     }
 }
@@ -618,6 +757,10 @@ class JessRepositoryImpl(
 
     private var liveSession: GeminiLiveAudioSession? = null
     private var leaseListener: ListenerRegistration? = null
+    private var leaseHeartbeatJob: Job? = null
+    @Volatile private var activeSessionId: String? = null
+    private val jessLeaseDurationMs = 22_000L
+    private val jessLeaseHeartbeatMs = 8_000L
     private val currentTurnUserBuffer = StringBuilder()
     private val currentTurnJessBuffer = StringBuilder()
 
@@ -631,17 +774,24 @@ class JessRepositoryImpl(
                 .collection("private")
                 .document("jessActiveSession")
                 .addSnapshotListener { snap, _ ->
-                    if (snap != null && snap.exists()) {
-                        val active = snap.getBoolean("active") ?: false
-                        val owner = snap.getString("client")
-                        _activeLeaseClient.value = if (active) owner else null
-                    }
+                    val leaseUntil = snap?.getLong("leaseUntil") ?: 0L
+                    val status = snap?.getString("status")
+                    val owner = snap?.getString("client")
+                    _activeLeaseClient.value = if (
+                        snap != null && snap.exists() && status == "active" &&
+                        leaseUntil > System.currentTimeMillis()
+                    ) owner else null
                 }
         }
     }
 
     override suspend fun startVoiceSession(): Boolean {
-        // Unit-test path when no backendClient is wired
+        if (liveSession != null && _connectionState.value in setOf(
+                LiveConnectionState.CONNECTING,
+                LiveConnectionState.CONNECTED
+            )
+        ) return true
+
         val client = backendClient
         if (client == null) {
             _connectionState.value = LiveConnectionState.CONNECTING
@@ -668,35 +818,114 @@ class JessRepositoryImpl(
             return false
         }
 
-        // Claim the cross-device voice session lease in Firestore
-        val uid = authRepository?.currentUser?.value?.id ?: ephemeral.userId
-        if (uid.isNotBlank()) {
-            runCatching {
-                val db = client.getFirebaseFirestore().getOrNull()
-                db?.collection("users")
-                    ?.document(uid)
-                    ?.collection("private")
-                    ?.document("jessActiveSession")
-                    ?.set(
+        val uid = authRepository?.currentUser?.value?.id
+            ?: client.getFirebaseAuth().getOrNull()?.currentUser?.uid.orEmpty()
+        if (uid.isBlank() || ephemeral.userId != uid) {
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+
+        val db = client.getFirebaseFirestore().getOrNull()
+        if (db == null) {
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+        val leaseRef = db.collection("users").document(uid)
+            .collection("private").document("jessActiveSession")
+        val sessionId = "android-${UUID.randomUUID()}"
+        val now = System.currentTimeMillis()
+
+        val leaseClaimed = runCatching {
+            db.runTransaction { transaction ->
+                val current = transaction.get(leaseRef)
+                val currentSessionId = current.getString("sessionId")
+                val currentLeaseUntil = current.getLong("leaseUntil") ?: 0L
+                if (!currentSessionId.isNullOrBlank() &&
+                    currentSessionId != sessionId &&
+                    currentLeaseUntil > now
+                ) {
+                    false
+                } else {
+                    transaction.set(
+                        leaseRef,
                         mapOf(
-                            "sessionId" to ("sess-android-" + UUID.randomUUID().toString().take(8)),
+                            "sessionId" to sessionId,
                             "client" to "android",
-                            "active" to true,
-                            "updatedAt" to System.currentTimeMillis()
+                            "status" to "active",
+                            "leaseUntil" to (now + jessLeaseDurationMs),
+                            "updatedAt" to now
                         ),
                         SetOptions.merge()
                     )
-                    ?.await()
-                _activeLeaseClient.value = "android"
+                    true
+                }
+            }.await()
+        }.getOrElse {
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+
+        if (!leaseClaimed) {
+            val owner = runCatching { leaseRef.get().await().getString("client") }.getOrNull()
+            _activeLeaseClient.value = owner
+            _connectionState.value = LiveConnectionState.ERROR
+            _liveState.value = JessLiveState.ERROR
+            return false
+        }
+
+        activeSessionId = sessionId
+        _activeLeaseClient.value = "android"
+        leaseHeartbeatJob?.cancel()
+        leaseHeartbeatJob = scope.launch {
+            while (isActive && activeSessionId == sessionId) {
+                delay(jessLeaseHeartbeatMs)
+                val renewed = runCatching {
+                    db.runTransaction { transaction ->
+                        val current = transaction.get(leaseRef)
+                        if (!current.exists() || current.getString("sessionId") != sessionId) {
+                            false
+                        } else {
+                            val heartbeatAt = System.currentTimeMillis()
+                            transaction.set(
+                                leaseRef,
+                                mapOf(
+                                    "client" to "android",
+                                    "status" to "active",
+                                    "leaseUntil" to (heartbeatAt + jessLeaseDurationMs),
+                                    "updatedAt" to heartbeatAt
+                                ),
+                                SetOptions.merge()
+                            )
+                            true
+                        }
+                    }.await()
+                }.getOrDefault(false)
+
+                if (!renewed) {
+                    liveSession?.shutdown()
+                    liveSession = null
+                    activeSessionId = null
+                    _activeLeaseClient.value = null
+                    _connectionState.value = LiveConnectionState.ERROR
+                    _liveState.value = JessLiveState.ERROR
+                    break
+                }
             }
         }
 
         val memories = (conversationRepository as? ConversationRepositoryImpl)?.userMemories?.value ?: emptyList()
+        val currentDevices = deviceRegistryRepository.devices.value
+        val localDevice = currentDevices.firstOrNull { it.isCurrentDevice }
         val systemInstruction = JessCanonicalConfig.buildSystemInstruction(
             user = authRepository?.currentUser?.value,
             memories = memories,
-            devices = deviceRegistryRepository.devices.value,
-            targetDevice = deviceRegistryRepository.currentTargetDevice.value
+            devices = currentDevices,
+            targetDevice = deviceRegistryRepository.currentTargetDevice.value,
+            permissionMode = localDevice?.permissionMode ?: "ask",
+            fullControlEnabled = localDevice?.fullControlActive == true
         )
         val toolDecls = JessCanonicalConfig.buildToolDeclarations()
 
@@ -767,7 +996,11 @@ class JessRepositoryImpl(
                 }
 
                 override fun onError(message: String) {
-                    _liveState.value = JessLiveState.ERROR
+                    scope.launch {
+                        endVoiceSession()
+                        _connectionState.value = LiveConnectionState.ERROR
+                        _liveState.value = JessLiveState.ERROR
+                    }
                 }
             }
         )
@@ -777,6 +1010,10 @@ class JessRepositoryImpl(
     }
 
     override suspend fun endVoiceSession() {
+        val sessionId = activeSessionId
+        activeSessionId = null
+        leaseHeartbeatJob?.cancel()
+        leaseHeartbeatJob = null
         liveSession?.shutdown()
         liveSession = null
         _liveState.value = JessLiveState.IDLE
@@ -784,24 +1021,22 @@ class JessRepositoryImpl(
 
         val client = backendClient
         val uid = authRepository?.currentUser?.value?.id
-        if (client != null && !uid.isNullOrBlank()) {
+            ?: client?.getFirebaseAuth()?.getOrNull()?.currentUser?.uid
+        if (client != null && !uid.isNullOrBlank() && !sessionId.isNullOrBlank()) {
             runCatching {
-                val db = client.getFirebaseFirestore().getOrNull()
-                db?.collection("users")
-                    ?.document(uid)
-                    ?.collection("private")
-                    ?.document("jessActiveSession")
-                    ?.set(
-                        mapOf(
-                            "client" to "android",
-                            "active" to false,
-                            "updatedAt" to System.currentTimeMillis()
-                        ),
-                        SetOptions.merge()
-                    )
-                    ?.await()
+                val db = client.getFirebaseFirestore().getOrNull() ?: return@runCatching
+                val leaseRef = db.collection("users").document(uid)
+                    .collection("private").document("jessActiveSession")
+                db.runTransaction { transaction ->
+                    val current = transaction.get(leaseRef)
+                    if (current.exists() && current.getString("sessionId") == sessionId) {
+                        transaction.delete(leaseRef)
+                    }
+                    true
+                }.await()
             }
         }
+        _activeLeaseClient.value = null
     }
 
     override suspend fun setLiveState(state: JessLiveState) {
@@ -812,10 +1047,20 @@ class JessRepositoryImpl(
         return when (call.name) {
             "android_device_action" -> {
                 val localAndroidId = deviceRegistryRepository.devices.value
-                    .firstOrNull { it.isCurrentDevice || it.platform == DevicePlatform.ANDROID }
-                    ?.deviceId ?: "android-local"
-                val actionType = (call.args["actionType"] as? String) ?: "GET_SCREEN_HIERARCHY"
-                val res = deviceControlRepository.executeTool(localAndroidId, actionType, call.args)
+                    .firstOrNull { it.isCurrentDevice && it.platform == DevicePlatform.ANDROID }
+                    ?.deviceId ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "The current Android device is not registered in this Hub-Mind account."
+                    )
+                val actionType = (call.args["actionType"] as? String)?.takeIf { it.isNotBlank() }
+                    ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "Jess did not provide an Android actionType."
+                    )
+                val actionArgs = call.args.filterKeys { it != "actionType" }
+                val res = deviceControlRepository.executeTool(localAndroidId, actionType, actionArgs)
                 lastExecutedToolName = actionType
                 lastExecutionStatus = if (res.success && res.verified) "done_verified" else if (res.success) "sent_unverified" else "failed"
                 mapOf(
@@ -828,11 +1073,20 @@ class JessRepositoryImpl(
             }
             "windows_device_action" -> {
                 val targetWinId = (call.args["targetDeviceId"] as? String)?.takeIf { it.isNotBlank() }
-                    ?: deviceRegistryRepository.devices.value.firstOrNull { it.platform == DevicePlatform.WINDOWS }?.deviceId
-                    ?: deviceRegistryRepository.currentTargetDevice.value?.deviceId
-                    ?: "windows-workstation"
-                val toolName = (call.args["toolName"] as? String) ?: "get_windows_system_info"
-                val res = deviceControlRepository.executeTool(targetWinId, toolName, call.args)
+                    ?: deviceRegistryRepository.devices.value.firstOrNull { it.platform == DevicePlatform.WINDOWS && it.status == DeviceStatus.ONLINE }?.deviceId
+                    ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "No online Windows workstation is registered to this Hub-Mind account."
+                    )
+                val toolName = (call.args["toolName"] as? String)?.takeIf { it.isNotBlank() }
+                    ?: return mapOf(
+                        "success" to false,
+                        "verified" to false,
+                        "error" to "Jess did not provide a Windows toolName."
+                    )
+                val toolArgs = call.args.filterKeys { it != "toolName" && it != "targetDeviceId" }
+                val res = deviceControlRepository.executeTool(targetWinId, toolName, toolArgs)
                 lastExecutedToolName = toolName
                 lastExecutionStatus = if (res.success && res.verified) "done_verified" else if (res.success) "sent_unverified" else "failed"
                 mapOf(
@@ -1079,7 +1333,7 @@ class DeviceRegistryRepositoryImpl(
                         val platformStr = (doc.getString("platform") ?: "ANDROID").uppercase()
                         val platform = runCatching { DevicePlatform.valueOf(platformStr) }
                             .getOrDefault(DevicePlatform.ANDROID)
-                        val lastSeen = doc.getLong("lastSeenAt") ?: 0L
+                        val lastSeen = doc.getLong("lastSeen") ?: doc.getLong("lastSeenAt") ?: 0L
                         val rawStatus = (doc.getString("status") ?: "ONLINE").uppercase()
                         val isFresh = (now - lastSeen) < 65_000L
                         val status = if (devId == localDeviceId) {
@@ -1157,6 +1411,7 @@ class DeviceRegistryRepositoryImpl(
             "fullControlActive" to androidNode.fullControlActive,
             "permissionMode" to androidNode.permissionMode,
             "capabilities" to androidNode.capabilities.map { it.name },
+            "lastSeen" to System.currentTimeMillis(),
             "lastSeenAt" to System.currentTimeMillis(),
             "batteryPercent" to androidNode.batteryPercent,
             "ipAddress" to androidNode.ipAddress,
@@ -1235,36 +1490,35 @@ class DeviceControlRepositoryImpl(
         )
         _commandHistory.value = listOf(command) + _commandHistory.value
 
-        val isLocalTarget = targetDeviceId == localId ||
-            targetDeviceId.startsWith("android") ||
-            toolName.equals("android_device_action", ignoreCase = true)
+        val isLocalTarget = targetDeviceId == localId
 
         val result: CommandResult = if (isLocalTarget && localExecutor != null) {
             val actionStr = (args["actionType"] as? String)?.ifBlank { null } ?: toolName
-            val actionType = runCatching { AndroidActionType.valueOf(actionStr.uppercase()) }
-                .getOrElse {
-                    when (actionStr.uppercase()) {
-                        "LAUNCH_APP", "OPEN_APP" -> AndroidActionType.OPEN_APP
-                        "NAVIGATE_BACK", "BACK" -> AndroidActionType.NAVIGATE_BACK
-                        "GO_HOME", "HOME" -> AndroidActionType.GO_HOME
-                        "CAPTURE_SCREEN", "SCREENSHOT" -> AndroidActionType.CAPTURE_SCREEN
-                        else -> AndroidActionType.GET_SCREEN_HIERARCHY
-                    }
-                }
-            val androidRes = localExecutor.executeCommand(
-                AndroidCommand(
-                    commandId = cmdId,
-                    actionType = actionType,
-                    parameters = args
+            val actionType = runCatching { AndroidActionType.valueOf(actionStr.uppercase()) }.getOrNull()
+            if (actionType == null) {
+                CommandResult(
+                    success = false,
+                    verified = false,
+                    error = "Unsupported Android action '$actionStr'. No fallback action was executed.",
+                    durationMs = System.currentTimeMillis() - startMs
                 )
-            )
-            CommandResult(
-                success = androidRes.success,
-                verified = androidRes.verified,
-                output = androidRes.outputText,
-                error = androidRes.error,
-                durationMs = androidRes.durationMs
-            )
+            } else {
+                val androidRes = localExecutor.executeCommand(
+                    AndroidCommand(
+                        commandId = cmdId,
+                        actionType = actionType,
+                        parameters = args,
+                        requiresConfirmation = args["requiresConfirmation"] as? Boolean ?: false
+                    )
+                )
+                CommandResult(
+                    success = androidRes.success,
+                    verified = androidRes.verified,
+                    output = androidRes.outputText,
+                    error = androidRes.error,
+                    durationMs = androidRes.durationMs
+                )
+            }
         } else if (controlPlaneTransport != null) {
             val uid = authRepository?.currentUser?.value?.id ?: "authenticated-user"
             val envelope = CommandEnvelope(
@@ -1275,7 +1529,8 @@ class DeviceControlRepositoryImpl(
                 actionType = toolName,
                 parameters = args,
                 creationTime = startMs,
-                expirationTime = startMs + 20_000L
+                expirationTime = startMs + 20_000L,
+                requiresConfirmation = args["requiresConfirmation"] as? Boolean ?: false
             )
             controlPlaneTransport.dispatchCommand(envelope)
         } else {

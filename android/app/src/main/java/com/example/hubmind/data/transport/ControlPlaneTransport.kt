@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -41,7 +42,8 @@ enum class CommandLifecycle {
     COMPLETED,
     FAILED,
     CANCELLED,
-    EXPIRED
+    EXPIRED,
+    TIMED_OUT
 }
 
 data class CommandEnvelope(
@@ -137,16 +139,19 @@ class HubMindControlPlaneTransportImpl(
     override suspend fun connect(userId: String, deviceId: String) {
         activeUserId = userId
         activeDeviceId = deviceId
+        processedCommandIds.clear()
+        processedReplayTokens.clear()
         KeystorePairingManager.generateDeviceKeyPair()
 
-        if (backendClient == null) {
+        val client = backendClient
+        if (client == null) {
             _isConnected.value = true
             return
         }
 
-        val dbRes = backendClient.getFirebaseFirestore()
-        val db = dbRes.getOrNull()
-        if (db == null) {
+        val db = client.getFirebaseFirestore().getOrNull()
+        val authUid = client.getFirebaseAuth().getOrNull()?.currentUser?.uid
+        if (db == null || authUid != userId) {
             _isConnected.value = false
             return
         }
@@ -164,59 +169,11 @@ class HubMindControlPlaneTransportImpl(
                 _isConnected.value = true
                 val docs = snapshot?.documents ?: return@addSnapshotListener
                 for (doc in docs) {
-                    val status = doc.getString("status") ?: continue
-                    if (status != "DISPATCHED" && status != "PENDING") continue
-                    val cmdId = doc.getString("commandId") ?: doc.id
-                    if (!processedCommandIds.add(cmdId)) continue
-
-                    val replayToken = doc.getString("replayToken") ?: "nonce-$cmdId"
-                    if (!processedReplayTokens.add(replayToken)) {
-                        scope.launch {
-                            doc.reference.update(
-                                mapOf(
-                                    "status" to "FAILED",
-                                    "error" to "Replay token rejected.",
-                                    "completedAt" to System.currentTimeMillis()
-                                )
-                            )
-                        }
-                        continue
-                    }
-
-                    val expiresAt = doc.getLong("expiresAt") ?: (System.currentTimeMillis() + 30_000L)
-                    if (expiresAt < System.currentTimeMillis()) {
-                        scope.launch {
-                            doc.reference.update(
-                                mapOf(
-                                    "status" to "EXPIRED",
-                                    "error" to "Command expired before execution.",
-                                    "completedAt" to System.currentTimeMillis()
-                                )
-                            )
-                        }
-                        continue
-                    }
-
-                    val actionType = doc.getString("actionType") ?: doc.getString("toolName") ?: ""
-                    @Suppress("UNCHECKED_CAST")
-                    val rawParams = (doc.get("parameters") as? Map<String, Any>) ?: emptyMap()
-                    val envelope = CommandEnvelope(
-                        commandId = cmdId,
-                        issuingUserId = doc.getString("userId") ?: userId,
-                        sourceDeviceId = doc.getString("sourceDeviceId") ?: "remote",
-                        targetDeviceId = deviceId,
-                        actionType = actionType,
-                        parameters = rawParams,
-                        creationTime = doc.getLong("createdAt") ?: System.currentTimeMillis(),
-                        expirationTime = expiresAt,
-                        replayToken = replayToken,
-                        requiresConfirmation = doc.getBoolean("requiresConfirmation") ?: false,
-                        correlationId = doc.getString("correlationId") ?: "corr-$cmdId",
-                        lifecycleState = CommandLifecycle.RECEIVED
-                    )
-                    _incomingCommands.tryEmit(envelope)
+                    if (doc.getString("lifecycleState") != "DISPATCHED") continue
+                    val commandId = doc.getString("commandId") ?: doc.id
+                    if (!processedCommandIds.add(commandId)) continue
                     scope.launch {
-                        executeIncomingCommand(userId, cmdId, envelope)
+                        executeIncomingCommand(userId, deviceId, doc.reference, commandId)
                     }
                 }
             }
@@ -224,102 +181,222 @@ class HubMindControlPlaneTransportImpl(
 
     private suspend fun executeIncomingCommand(
         userId: String,
-        commandId: String,
-        envelope: CommandEnvelope
+        deviceId: String,
+        commandRef: com.google.firebase.firestore.DocumentReference,
+        commandId: String
     ) {
         val db = backendClient?.getFirebaseFirestore()?.getOrNull() ?: return
-        val cmdRef = db.collection("users").document(userId).collection("deviceCommands").document(commandId)
         val startMs = System.currentTimeMillis()
+        val snapshot = runCatching { commandRef.get().await() }.getOrNull() ?: return
+        if (!snapshot.exists() || snapshot.getString("lifecycleState") != "DISPATCHED") return
 
-        runCatching {
-            cmdRef.update(mapOf("status" to "EXECUTING", "acknowledgedAt" to startMs)).await()
+        val issuingUserId = snapshot.getString("issuingUserId").orEmpty()
+        val sourceDeviceId = snapshot.getString("sourceDeviceId").orEmpty()
+        val targetDeviceId = snapshot.getString("targetDeviceId").orEmpty()
+        val actionType = snapshot.getString("actionType").orEmpty()
+        val replayToken = snapshot.getString("replayToken").orEmpty()
+        val expirationTime = snapshot.getLong("expirationTime") ?: 0L
+        val requiresConfirmation = snapshot.getBoolean("requiresConfirmation") ?: false
+
+        if (issuingUserId != userId || targetDeviceId != deviceId || sourceDeviceId.isBlank() || actionType.isBlank()) {
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "Command envelope identity or target validation failed.")
+            return
+        }
+        val sourceDeviceRegistered = runCatching {
+            db.collection("users").document(userId).collection("devices")
+                .document(sourceDeviceId).get().await().exists()
+        }.getOrDefault(false)
+        if (!sourceDeviceRegistered) {
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "Command source device is not registered to this Hub-Mind user.")
+            return
+        }
+        if (expirationTime <= System.currentTimeMillis()) {
+            writeCommandResult(userId, commandId, "TIMED_OUT", false, false, "",
+                "Command expired before Android execution began.")
+            return
+        }
+        if (replayToken.isBlank() || !processedReplayTokens.add(replayToken)) {
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "Duplicate or missing replay token rejected by Android.")
+            return
+        }
+        if (requiresConfirmation) {
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "This command requires explicit user confirmation. The Android receiver has no pending-approval surface in this build, so it was not executed.")
+            return
         }
 
-        if (envelope.actionType.equals("ping_device", ignoreCase = true) ||
-            envelope.actionType.equals("PING", ignoreCase = true)
-        ) {
-            val dur = System.currentTimeMillis() - startMs
-            runCatching {
-                cmdRef.update(
-                    mapOf(
-                        "status" to "COMPLETED",
-                        "verified" to true,
-                        "output" to "Android agent online and responsive.",
-                        "durationMs" to dur,
-                        "completedAt" to System.currentTimeMillis()
-                    )
-                ).await()
-            }
+        // Transactionally claim the command so reconnects cannot execute it twice.
+        val claimed = runCatching {
+            db.runTransaction { transaction ->
+                val current = transaction.get(commandRef)
+                if (!current.exists() || current.getString("lifecycleState") != "DISPATCHED") {
+                    false
+                } else if (
+                    current.getString("issuingUserId") != userId ||
+                    current.getString("targetDeviceId") != deviceId ||
+                    (current.getLong("expirationTime") ?: 0L) <= System.currentTimeMillis()
+                ) {
+                    false
+                } else {
+                    transaction.update(commandRef, mapOf(
+                        "lifecycleState" to "EXECUTING",
+                        "claimedByDeviceId" to deviceId,
+                        "claimedAt" to System.currentTimeMillis()
+                    ))
+                    true
+                }
+            }.await()
+        }.getOrDefault(false)
+
+        if (!claimed) return
+
+        val paramsJson = snapshot.getString("parametersJson").orEmpty()
+        val parameters = try {
+            JSONObject(paramsJson.ifBlank { "{}" }).toNativeMap()
+        } catch (error: Exception) {
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "Command parameters were not valid JSON: ${error.message ?: "parse error"}")
+            return
+        }
+
+        if (actionType.equals("ping_device", ignoreCase = true) || actionType.equals("PING", ignoreCase = true)) {
+            val duration = System.currentTimeMillis() - startMs
+            writeCommandResult(userId, commandId, "COMPLETED", true, true,
+                "Pong from Android device $deviceId.", "", duration)
+            return
+        }
+
+        val mappedAction = mapActionName(actionType, parameters)
+        if (mappedAction == null) {
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "Unsupported Android action '$actionType'. No fallback action was executed.")
             return
         }
 
         val executor = localExecutor
         if (executor == null) {
-            runCatching {
-                cmdRef.update(
-                    mapOf(
-                        "status" to "FAILED",
-                        "verified" to false,
-                        "error" to "AndroidUiActionExecutor is not initialized on this device.",
-                        "completedAt" to System.currentTimeMillis()
-                    )
-                ).await()
-            }
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "AndroidUiActionExecutor is not initialized on this device.")
             return
         }
 
-        val mappedAction = mapActionName(envelope.actionType, envelope.parameters)
-        val androidCmd = AndroidCommand(
+        val command = AndroidCommand(
             commandId = commandId,
             actionType = mappedAction,
-            parameters = envelope.parameters,
-            expiryTimestamp = envelope.expirationTime,
-            requiresConfirmation = envelope.requiresConfirmation
+            parameters = parameters,
+            expiryTimestamp = expirationTime,
+            requiresConfirmation = false
         )
-        val actionResult = executor.executeCommand(androidCmd)
-        val duration = System.currentTimeMillis() - startMs
-        val statusStr = if (actionResult.success) "COMPLETED" else "FAILED"
+        val result = runCatching { executor.executeCommand(command) }.getOrElse { error ->
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                error.message ?: "Android action execution failed.")
+            return
+        }
 
-        val updateMap = mutableMapOf<String, Any?>(
-            "status" to statusStr,
-            "verified" to actionResult.verified,
-            "output" to (actionResult.outputText ?: ""),
-            "error" to actionResult.error,
-            "durationMs" to duration,
-            "completedAt" to System.currentTimeMillis(),
-            "result" to mapOf(
-                "success" to actionResult.success,
-                "verified" to actionResult.verified,
-                "output" to (actionResult.outputText ?: ""),
-                "error" to (actionResult.error ?: ""),
-                "durationMs" to duration
-            )
-        )
-        runCatching {
-            cmdRef.update(updateMap).await()
-        }.onFailure {
-            val token = backendClient?.getFreshIdToken()?.getOrNull()
-            if (token != null) {
-                backendClient.updateDeviceCommandOnBackend(
-                    token,
-                    JSONObject().apply {
-                        put("commandId", commandId)
-                        put("status", statusStr)
-                        put("verified", actionResult.verified)
-                        put("output", actionResult.outputText ?: "")
-                        put("error", actionResult.error ?: "")
-                        put("durationMs", duration)
-                    }
-                )
+        val duration = System.currentTimeMillis() - startMs
+        val payloadJson = result.screenshotBase64
+            ?.takeIf { it.length <= 450_000 }
+            ?.let { image ->
+                JSONObject().put(
+                    "evidence",
+                    JSONObject().put("imageBase64", image).put("mimeType", "image/jpeg")
+                ).toString()
             }
+        writeCommandResult(
+            userId = userId,
+            commandId = commandId,
+            lifecycleState = if (result.success) "COMPLETED" else "FAILED",
+            success = result.success,
+            verified = result.verified,
+            summary = result.outputText.orEmpty(),
+            error = result.error.orEmpty(),
+            durationMs = duration,
+            resultPayloadJson = payloadJson
+        )
+    }
+
+    private fun JSONObject.toNativeMap(): Map<String, Any> {
+        val result = mutableMapOf<String, Any>()
+        val keys = keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            when (val value = opt(key)) {
+                null, JSONObject.NULL -> Unit
+                is JSONObject -> result[key] = value.toNativeMap()
+                is JSONArray -> result[key] = value.toNativeList()
+                else -> result[key] = value
+            }
+        }
+        return result
+    }
+
+    private fun JSONArray.toNativeList(): List<Any> {
+        val result = mutableListOf<Any>()
+        for (index in 0 until length()) {
+            when (val value = opt(index)) {
+                null, JSONObject.NULL -> Unit
+                is JSONObject -> result.add(value.toNativeMap())
+                is JSONArray -> result.add(value.toNativeList())
+                else -> result.add(value)
+            }
+        }
+        return result
+    }
+
+    private suspend fun writeCommandResult(
+        userId: String,
+        commandId: String,
+        lifecycleState: String,
+        success: Boolean,
+        verified: Boolean,
+        summary: String,
+        error: String,
+        durationMs: Long = 0,
+        resultPayloadJson: String? = null
+    ) {
+        val update = mutableMapOf<String, Any>(
+            "lifecycleState" to lifecycleState,
+            "resultSuccess" to success,
+            "resultVerified" to verified,
+            "resultSummary" to summary.take(10_000),
+            "resultError" to error.take(5_000),
+            "completedAt" to System.currentTimeMillis(),
+            "durationMs" to durationMs
+        )
+        resultPayloadJson?.takeIf { it.length <= 500_000 }?.let { update["resultPayloadJson"] = it }
+
+        val db = backendClient?.getFirebaseFirestore()?.getOrNull()
+        val write = if (db != null) runCatching {
+            db.collection("users").document(userId).collection("deviceCommands")
+                .document(commandId).update(update).await()
+        } else Result.failure<Unit>(IllegalStateException("Firestore unavailable"))
+
+        if (write.isFailure) {
+            val token = backendClient?.getFreshIdToken()?.getOrNull() ?: return
+            backendClient.updateDeviceCommandOnBackend(
+                token,
+                JSONObject().apply {
+                    put("commandId", commandId)
+                    put("lifecycleState", lifecycleState)
+                    put("resultSuccess", success)
+                    put("resultVerified", verified)
+                    put("resultSummary", summary.take(10_000))
+                    put("resultError", error.take(5_000))
+                    put("durationMs", durationMs)
+                    resultPayloadJson?.takeIf { it.length <= 500_000 }?.let { put("resultPayloadJson", it) }
+                }
+            )
         }
     }
 
-    private fun mapActionName(rawAction: String, params: Map<String, Any>): AndroidActionType {
+    private fun mapActionName(rawAction: String, params: Map<String, Any>): AndroidActionType? {
         val candidate = (params["actionType"] as? String)?.ifBlank { null } ?: rawAction
         return when (candidate.uppercase().trim()) {
             "LAUNCH_APP", "OPEN_APP", "OPEN_APPLICATION" -> AndroidActionType.OPEN_APP
-            "TAP", "CLICK" -> AndroidActionType.TAP
+            "TAP", "CLICK", "CLICK_UI_ELEMENT" -> AndroidActionType.TAP
             "DOUBLE_TAP" -> AndroidActionType.DOUBLE_TAP
             "LONG_PRESS" -> AndroidActionType.LONG_PRESS
             "SWIPE" -> AndroidActionType.SWIPE
@@ -336,177 +413,156 @@ class HubMindControlPlaneTransportImpl(
             "OPEN_RECENTS", "RECENTS" -> AndroidActionType.OPEN_RECENTS
             "OPEN_NOTIFICATIONS", "NOTIFICATIONS" -> AndroidActionType.OPEN_NOTIFICATIONS
             "OPEN_QUICK_SETTINGS", "QUICK_SETTINGS" -> AndroidActionType.OPEN_QUICK_SETTINGS
-            else -> AndroidActionType.GET_SCREEN_HIERARCHY
+            "SET_VOLUME" -> AndroidActionType.SET_VOLUME
+            "GET_DEVICE_STATUS" -> AndroidActionType.GET_DEVICE_STATUS
+            else -> null
         }
     }
 
     override suspend fun disconnect() {
         incomingListener?.remove()
         incomingListener = null
+        activeUserId = null
+        activeDeviceId = null
+        processedCommandIds.clear()
+        processedReplayTokens.clear()
         _isConnected.value = false
     }
 
     override suspend fun dispatchCommand(envelope: CommandEnvelope): CommandResult {
-        if (envelope.expirationTime < System.currentTimeMillis()) {
-            return CommandResult(
-                success = false,
-                verified = false,
-                error = "Command envelope expired before dispatch.",
-                durationMs = 0
-            )
+        val startMs = System.currentTimeMillis()
+        if (envelope.expirationTime <= startMs) {
+            return CommandResult(false, false, error = "Command envelope expired before dispatch.", durationMs = 0)
         }
-
+        if (envelope.replayToken.isBlank()) {
+            return CommandResult(false, false, error = "Missing replayToken; command rejected.")
+        }
         if (!processedReplayTokens.add(envelope.replayToken)) {
-            return CommandResult(
-                success = false,
-                verified = false,
-                error = "Duplicate replayToken rejected by control plane.",
-                durationMs = 0
-            )
+            return CommandResult(false, false, error = "Duplicate replayToken; command rejected.")
         }
-
-        // Unit test fallback when no Android Context / HubMindBackendClient is wired
         if (backendClient == null) {
+            // Deterministic unit-test fallback only; production always injects HubMindBackendClient.
             return CommandResult(
                 success = true,
                 verified = true,
-                output = "Target ${envelope.targetDeviceId} executed ${envelope.actionType} successfully.",
+                output = "Test transport accepted ${envelope.actionType} for ${envelope.targetDeviceId}.",
                 durationMs = 25
             )
         }
 
-        val startMs = System.currentTimeMillis()
-        val db = backendClient.getFirebaseFirestore().getOrNull()
-        val auth = backendClient.getFirebaseAuth().getOrNull()
-        val uid = auth?.currentUser?.uid ?: envelope.issuingUserId
-
-        if (db == null || uid.isBlank()) {
-            return CommandResult(
-                success = false,
-                verified = false,
-                error = "Not authenticated with Hub-Mind Firestore control plane.",
-                durationMs = System.currentTimeMillis() - startMs
-            )
+        val client = backendClient
+        val authUid = client.getFirebaseAuth().getOrNull()?.currentUser?.uid
+        val uid = activeUserId
+        val sourceDeviceId = activeDeviceId
+        if (authUid.isNullOrBlank() || uid != authUid || envelope.issuingUserId != authUid) {
+            return CommandResult(false, false, error = "Command issuer is not the active authenticated Hub-Mind user.")
+        }
+        if (sourceDeviceId.isNullOrBlank() || envelope.sourceDeviceId != sourceDeviceId) {
+            return CommandResult(false, false, error = "Command source device does not match this paired Android device.")
+        }
+        if (envelope.targetDeviceId.isBlank() || envelope.targetDeviceId == sourceDeviceId) {
+            return CommandResult(false, false, error = "A valid remote target device is required.")
         }
 
-        val cmdRef = db.collection("users")
-            .document(uid)
-            .collection("deviceCommands")
-            .document(envelope.commandId)
+        val db = client.getFirebaseFirestore().getOrNull()
+            ?: return CommandResult(false, false, error = "Hub-Mind Firestore is unavailable.")
+        val devicesRef = db.collection("users").document(uid).collection("devices")
+        val target = runCatching { devicesRef.document(envelope.targetDeviceId).get().await() }.getOrNull()
+            ?: return CommandResult(false, false, error = "Could not verify the target device registration.")
+        if (!target.exists()) {
+            return CommandResult(false, false, error = "Target device is not registered to this Hub-Mind account.")
+        }
+        val targetStatus = target.getString("status")?.uppercase().orEmpty()
+        val targetLastSeen = target.getLong("lastSeen") ?: target.getLong("lastSeenAt") ?: 0L
+        if (targetStatus !in setOf("ONLINE", "BUSY") || targetLastSeen <= 0L || startMs - targetLastSeen > 60_000L) {
+            return CommandResult(false, false, error = "Target device is offline or its presence heartbeat is stale.")
+        }
 
-        val cmdDoc = mapOf(
+        val commandRef = db.collection("users").document(uid)
+            .collection("deviceCommands").document(envelope.commandId)
+        val commandDoc = mapOf(
             "commandId" to envelope.commandId,
-            "userId" to uid,
-            "sourceDeviceId" to envelope.sourceDeviceId,
+            "protocolVersion" to envelope.protocolVersion,
+            "issuingUserId" to uid,
+            "sourceDeviceId" to sourceDeviceId,
             "targetDeviceId" to envelope.targetDeviceId,
             "actionType" to envelope.actionType,
-            "toolName" to envelope.actionType,
-            "parameters" to envelope.parameters,
-            "status" to "DISPATCHED",
-            "replayToken" to envelope.replayToken,
-            "correlationId" to envelope.correlationId,
+            "parametersJson" to JSONObject(envelope.parameters).toString(),
+            "lifecycleState" to "DISPATCHED",
             "requiresConfirmation" to envelope.requiresConfirmation,
-            "createdAt" to envelope.creationTime,
-            "expiresAt" to envelope.expirationTime
+            "issuedAt" to envelope.creationTime,
+            "expirationTime" to envelope.expirationTime,
+            "replayToken" to envelope.replayToken,
+            "correlationId" to envelope.correlationId
         )
 
-        val writeRes = runCatching { cmdRef.set(cmdDoc).await() }
-        if (writeRes.isFailure) {
-            val idToken = backendClient.getFreshIdToken().getOrNull()
-            if (idToken == null) {
-                return CommandResult(
-                    success = false,
-                    verified = false,
-                    error = "Failed to dispatch command to Firestore: ${writeRes.exceptionOrNull()?.message}",
+        val directWrite = runCatching { commandRef.set(commandDoc).await() }
+        if (directWrite.isFailure) {
+            val token = client.getFreshIdToken().getOrNull()
+                ?: return CommandResult(
+                    false, false,
+                    error = "Firestore command write failed and no fresh Firebase token is available: ${directWrite.exceptionOrNull()?.message}",
                     durationMs = System.currentTimeMillis() - startMs
                 )
-            }
-            val payload = JSONObject().apply {
+            val apiPayload = JSONObject().apply {
                 put("commandId", envelope.commandId)
-                put("sourceDeviceId", envelope.sourceDeviceId)
+                put("protocolVersion", envelope.protocolVersion)
+                put("sourceDeviceId", sourceDeviceId)
                 put("targetDeviceId", envelope.targetDeviceId)
                 put("actionType", envelope.actionType)
                 put("parameters", JSONObject(envelope.parameters))
+                put("requiresConfirmation", envelope.requiresConfirmation)
+                put("issuedAt", envelope.creationTime)
+                put("expirationTime", envelope.expirationTime)
                 put("replayToken", envelope.replayToken)
                 put("correlationId", envelope.correlationId)
-                put("expiresAt", envelope.expirationTime)
             }
-            val apiRes = backendClient.dispatchDeviceCommandOnBackend(idToken, payload)
-            if (apiRes.isFailure) {
-                return CommandResult(
-                    success = false,
-                    verified = false,
-                    error = "Cross-device command dispatch failed: ${apiRes.exceptionOrNull()?.message}",
-                    durationMs = System.currentTimeMillis() - startMs
-                )
+            val apiResult = client.dispatchDeviceCommandOnBackend(token, apiPayload)
+            if (apiResult.isFailure) {
+                return CommandResult(false, false, error = "Cross-device dispatch failed: ${apiResult.exceptionOrNull()?.message}")
             }
         }
 
-        val timeoutMs = (envelope.expirationTime - System.currentTimeMillis()).coerceIn(3_000L, 20_000L)
-        val finalResult = withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine<CommandResult> { cont ->
-                val reg = cmdRef.addSnapshotListener { snap, err ->
-                    if (err != null) {
-                        if (cont.isActive) {
-                            cont.resume(
-                                CommandResult(
-                                    success = false,
-                                    verified = false,
-                                    error = "Control plane listener error: ${err.message}",
-                                    durationMs = System.currentTimeMillis() - startMs
-                                )
-                            )
-                        }
+        val timeoutMs = (envelope.expirationTime - System.currentTimeMillis()).coerceAtLeast(1_000L)
+        val result = withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<CommandResult> { continuation ->
+                val registration = commandRef.addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        if (continuation.isActive) continuation.resume(
+                            CommandResult(false, false, error = "Command result listener failed: ${error.message}")
+                        )
                         return@addSnapshotListener
                     }
-                    if (snap == null || !snap.exists()) return@addSnapshotListener
-                    val status = snap.getString("status") ?: return@addSnapshotListener
-                    when (status) {
-                        "COMPLETED" -> {
-                            val verified = snap.getBoolean("verified") ?: false
-                            val output = snap.getString("output")
-                                ?: (snap.get("result") as? Map<*, *>)?.get("output")?.toString()
-                                ?: "Action completed on ${envelope.targetDeviceId}."
-                            val dur = snap.getLong("durationMs") ?: (System.currentTimeMillis() - startMs)
-                            if (cont.isActive) {
-                                cont.resume(
-                                    CommandResult(
-                                        success = true,
-                                        verified = verified,
-                                        output = output,
-                                        durationMs = dur
-                                    )
-                                )
-                            }
-                        }
-                        "FAILED", "CANCELLED", "EXPIRED" -> {
-                            val errMsg = snap.getString("error")
-                                ?: (snap.get("result") as? Map<*, *>)?.get("error")?.toString()
-                                ?: "Command $status on ${envelope.targetDeviceId}."
-                            val dur = snap.getLong("durationMs") ?: (System.currentTimeMillis() - startMs)
-                            if (cont.isActive) {
-                                cont.resume(
-                                    CommandResult(
-                                        success = false,
-                                        verified = false,
-                                        error = errMsg,
-                                        durationMs = dur
-                                    )
-                                )
-                            }
-                        }
+                    if (snapshot == null || !snapshot.exists() || !continuation.isActive) return@addSnapshotListener
+                    when (snapshot.getString("lifecycleState")) {
+                        "COMPLETED" -> continuation.resume(
+                            CommandResult(
+                                success = snapshot.getBoolean("resultSuccess") ?: false,
+                                verified = snapshot.getBoolean("resultVerified") ?: false,
+                                output = snapshot.getString("resultSummary"),
+                                error = snapshot.getString("resultError")?.takeIf { it.isNotBlank() },
+                                durationMs = snapshot.getLong("durationMs") ?: (System.currentTimeMillis() - startMs)
+                            )
+                        )
+                        "FAILED", "CANCELLED", "TIMED_OUT" -> continuation.resume(
+                            CommandResult(
+                                success = false,
+                                verified = false,
+                                error = snapshot.getString("resultError")?.takeIf { it.isNotBlank() }
+                                    ?: "Target device reported ${snapshot.getString("lifecycleState")}.",
+                                durationMs = snapshot.getLong("durationMs") ?: (System.currentTimeMillis() - startMs)
+                            )
+                        )
                     }
                 }
-                cont.invokeOnCancellation { reg.remove() }
+                continuation.invokeOnCancellation { registration.remove() }
             }
         }
 
-        return finalResult ?: CommandResult(
-            success = false,
-            verified = false,
-            error = "Timed out waiting for target device (${envelope.targetDeviceId}) to execute ${envelope.actionType}. Verify the target device is online with Full Control enabled.",
-            durationMs = System.currentTimeMillis() - startMs
-        )
+        if (result != null) return result
+        val timeoutMessage = "Timed out waiting for target device ${envelope.targetDeviceId}."
+        writeCommandResult(uid, envelope.commandId, "TIMED_OUT", false, false, "", timeoutMessage)
+        return CommandResult(false, false, error = timeoutMessage, durationMs = System.currentTimeMillis() - startMs)
     }
 
     override suspend fun reportProgress(commandId: String, state: CommandLifecycle, details: String) {

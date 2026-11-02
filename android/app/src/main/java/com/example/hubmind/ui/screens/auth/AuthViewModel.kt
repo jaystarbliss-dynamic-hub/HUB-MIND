@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 data class AuthUiState(
     val email: String = "",
     val password: String = "",
+    val invitationId: String = "",
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val user: User? = null
@@ -40,6 +41,10 @@ class AuthViewModel(
         _uiState.value = _uiState.value.copy(password = newPassword, errorMessage = null)
     }
 
+    fun onInvitationIdChange(newInvitationId: String) {
+        _uiState.value = _uiState.value.copy(invitationId = newInvitationId.trim(), errorMessage = null)
+    }
+
     fun signIn() {
         val email = _uiState.value.email.trim()
         val password = _uiState.value.password
@@ -49,7 +54,7 @@ class AuthViewModel(
         }
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            val result = authRepository.signIn(email, password)
+            val result = authRepository.signIn(email, password, _uiState.value.invitationId.ifBlank { null })
             result.fold(
                 onSuccess = { user ->
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)
@@ -67,7 +72,7 @@ class AuthViewModel(
     fun signInWithGoogleIdToken(idToken: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            val result = authRepository.signInWithGoogle(idToken)
+            val result = authRepository.signInWithGoogle(idToken, _uiState.value.invitationId.ifBlank { null })
             result.fold(
                 onSuccess = { user ->
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)

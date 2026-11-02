@@ -20,6 +20,7 @@ export interface RepoRelease {
   isLatest: boolean;
   assets: RepoReleaseAsset[];
   installerAsset?: RepoReleaseAsset;
+  androidAsset?: RepoReleaseAsset;
   extensionAsset?: RepoReleaseAsset;
 }
 
@@ -110,6 +111,7 @@ export async function fetchHubMindReleases(forceFresh = false): Promise<RepoRele
       }));
 
       const installerAsset = assets.find(a => /\.exe$/i.test(a.name));
+      const androidAsset = assets.find(a => /\.apk$/i.test(a.name));
       const extensionAsset = assets.find(a => /extension\.zip$/i.test(a.name) || /Jess-Chrome-Extension/i.test(a.name));
 
       return {
@@ -122,6 +124,7 @@ export async function fetchHubMindReleases(forceFresh = false): Promise<RepoRele
         isLatest: index === 0,
         assets,
         installerAsset,
+        androidAsset,
         extensionAsset,
       };
     });

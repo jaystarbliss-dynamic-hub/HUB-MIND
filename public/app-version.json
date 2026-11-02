@@ -1,0 +1,12 @@
+{
+  "status": "NOT_PUBLISHED",
+  "packageName": "com.aistudio.hubmind.wzyqkp",
+  "versionName": "2.4.0",
+  "versionCode": 240,
+  "minSupportedVersionCode": 1,
+  "apkUrl": "",
+  "sha256": "",
+  "releaseNotes": "The first Android version is undergoing integration and user acceptance testing. No public updater package is available yet.",
+  "updatedAt": "2026-11-02T00:00:00Z",
+  "minSdkVersion": 26
+}

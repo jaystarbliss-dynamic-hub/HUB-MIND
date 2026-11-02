@@ -180,7 +180,7 @@ class SettingsViewModel(
             } else {
                 _uiState.value = _uiState.value.copy(
                     availableUpdate = null,
-                    updateStatusMessage = "Hub-Mind Android v2.4.0 (build 240) is up to date."
+                    updateStatusMessage = "Hub-Mind Android ${updateChecker.currentVersionLabel()} is current. No newer published Android release is available."
                 )
             }
         }
