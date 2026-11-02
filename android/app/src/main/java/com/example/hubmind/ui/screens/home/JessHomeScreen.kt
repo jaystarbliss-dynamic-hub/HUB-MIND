@@ -14,6 +14,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.viewinterop.AndroidView
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,7 +51,7 @@ fun JessHomeScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = Slate950,
+        containerColor = Color.Transparent,
         topBar = {
             HubMindTopBar(
                 targetDevice = state.targetDevice,
@@ -56,11 +59,59 @@ fun JessHomeScreen(
             )
         }
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .background(Slate950)
         ) {
+            // Decorative Unicorn Studio lighting layer. It is deliberately non-interactive.
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    WebView(context).apply {
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.loadsImagesAutomatically = true
+                        settings.mediaPlaybackRequiresUserGesture = true
+                        isVerticalScrollBarEnabled = false
+                        isHorizontalScrollBarEnabled = false
+                        isFocusable = false
+                        isFocusableInTouchMode = false
+                        isClickable = false
+                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                        webViewClient = WebViewClient()
+                        setOnTouchListener { _, _ -> true }
+                        val backgroundHtml = """
+                            <!doctype html>
+                            <html><head><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+                            <style>
+                              html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
+                              #hubmind-unicorn-bg{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;}
+                              canvas{pointer-events:none!important;}
+                            </style></head><body>
+                            <div id="hubmind-unicorn-bg" data-us-project="1AfwBht7npSsvDW0cDU5" data-us-production="true"></div>
+                            <script src="https://cdn.jsdelivr.net/gh/hiunicornstudio/unicornstudio.js@v2.4.3/dist/unicornStudio.umd.js"></script>
+                            <script>window.addEventListener('load',function(){if(window.UnicornStudio&&window.UnicornStudio.init){window.UnicornStudio.init();}});</script>
+                            </body></html>
+                        """.trimIndent()
+                        loadDataWithBaseURL(
+                            "https://cdn.jsdelivr.net/",
+                            backgroundHtml,
+                            "text/html",
+                            "UTF-8",
+                            null
+                        )
+                    }
+                },
+                update = { }
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
             // Interactive Jess Hero Area (Orb + State Label)
             Column(
                 modifier = Modifier
@@ -231,6 +282,7 @@ fun JessHomeScreen(
                         )
                     }
                 }
+            }
             }
         }
     }
