@@ -203,6 +203,15 @@ class HubMindControlPlaneTransportImpl(
                 "Command envelope identity or target validation failed.")
             return
         }
+        val sourceDeviceRegistered = runCatching {
+            db.collection("users").document(userId).collection("devices")
+                .document(sourceDeviceId).get().await().exists()
+        }.getOrDefault(false)
+        if (!sourceDeviceRegistered) {
+            writeCommandResult(userId, commandId, "FAILED", false, false, "",
+                "Command source device is not registered to this Hub-Mind user.")
+            return
+        }
         if (expirationTime <= System.currentTimeMillis()) {
             writeCommandResult(userId, commandId, "TIMED_OUT", false, false, "",
                 "Command expired before Android execution began.")

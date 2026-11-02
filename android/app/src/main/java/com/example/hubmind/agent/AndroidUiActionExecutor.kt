@@ -57,13 +57,17 @@ class AndroidUiActionExecutor(private val context: Context) {
                 }
                 val hierarchy = HubMindAccessibilityService.instance.value?.dumpActiveHierarchy()
                 val activePkg = hierarchy?.firstOrNull()?.packageName
-                val verified = success && (activePkg == null || activePkg.equals(resolvedPkg, ignoreCase = true))
+                val verified = success && activePkg?.equals(resolvedPkg, ignoreCase = true) == true
                 AndroidActionResult(
                     commandId = command.commandId,
                     actionType = command.actionType,
                     success = success,
                     verified = verified,
-                    outputText = if (success) "Launched application ${appName ?: resolvedPkg}." else null,
+                    outputText = when {
+                        !success -> null
+                        verified -> "Launched and confirmed foreground application ${appName ?: resolvedPkg}."
+                        else -> "Android accepted the launch request for ${appName ?: resolvedPkg}, but the foreground application could not be confirmed."
+                    },
                     error = if (!success) "Target application (${appName ?: pkg}) not found or could not be launched." else null
                 )
             }
