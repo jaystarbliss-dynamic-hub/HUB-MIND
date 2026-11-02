@@ -88,6 +88,7 @@ object JessCanonicalConfig {
                     put("text", JSONObject().put("type", "STRING").put("description", "Text to type or copy to clipboard"))
                     put("targetText", JSONObject().put("type", "STRING").put("description", "Visible UI element text or content description to tap/click"))
                     put("viewId", JSONObject().put("type", "STRING").put("description", "Accessibility viewIdResourceName to target"))
+                    put("elementIndex", JSONObject().put("type", "NUMBER").put("description", "Optional indexed UI element number returned by a recent screen inspection"))
                     put("x", JSONObject().put("type", "NUMBER").put("description", "Screen X coordinate in pixels"))
                     put("y", JSONObject().put("type", "NUMBER").put("description", "Screen Y coordinate in pixels"))
                     put("direction", JSONObject().put("type", "STRING").put("description", "Scroll or swipe direction: up, down, left, right"))
