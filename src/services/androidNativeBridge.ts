@@ -13,6 +13,7 @@ type NativeAndroidInterface = {
   openAccessibilitySettings(token: string): void;
   startAgentSession(token: string): void;
   stopAgentSession(token: string): void;
+  beginGoogleSignIn(clientId: string, token: string, callbackId: string): void;
   executeTool(name: string, argsJson: string, userId: string, token: string, callbackId: string): void;
 };
 
@@ -27,6 +28,7 @@ declare global {
       openAccessibilitySettings: () => void;
       startAgentSession: () => void;
       stopAgentSession: () => void;
+      signInWithGoogle: (clientId: string) => Promise<AndroidNativeResult>;
       executeTool: (name: string, args: Record<string, any>, userId?: string) => Promise<AndroidNativeResult>;
       __resolve?: (id: string, resultJson: string) => void;
     };
@@ -57,6 +59,25 @@ export function installAndroidNativeBridge(): boolean {
     },
     startAgentSession: () => { try { native.startAgentSession(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {} },
     stopAgentSession: () => { try { native.stopAgentSession(String(window.__HUBMIND_NATIVE_TOKEN__ || '')); } catch {} },
+    signInWithGoogle: (clientId) => new Promise(resolve => {
+      const callbackId = 'google-' + Date.now().toString(36) + '-' + (++requestSequence).toString(36);
+      const timeout = window.setTimeout(() => {
+        if (!pending.has(callbackId)) return;
+        pending.delete(callbackId);
+        resolve({ success: false, error: 'Google sign-in did not respond before timing out.' });
+      }, 60000);
+      pending.set(callbackId, result => {
+        window.clearTimeout(timeout);
+        resolve(result);
+      });
+      try {
+        native.beginGoogleSignIn(String(clientId || ''), String(window.__HUBMIND_NATIVE_TOKEN__ || ''), callbackId);
+      } catch (error: any) {
+        window.clearTimeout(timeout);
+        pending.delete(callbackId);
+        resolve({ success: false, error: String(error?.message || 'Could not start Google sign-in.') });
+      }
+    }),
     executeTool: (name, args, userId = '') => new Promise(resolve => {
       const callbackId = 'android-' + Date.now().toString(36) + '-' + (++requestSequence).toString(36);
       const timeout = window.setTimeout(() => {
