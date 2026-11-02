@@ -33,3 +33,5 @@ This directory preserves the Android-native project and its Android/Jess integra
 - Integrate Android-native capabilities through explicit user-granted Android APIs. Add permission onboarding, revocation handling, action confirmation, and execution audit logs.
 - Add a reproducible Gradle wrapper, CI build, debug APK build, separately signed release build, and physical-device test evidence before publishing an APK.
 - Publish only a tested signed APK to the Hub-Mind website. Do not label a debug build or untested artifact as a release.
+
+10. The original root `firestore.rules` has no match rules for `devices`, `deviceCommands`, or `jessActiveSession`; `server.ts` has no `/api/devices/dispatch` route; and `electron/main.cjs` has no `deviceCommands` listener. The cross-device registry/dispatch/Windows receiver described in architecture documents is therefore not yet implemented in the original root.

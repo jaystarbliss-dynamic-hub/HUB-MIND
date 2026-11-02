@@ -144,3 +144,8 @@ Build a signed release APK, verify signature/package/version, install/update on 
 ## Working style and reporting
 
 Start by reading the repository and running an audit. Then implement, do not merely write another architecture proposal. Fix real defects in order, run tests, and show evidence. Never invent test results, device names, API responses, deployment URLs, or release status. If a feature is blocked by a missing secret, external deployment, Android permission, physical device, or user approval, implement the safe surrounding code and clearly identify the exact remaining action. Keep the original desktop app working throughout.
+
+
+## Additional verified cross-device backend gap
+
+The current original-root `firestore.rules` does not contain match rules for `devices`, `deviceCommands`, or `jessActiveSession`. The current root `server.ts` does not expose `/api/devices/dispatch`, and the current `electron/main.cjs` has no `deviceCommands` listener. Therefore the device registry/command queue/Windows receiver described in older architecture notes is not yet live. Implement the schema, least-privilege rules, authenticated server routes, and Electron receiver as an explicit coordinated feature; do not assume these are already deployed.
