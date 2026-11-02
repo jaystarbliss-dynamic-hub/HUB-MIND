@@ -425,6 +425,12 @@ class HubMindControlPlaneTransportImpl(
         if (envelope.expirationTime <= startMs) {
             return CommandResult(false, false, error = "Command envelope expired before dispatch.", durationMs = 0)
         }
+        if (envelope.replayToken.isBlank()) {
+            return CommandResult(false, false, error = "Missing replayToken; command rejected.")
+        }
+        if (!processedReplayTokens.add(envelope.replayToken)) {
+            return CommandResult(false, false, error = "Duplicate replayToken; command rejected.")
+        }
         if (backendClient == null) {
             // Deterministic unit-test fallback only; production always injects HubMindBackendClient.
             return CommandResult(
