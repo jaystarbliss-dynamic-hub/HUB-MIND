@@ -76,7 +76,7 @@ export function DesktopUpdatesModal({
   const [releases, setReleases] = useState<RepoRelease[]>([]);
   const [commits, setCommits] = useState<RepoCommit[]>([]);
   const [overview, setOverview] = useState<RepoOverview | null>(null);
-  const [currentVersion, setCurrentVersion] = useState<string>('2.4.0');
+  const [currentVersion, setCurrentVersion] = useState<string>('0.1.0');
   const [expandedRelease, setExpandedRelease] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -407,7 +407,7 @@ export function DesktopUpdatesModal({
                 </div>
                 <h3 className="text-sm sm:text-base font-bold text-slate-100 mt-0.5">{latestRelease.name}</h3>
                 <p className="text-xs text-slate-400 line-clamp-1 mt-0.5">
-                  Current app version: v{currentVersion} • {platformReleases.length} {activePlatform === 'android' ? 'Android' : 'Windows'} releases
+                  Current app version: v{activePlatform === 'android' ? '2.4.0' : currentVersion} • {platformReleases.length} {activePlatform === 'android' ? 'Android' : 'Windows'} releases
                 </p>
               </div>
             </div>
