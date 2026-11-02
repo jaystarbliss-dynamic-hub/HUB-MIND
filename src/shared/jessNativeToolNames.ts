@@ -53,6 +53,9 @@ export const JESS_NATIVE_TOOL_NAMES = [
 
 export const JESS_NATIVE_TOOL_NAME_SET: ReadonlySet<string> = new Set(JESS_NATIVE_TOOL_NAMES);
 
+export const JESS_ANDROID_TOOL_NAMES = ['android_device_action'] as const;
+export const JESS_ANDROID_TOOL_NAME_SET: ReadonlySet<string> = new Set(JESS_ANDROID_TOOL_NAMES);
+
 export function getJessToolsForRuntime(groups: any[], isDesktopRuntime: boolean): any[] {
   return groups.map((group) => {
     if (!Array.isArray(group?.functionDeclarations)) return group;
