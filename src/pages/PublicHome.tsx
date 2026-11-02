@@ -18,6 +18,7 @@ export function PublicHome() {
   const [error, setError] = useState('');
   const [mobileMenu, setMobileMenu] = useState(false);
   const [release, setRelease] = useState<{ url: string; name: string; version: string; extensionUrl?: string; apkUrl?: string; apkName?: string } | null>(null);
+  const [androidRelease, setAndroidRelease] = useState<{ url: string; name: string; version: string } | null>(null);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [installHelpOpen, setInstallHelpOpen] = useState(false);
 
@@ -57,6 +58,21 @@ export function PublicHome() {
     return () => { active = false; };
   }, []);
 
+
+  useEffect(() => {
+    let active = true;
+    fetch('https://api.github.com/repos/Jaystarbliss-studios/HUB-MIND-ANDROID/releases?per_page=10')
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('No Android release yet')))
+      .then((releases: any[]) => {
+        const releaseWithApk = releases.find(item => (item.assets || []).some((asset: any) => /Hub-Mind-Android\\.apk$/i.test(asset.name)));
+        const apk = releaseWithApk?.assets?.find((asset: any) => /Hub-Mind-Android\\.apk$/i.test(asset.name));
+        if (active && releaseWithApk && apk?.browser_download_url) {
+          setAndroidRelease({ url: apk.browser_download_url, name: apk.name, version: releaseWithApk.tag_name || 'Android' });
+        }
+      })
+      .catch(() => { if (active) setAndroidRelease(null); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const capture = (event: Event) => { setInstallPrompt(event); };
@@ -175,10 +191,10 @@ export function PublicHome() {
           <div className="hm-desktop-points"><span><Check size={15}/> Dedicated desktop window</span><span><Check size={15}/> Floating Jess companion</span><span><Check size={15}/> Controlled system integrations</span></div>
           {release?.url ? <a className="hm-button hm-button-primary hm-button-large" href={release.url}><Download size={17}/> Download for Windows <span className="hm-version">{release.version}</span></a> : <button className="hm-button hm-button-disabled hm-button-large" disabled title="A verified Windows installer has not been published yet"><Download size={17}/> Windows app coming soon</button>}
           <div className="hm-install-actions">
-            {release?.apkUrl ? (
-              <a className="hm-button hm-button-outline hm-button-large" href={release.apkUrl}><Download size={16}/> Download Android APK <span className="hm-version">v2.4.0</span></a>
+            {androidRelease?.url ? (
+              <a className="hm-button hm-button-outline hm-button-large" href={androidRelease.url}><Download size={16}/> Download Android APK <span className="hm-version">{androidRelease.version}</span></a>
             ) : (
-              <a className="hm-button hm-button-outline hm-button-large" href="/downloads/hubmind-v2.4.0.apk"><Download size={16}/> Android Companion APK (v2.4.0)</a>
+              <button className="hm-button hm-button-disabled hm-button-large" disabled title="The Android APK will appear here after the build is published and verified"><Download size={16}/> Android app build in progress</button>
             )}
             <button className="hm-button hm-button-outline hm-button-large" onClick={installWebApp}><Download size={16}/> Install Chrome app</button>
             <button type="button" className="hm-button hm-button-outline hm-button-large" onClick={() => window.dispatchEvent(new CustomEvent('hubmind:open-updates-panel'))}><Layers size={16}/> View Version History</button>
@@ -216,7 +232,7 @@ export function PublicHome() {
               <span><Check size={15}/> <strong>Chrome extension:</strong> Download the ZIP, extract it, open Chrome → Extensions → Manage extensions, enable Developer mode, then choose Load unpacked and select the extracted folder. Review its permissions before enabling it.</span>
               {release?.extensionUrl && <a className="hm-button hm-button-quiet" href={release.extensionUrl}><Download size={15}/> Download Jess Chrome extension</a>}
               <span><Check size={15}/> <strong>Windows:</strong> Download the installer, run it, then open Hub-Mind from the Start menu. Windows may show a publisher warning if the release is unsigned.</span>
-              <span><Check size={15}/> <strong>Android (v2.4.0, build 240):</strong> Install the Hub-Mind APK (`com.aistudio.hubmind.wzyqkp`), sign in with your workspace account, grant Microphone and Notification permissions, and enable the Hub-Mind Accessibility Service in Android Settings → Accessibility to allow Jess to inspect UI hierarchy and execute two-way phone/Windows commands.</span>
+              <span><Check size={15}/> <strong>Android (${androidRelease?.version || 'test build'}):</strong> Download the APK above, install it, sign in with your invited Google account, allow microphone access for Jess voice, and enable Hub-Mind Accessibility in Android Settings → Accessibility before asking Jess to control phone apps. The phone and Windows app must both be online with their Hub-Mind agents active for cross-device actions.</span>
               <span><Check size={15}/> <strong>Jess:</strong> Allow microphone access for voice use. Configure memory, personalization, web research, and cross-device permissions in Jess settings.</span>
             </div>
             <button className="hm-button hm-button-primary hm-button-large" onClick={openWorkspace}>Sign in and get started <ArrowRight size={16}/></button>
