@@ -108,7 +108,7 @@ export async function registerCurrentWorkspaceDevice(
           ]
         : ['VOICE_INPUT', 'VOICE_OUTPUT'],
     permissionMode: options?.permissionMode || desktopStatus?.preferences?.permissionMode || 'allow-routine',
-    fullControlActive: Boolean(options?.fullControlActive ?? (isAndroid ? androidInfo?.accessibilityEnabled : desktopStatus?.active)),
+    fullControlActive: Boolean(options?.fullControlActive ?? (isAndroid ? androidInfo?.agentSessionActive : desktopStatus?.active)),
     batteryPercent: Number.isFinite(Number(androidInfo?.batteryPercent)) ? Number(androidInfo.batteryPercent) : undefined,
   };
 
