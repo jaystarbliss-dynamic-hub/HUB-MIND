@@ -223,7 +223,7 @@ test('Firebase Google Sign-In Web OAuth client ID is separated from Google Drive
   assert.match(serverTs, /firebaseGoogleClientId/);
   assert.match(fbConfigTs, /export let FIREBASE_GOOGLE_CLIENT_ID/);
   assert.match(clientKt, /val firebaseGoogleClientId: String/);
-  assert.match(authScreenKt, /cfg\.firebaseGoogleClientId\.ifBlank \{ cfg\.googleClientId \}/);
+  assert.match(authScreenKt, /cfg\.firebaseGoogleClientId/);
 });
 
 test('Android HubMindBackendClient strictly enforces canonical named Firestore database and never falls back to default database', () => {
@@ -240,7 +240,9 @@ test('Android Gradle files configure com.google.gms.google-services plugin safel
 
   assert.match(libsToml, /com\.google\.gms\.google-services/);
   assert.match(rootGradle, /alias\(libs\.plugins\.google\.services\) apply false/);
-  assert.match(appGradle, /apply\(plugin = "com\.google\.gms\.google-services"\)/);
+  assert.match(appGradle, /alias\(libs\.plugins\.google\.services\)/);
+  assert.ok(fs.existsSync(path.join(rootDir, 'android/app/google-services.json')));
+  assert.match(libsToml, /googleServices\s*=\s*"4\.5\.0"/);
 });
 
 test('Web workspace services and pages use rule-compliant visibleWorkspaceQueries', () => {
@@ -273,4 +275,36 @@ test('Web workspace services and pages use rule-compliant visibleWorkspaceQuerie
     const content = read(rel);
     assert.match(content, /visibleWorkspaceQueries/, `${rel} should use visibleWorkspaceQueries`);
   }
+});
+
+
+test('Android sign-in UI exposes Google authentication only', () => {
+  const screen = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthScreen.kt');
+  const viewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
+
+  assert.match(screen, /google_sign_in_button/);
+  assert.match(screen, /Continue with Google/);
+  assert.doesNotMatch(screen, /Studio Email|Password|email_input|password_input|sign_in_button|viewModel\.signIn\(/);
+  assert.doesNotMatch(viewModel, /email: String|password: String|fun signIn\(/);
+  assert.match(viewModel, /signInWithGoogleIdToken/);
+});
+
+test('Checked-in google-services.json matches registered Hub-Mind Android app and debug signing certificate', () => {
+  const config = JSON.parse(read('android/app/google-services.json'));
+  assert.equal(config.project_info.project_id, 'gen-lang-client-0197530608');
+  assert.equal(config.project_info.project_number, '691762959980');
+  const client = config.client.find(item =>
+    item.client_info.android_client_info.package_name === 'com.aistudio.hubmind.wzyqkp'
+  );
+  assert.ok(client, 'registered Hub-Mind Android package must be present');
+  assert.equal(client.client_info.mobilesdk_app_id, '1:691762959980:android:deaa0117684e641ec92a49');
+  assert.ok(client.oauth_client.some(item =>
+    item.client_type === 1 &&
+    item.client_id === '691762959980-lpau2iqkss2qgt8b43p3nbefgq90fkln.apps.googleusercontent.com' &&
+    item.android_info.certificate_hash === 'bf5d7fccbaa809ca12b92eafc4ccba267f03cfbc'
+  ));
+  assert.ok(client.oauth_client.some(item =>
+    item.client_type === 3 &&
+    item.client_id === '691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com'
+  ));
 });

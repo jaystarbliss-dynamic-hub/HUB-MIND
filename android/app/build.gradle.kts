@@ -4,14 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-}
-
-if (
-    file("google-services.json").exists() ||
-    file("src/debug/google-services.json").exists() ||
-    file("src/release/google-services.json").exists()
-) {
-    apply(plugin = "com.google.gms.google-services")
+    alias(libs.plugins.google.services)
 }
 
 val keystorePropsFile = rootProject.file("keystore.properties")

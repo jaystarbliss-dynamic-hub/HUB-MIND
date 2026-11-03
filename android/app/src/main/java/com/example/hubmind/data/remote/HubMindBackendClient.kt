@@ -2,7 +2,6 @@ package com.example.hubmind.data.remote
 
 import android.content.Context
 import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
@@ -54,9 +53,10 @@ class HubMindBackendClient(
         const val DEFAULT_BASE_URL = "https://hub-mind.netlify.app"
         const val CANONICAL_PROJECT_ID = "gen-lang-client-0197530608"
         const val CANONICAL_PROJECT_NUMBER = "691762959980"
+        const val CANONICAL_WEB_APP_ID = "1:691762959980:web:0979e7745677270cc92a49"
+        const val CANONICAL_ANDROID_APP_ID = "1:691762959980:android:deaa0117684e641ec92a49"
         const val CANONICAL_DATABASE_ID = "ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430"
         const val CANONICAL_FIREBASE_GOOGLE_CLIENT_ID = "691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com"
-        private const val FIREBASE_APP_NAME = "HubMindCanonical"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 
@@ -105,11 +105,8 @@ class HubMindBackendClient(
                     val firestoreDatabaseId = fb.optString("firestoreDatabaseId", CANONICAL_DATABASE_ID).trim()
                     val googleClientId = root.optString("googleClientId", "").trim()
                     val rawFirebaseGoogleClientId = root.optString("firebaseGoogleClientId", "").trim()
-                    val firebaseGoogleClientId = when {
-                        rawFirebaseGoogleClientId.startsWith("$CANONICAL_PROJECT_NUMBER-") -> rawFirebaseGoogleClientId
-                        googleClientId.startsWith("$CANONICAL_PROJECT_NUMBER-") -> googleClientId
-                        rawFirebaseGoogleClientId.isNotBlank() -> rawFirebaseGoogleClientId
-                        else -> CANONICAL_FIREBASE_GOOGLE_CLIENT_ID
+                    val firebaseGoogleClientId = rawFirebaseGoogleClientId.ifBlank {
+                        CANONICAL_FIREBASE_GOOGLE_CLIENT_ID
                     }
 
                     if (apiKey.isBlank() || apiKey == "dev-api-key" || apiKey == "test-api-key" || apiKey.startsWith("YOUR_")) {
@@ -119,6 +116,15 @@ class HubMindBackendClient(
                     }
                     if (projectId.isBlank() || appId.isBlank()) {
                         throw IllegalStateException("Incomplete Firebase configuration from /api/config.")
+                    }
+                    if (appId != CANONICAL_WEB_APP_ID) {
+                        throw IllegalStateException("Firebase web app ID mismatch: expected '$CANONICAL_WEB_APP_ID'.")
+                    }
+                    if (messagingSenderId != CANONICAL_PROJECT_NUMBER) {
+                        throw IllegalStateException("Firebase project number mismatch: expected '$CANONICAL_PROJECT_NUMBER'.")
+                    }
+                    if (firebaseGoogleClientId != CANONICAL_FIREBASE_GOOGLE_CLIENT_ID) {
+                        throw IllegalStateException("Firebase Google OAuth Web Client ID does not match the registered Hub-Mind Firebase project.")
                     }
                     if (projectId != CANONICAL_PROJECT_ID) {
                         throw IllegalStateException(
@@ -153,26 +159,36 @@ class HubMindBackendClient(
     @Synchronized
     private fun ensureFirebaseInitialized(config: HubMindFirebaseRuntimeConfig): FirebaseApp? {
         val ctx = context?.applicationContext ?: return null
-        firebaseApp?.let { return it }
-
-        val existing = FirebaseApp.getApps(ctx).firstOrNull { it.name == FIREBASE_APP_NAME }
-            ?: FirebaseApp.getApps(ctx).firstOrNull { it.options.projectId == config.projectId }
-        if (existing != null) {
-            firebaseApp = existing
-            return existing
+        firebaseApp?.let { cached ->
+            validateAndroidFirebaseApp(cached, config)
+            return cached
         }
 
-        val options = FirebaseOptions.Builder()
-            .setApiKey(config.apiKey)
-            .setApplicationId(config.appId)
-            .setProjectId(config.projectId)
-            .setGcmSenderId(config.messagingSenderId.ifBlank { null })
-            .setStorageBucket(config.storageBucket.ifBlank { null })
-            .build()
+        // google-services.json generates the registered Android app resources.
+        // The shared /api/config endpoint returns the Web app ID and must not initialize Android.
+        val app = FirebaseApp.getApps(ctx).firstOrNull { it.name == "[DEFAULT]" }
+            ?: FirebaseApp.initializeApp(ctx)
+            ?: throw IllegalStateException(
+                "Hub-Mind Android Firebase configuration is missing. Add android/app/google-services.json and rebuild."
+            )
 
-        val initialized = FirebaseApp.initializeApp(ctx, options, FIREBASE_APP_NAME)
-        firebaseApp = initialized
-        return initialized
+        validateAndroidFirebaseApp(app, config)
+        firebaseApp = app
+        return app
+    }
+
+    private fun validateAndroidFirebaseApp(app: FirebaseApp, config: HubMindFirebaseRuntimeConfig) {
+        val options = app.options
+        if (options.projectId != CANONICAL_PROJECT_ID || options.projectId != config.projectId) {
+            throw IllegalStateException(
+                "Android Firebase project mismatch. Expected '$CANONICAL_PROJECT_ID' but found '${options.projectId}'."
+            )
+        }
+        if (options.applicationId != CANONICAL_ANDROID_APP_ID) {
+            throw IllegalStateException(
+                "Android Firebase app ID mismatch. Expected '$CANONICAL_ANDROID_APP_ID' from google-services.json but found '${options.applicationId}'."
+            )
+        }
     }
 
     suspend fun getFirebaseAuth(): Result<FirebaseAuth> {

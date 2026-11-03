@@ -15,7 +15,7 @@ okhttp = "4.12.0"
 firebaseBom = "33.7.0"
 playServicesAuth = "21.3.0"
 orgJson = "20231013"
-googleServices = "4.4.2"
+googleServices = "4.5.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
