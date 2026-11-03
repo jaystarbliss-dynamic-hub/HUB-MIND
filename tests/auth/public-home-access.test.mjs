@@ -13,7 +13,7 @@ const login = fs.readFileSync(new URL('../../src/pages/Login.tsx', import.meta.u
 test('public landing page keeps invite-only access and release-gated installer', () => {
   assert.match(home, /Get Invite/i);
   assert.match(home, /\/login\?invite=/);
-  assert.match(home, /releases\/latest/);
+  assert.ok(home.includes('releases?per_page=50'));
   assert.match(home, /\.exe\$/i);
   assert.match(home, /This Google account|invitation/i);
   assert.match(auth, /acceptInvitation\(inviteId, firebaseUser\.uid, userEmail\)/);
