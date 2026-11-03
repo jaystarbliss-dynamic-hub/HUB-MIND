@@ -36,7 +36,31 @@ Keytool prompts for the keystore password, certificate details, and key password
 
 The Android project already ignores `*.jks`, `*.keystore`, and `keystore.properties` under `android/`. Never remove those ignore rules.
 
-## 3. Add GitHub Actions repository secrets
+## 3. Register the release certificate with Firebase Google Sign-In
+
+Hub-Mind uses Google Sign-In. The existing Firebase Android OAuth registration includes the previous debug certificate, not the new production key. Register the new certificate before generating the official APK, or Google Sign-In can fail in the signed build.
+
+In PowerShell, print the release keystore's SHA-1 and SHA-256 fingerprints:
+
+```powershell
+keytool -list -v -keystore $keystorePath -alias hubmind-release
+```
+
+Keytool prompts for the keystore password. Copy the **SHA1** and **SHA256** fingerprint values from its output.
+
+Open Firebase Project Settings:
+
+https://console.firebase.google.com/project/gen-lang-client-0197530608/settings/general
+
+Under **Your apps**, select the Android app with package `com.aistudio.hubmind.wzyqkp`. Add both the new SHA-1 and SHA-256 fingerprints. Keep any existing debug fingerprints registered so debug/test builds can still authenticate.
+
+Then download the refreshed `google-services.json` from the same Android app configuration and replace:
+
+`android/app/google-services.json`
+
+Commit that refreshed configuration to the repository. It is Firebase client configuration, not the private signing key. Do not remove the Firebase Web OAuth client entry or disable the Google provider in Firebase Authentication.
+
+## 4. Add GitHub Actions repository secrets
 
 Open the repository:
 
@@ -62,7 +86,7 @@ Paste the clipboard value directly into the GitHub secret form for `ANDROID_RELE
 
 If repository Actions settings restrict the workflow token to read-only permissions, an administrator must set **Settings → Actions → General → Workflow permissions → Read and write permissions**. The publishing job separately requests only the `contents: write` permission it needs.
 
-## 4. Run the signed release
+## 5. Run the signed release
 
 After the four secrets are saved:
 
@@ -81,7 +105,7 @@ The workflow will:
 
 When a signed keystore is configured, the debug APK is not published as the production download. Without the signing secrets, CI continues to publish only a clearly labelled debug test prerelease and leaves the app update manifest unpublished.
 
-## 5. Website and update verification
+## 6. Website and update verification
 
 After the release workflow completes, verify all of the following:
 
@@ -92,13 +116,13 @@ After the release workflow completes, verify all of the following:
 
 The static manifest update is committed by the GitHub Actions publishing job. Netlify must complete the resulting production deploy before the new manifest is served by the live website.
 
-## 6. Important first-install / signing transition
+## 7. Important first-install / signing transition
 
 Existing Hub-Mind debug APKs are signed with the Android debug certificate. The new production release uses a different certificate. Android will **not** install the production-signed APK over an existing debug-signed installation.
 
 Before replacing an existing debug installation, confirm that important user data is synced to the Hub-Mind backend or otherwise backed up. The debug app may need to be uninstalled before the official APK is installed. Once the official production-signed build is installed, future updates must keep using the same production keystore.
 
-## 7. Future version releases
+## 8. Future version releases
 
 For every subsequent Android release:
 - increment `versionCode` (it must always increase);
