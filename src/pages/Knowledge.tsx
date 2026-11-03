@@ -7,6 +7,7 @@ import { logActivity } from '../lib/activity';
 import { Loader2, Plus, Book, Search, FileText, Bookmark, Trash2 } from 'lucide-react';
 import { safeParseISO, safeFormat } from "../lib/dateUtils";
 import { format, parseISO } from 'date-fns';
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
 
 export function Knowledge() {
   const { profile } = useAuth();
@@ -22,14 +23,21 @@ export function Knowledge() {
   useEffect(() => {
     if (!profile) return;
     setLoading(true);
-    const q = query(collection(db, 'knowledge'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as KnowledgeType)));
-      setLoading(false);
-    }, (error) => {
-      console.warn("Real-time knowledge listener warning:", error);
-      setLoading(false);
-    });
+    const unsubscribe = subscribeVisibleWorkspaceCollection<KnowledgeType>(
+      'knowledge',
+      profile,
+      list => {
+        setItems(list);
+        setLoading(false);
+      },
+      error => {
+        console.warn("Real-time knowledge listener warning:", error);
+        setLoading(false);
+      },
+      {
+        sort: (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+      }
+    );
 
     return () => unsubscribe();
   }, [profile]);
@@ -43,7 +51,9 @@ export function Knowledge() {
         content: newContent,
         category: newCategory,
         tags: [],
+        ownerId: profile?.id,
         createdBy: profile?.id,
+        visibility: profile?.defaultVisibility || 'workspace',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });

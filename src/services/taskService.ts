@@ -260,31 +260,22 @@ export function subscribeToTask(taskId: string, callback: (task: Task | null) =>
   });
 }
 
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
+
 export function subscribeToTasks(
   currentUser: User,
   callback: (tasks: Task[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'tasks'), orderBy('updatedAt', 'desc'));
-
-  return onSnapshot(q, (snap) => {
-    let tasks = snap.docs.map(d => ({ id: d.id, ...d.data() } as Task));
-
-    if (currentUser.role !== 'admin') {
-      tasks = tasks.filter(task => {
-        if (task.ownerId === currentUser.id || task.createdBy === currentUser.id || task.assignedTo === currentUser.id) return true;
-        if (task.visibility === 'workspace') return true;
-        if (task.visibility === 'shared' && isSharedWith(task.sharedWith, currentUser.id)) return true;
-        return false;
-      });
+  return subscribeVisibleWorkspaceCollection<Task>(
+    'tasks',
+    currentUser,
+    callback,
+    err => console.warn('Tasks subscription warning:', err),
+    {
+      includeAssignedTo: true,
+      filter: projectId ? (t: Task) => t.projectId === projectId : undefined,
+      sort: (a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime(),
     }
-
-    if (projectId) {
-      tasks = tasks.filter(t => t.projectId === projectId);
-    }
-
-    callback(tasks);
-  }, (err) => {
-    console.warn('Tasks subscription warning:', err);
-  });
+  );
 }

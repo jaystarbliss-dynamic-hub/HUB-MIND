@@ -208,14 +208,15 @@ fun AuthScreen(
                         val cfgRes = ServiceLocator.backendClient.fetchAndValidateRuntimeConfig()
                         cfgRes.fold(
                             onSuccess = { cfg ->
-                                if (cfg.googleClientId.isBlank()) {
+                                val webClientId = cfg.firebaseGoogleClientId.ifBlank { cfg.googleClientId }
+                                if (webClientId.isBlank()) {
                                     viewModel.onGoogleSignInError(
-                                        "Google Web Client ID is not configured on /api/config. Please sign in with your Hub-Mind email and password."
+                                        "Firebase Google Web Client ID is not configured on /api/config. Please sign in with your Hub-Mind email and password."
                                     )
                                 } else {
                                     val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                                         .requestEmail()
-                                        .requestIdToken(cfg.googleClientId)
+                                        .requestIdToken(webClientId)
                                         .build()
                                     val googleClient = GoogleSignIn.getClient(context, gso)
                                     googleSignInLauncher.launch(googleClient.signInIntent)

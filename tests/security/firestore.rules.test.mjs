@@ -12,3 +12,13 @@ test('device registry and cross-device command envelopes are scoped to the authe
   assert.match(rules,/match \/deviceCommands\/\{commandId\}/);
   assert.match(rules,/request\.resource\.data\.issuingUserId == userId/);
 });
+test('sharedReadData supports sharedWith array, sharedWith map, and permissions map queries without requiring composite visibility filter',()=>{
+  assert.match(rules,/function sharedReadData\(data\)\{ return \(\s*\(\('sharedWith' in data\) && data\.sharedWith is list && request\.auth\.uid in data\.sharedWith\)/);
+});
+test('users conversations rule covers nested messages subcollections for Android and Web sync',()=>{
+  assert.match(rules,/match \/conversations\/\{document=\*\*\} \{ allow read, write: if self\(userId\) \|\| admin\(\); \}/);
+});
+test('tasks rule allows assignedTo member to get, list, and update assigned tasks',()=>{
+  assert.match(rules,/match \/tasks\/\{id\} \{ allow get: if member\(\) && \(readable\(\) \|\| resource\.data\.assignedTo == request\.auth\.uid\);/);
+  assert.match(rules,/allow update: if member\(\) && \(writable\(\) \|\| resource\.data\.assignedTo == request\.auth\.uid\);/);
+});

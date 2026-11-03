@@ -143,26 +143,19 @@ export function subscribeToProject(projectId: string, callback: (proj: Project |
   });
 }
 
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
+
 export function subscribeToProjects(
   currentUser: User,
   callback: (projects: Project[]) => void
 ): () => void {
-  const q = query(collection(db, 'projects'), orderBy('updatedAt', 'desc'));
-
-  return onSnapshot(q, (snap) => {
-    let projects = snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
-
-    if (currentUser.role !== 'admin') {
-      projects = projects.filter(p => {
-        if (p.ownerId === currentUser.id || p.createdBy === currentUser.id) return true;
-        if (p.visibility === 'workspace') return true;
-        if (p.visibility === 'shared' && isSharedWith(p.sharedWith, currentUser.id)) return true;
-        return false;
-      });
+  return subscribeVisibleWorkspaceCollection<Project>(
+    'projects',
+    currentUser,
+    callback,
+    err => console.warn('Projects subscription warning:', err),
+    {
+      sort: (a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime(),
     }
-
-    callback(projects);
-  }, (err) => {
-    console.warn('Projects subscription warning:', err);
-  });
+  );
 }

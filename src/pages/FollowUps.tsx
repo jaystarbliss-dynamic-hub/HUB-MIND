@@ -6,6 +6,7 @@ import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
 import { FollowUp, FollowUpStatus, TaskPriority } from '../types';
 import { CalendarClock, CheckCircle2, Clock3, Plus, RefreshCw, Trash2, UserRound } from 'lucide-react';
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
 
 const statusOptions: FollowUpStatus[] = ['scheduled', 'due', 'contacted', 'waiting', 'resolved', 'cancelled'];
 const priorityOptions: TaskPriority[] = ['urgent', 'high', 'medium', 'low'];
@@ -35,20 +36,21 @@ export function FollowUps() {
     if (!profile) return;
     setLoading(true);
 
-    const base = collection(db, 'followUps');
-    const q = profile.role === 'admin'
-      ? query(base, orderBy('dueAt', 'asc'))
-      : query(base, where('ownerId', '==', profile.id));
-
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const next = snap.docs.map(d => ({ id: d.id, ...d.data() } as FollowUp));
-      next.sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-      setItems(next);
-      setLoading(false);
-    }, (e) => {
-      console.warn('Real-time follow-ups listener fallback:', e);
-      setLoading(false);
-    });
+    const unsubscribe = subscribeVisibleWorkspaceCollection<FollowUp>(
+      'followUps',
+      profile,
+      next => {
+        setItems(next);
+        setLoading(false);
+      },
+      e => {
+        console.warn('Real-time follow-ups listener fallback:', e);
+        setLoading(false);
+      },
+      {
+        sort: (a, b) => new Date(a.dueAt || 0).getTime() - new Date(b.dueAt || 0).getTime(),
+      }
+    );
 
     return () => unsubscribe();
   }, [profile?.id, profile?.role]);

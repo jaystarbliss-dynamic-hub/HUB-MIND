@@ -200,43 +200,21 @@ export function subscribeToDocument(
   });
 }
 
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
+
 export function subscribeToDocuments(
   currentUser: User,
   callback: (docs: DocumentInfo[]) => void,
   projectId?: string
 ): () => void {
-  const documentQueries = currentUser.role === 'admin'
-    ? [query(collection(db, 'documents'), orderBy('updatedAt', 'desc'))]
-    : [
-        query(collection(db, 'documents'), where('ownerId', '==', currentUser.id)),
-        query(collection(db, 'documents'), where('createdBy', '==', currentUser.id)),
-        query(collection(db, 'documents'), where('visibility', '==', 'workspace')),
-        query(
-          collection(db, 'documents'),
-          where('visibility', '==', 'shared'),
-          where('sharedWith', 'array-contains', currentUser.id),
-        ),
-      ];
-
-  const querySnapshots = new Map<number, any[]>();
-  const refresh = () => {
-    const uniqueDocs = new Map<string, DocumentInfo>();
-    querySnapshots.forEach(snapshotDocs => {
-      snapshotDocs.forEach(d => uniqueDocs.set(d.id, { id: d.id, ...d.data() } as DocumentInfo));
-    });
-
-    let docs = Array.from(uniqueDocs.values()).filter(d => !d.id.startsWith('doc-seed-'));
-    if (projectId) docs = docs.filter(d => d.projectId === projectId);
-    docs.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime());
-    callback(docs);
-  };
-
-  const unsubs = documentQueries.map((documentQuery, index) =>
-    onSnapshot(documentQuery, snap => {
-      querySnapshots.set(index, snap.docs);
-      refresh();
-    }, err => console.warn('Documents subscription warning:', err))
+  return subscribeVisibleWorkspaceCollection<DocumentInfo>(
+    'documents',
+    currentUser,
+    callback,
+    err => console.warn('Documents subscription warning:', err),
+    {
+      filter: (d: DocumentInfo) => !d.id.startsWith('doc-seed-') && (!projectId || d.projectId === projectId),
+      sort: (a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime(),
+    }
   );
-
-  return () => unsubs.forEach(unsub => unsub());
 }

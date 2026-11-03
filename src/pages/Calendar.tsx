@@ -24,6 +24,7 @@ import {
   eachDayOfInterval, isSameMonth, isSameDay, startOfWeek, endOfWeek, isToday
 } from 'date-fns';
 import * as Popover from '@radix-ui/react-popover';
+import { getVisibleWorkspaceDocs, subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
 
 type CalendarViewMode = 'month' | 'agenda';
 type FilterType = 'all' | 'meetings' | 'tasks';
@@ -89,13 +90,15 @@ export function Calendar() {
     if (!profile) return;
     const fetchClients = async () => {
       try {
-        const pSnap = await getDocs(collection(db, 'projects'));
-        if (pSnap && pSnap.docs.length > 0) {
-          setProjectsList(pSnap.docs.map(d => ({id: d.id, name: d.data().name})));
+        const [pDocs, cDocs] = await Promise.all([
+          getVisibleWorkspaceDocs<any>('projects', profile),
+          getVisibleWorkspaceDocs<any>('clients', profile),
+        ]);
+        if (pDocs.length > 0) {
+          setProjectsList(pDocs.map(d => ({ id: d.id, name: d.name })));
         }
-        const snap = await getDocs(collection(db, 'clients'));
-        if (snap && snap.docs.length > 0) {
-          setClients(snap.docs.map(d => ({id: d.id, name: d.data().name})));
+        if (cDocs.length > 0) {
+          setClients(cDocs.map(d => ({ id: d.id, name: d.name })));
         }
       } catch (err) {
         console.warn("Could not load clients/projects for calendar:", err);
@@ -105,41 +108,44 @@ export function Calendar() {
     // Populate upcoming occurrences from the recurring schedule templates.
     materializeRecurringMeetings(90).catch(err => console.warn('Recurring meetings:', err));
 
-    const tasksQuery = profile.role === 'admin'
-      ? query(collection(db, 'tasks'))
-      : query(collection(db, 'tasks'), where('assignedTo', '==', profile.id));
-      
-    const meetingsQuery = query(collection(db, 'meetings'));
-
-    const unsubTasks = onSnapshot(tasksQuery, (snap) => {
-      if (snap.docs.length > 0) {
-        const loadedTasks = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Task));
-        setLocalTasks(loadedTasks);
-        setTasks(loadedTasks);
-      } else {
+    const unsubTasks = subscribeVisibleWorkspaceCollection<Task>(
+      'tasks',
+      profile,
+      loadedTasks => {
+        if (loadedTasks.length > 0) {
+          setLocalTasks(loadedTasks);
+          setTasks(loadedTasks);
+        } else {
+          setTasks(getLocalTasks());
+        }
+        setLoading(false);
+      },
+      error => {
+        console.warn("Tasks listener warning, fallback to local storage:", error);
         setTasks(getLocalTasks());
-      }
-      setLoading(false);
-    }, (error) => {
-      console.warn("Tasks listener warning, fallback to local storage:", error);
-      setTasks(getLocalTasks());
-      setLoading(false);
-    });
+        setLoading(false);
+      },
+      { includeAssignedTo: true }
+    );
 
-    const unsubMeetings = onSnapshot(meetingsQuery, (snap) => {
-      if (snap.docs.length > 0) {
-        const loadedMeetings = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Meeting));
-        setLocalMeetings(loadedMeetings);
-        setMeetings(loadedMeetings);
-      } else {
+    const unsubMeetings = subscribeVisibleWorkspaceCollection<Meeting>(
+      'meetings',
+      profile,
+      loadedMeetings => {
+        if (loadedMeetings.length > 0) {
+          setLocalMeetings(loadedMeetings);
+          setMeetings(loadedMeetings);
+        } else {
+          setMeetings(getLocalMeetings());
+        }
+        setLoading(false);
+      },
+      error => {
+        console.warn("Meetings listener warning, fallback to local storage:", error);
         setMeetings(getLocalMeetings());
+        setLoading(false);
       }
-      setLoading(false);
-    }, (error) => {
-      console.warn("Meetings listener warning, fallback to local storage:", error);
-      setMeetings(getLocalMeetings());
-      setLoading(false);
-    });
+    );
 
     return () => {
       unsubTasks();

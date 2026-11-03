@@ -12,6 +12,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { useUsers } from '../lib/useUsers';
 import { getThumbnailUrl } from '../lib/cloudinary';
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
 
 export function Clients() {
   const { profile } = useAuth();
@@ -31,25 +32,28 @@ export function Clients() {
   useEffect(() => {
     if (!profile) return;
     startLoading('clients');
-    
-    const q = query(collection(db, 'clients'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (snapshot.docs.length > 0) {
-        let data = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as Client));
-        data = data.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-        setLocalClients(data);
-        setClients(data);
-      } else {
+
+    const unsubscribe = subscribeVisibleWorkspaceCollection<Client>(
+      'clients',
+      profile,
+      data => {
+        if (data.length > 0) {
+          const sorted = [...data].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          setLocalClients(sorted);
+          setClients(sorted);
+        } else {
+          setClients(getLocalClients());
+        }
+        setLoading(false);
+        stopLoading('clients');
+      },
+      error => {
+        console.warn("Clients listener warning, fallback to local storage:", error);
         setClients(getLocalClients());
+        setLoading(false);
+        stopLoading('clients');
       }
-      setLoading(false);
-      stopLoading('clients');
-    }, (error) => {
-      console.warn("Clients listener warning, fallback to local storage:", error);
-      setClients(getLocalClients());
-      setLoading(false);
-      stopLoading('clients');
-    });
+    );
 
     return () => {
       unsubscribe();

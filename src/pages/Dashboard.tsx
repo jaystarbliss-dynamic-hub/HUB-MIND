@@ -14,6 +14,7 @@ import { getLocalDocsMap, setLocalDocsMap } from '../lib/offlineSync';
 import { Link } from 'react-router-dom';
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { subscribeVisibleWorkspaceCollection, getVisibleWorkspaceDocs } from '../lib/visibleWorkspaceQueries';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -148,76 +149,88 @@ export function Dashboard() {
 
     try {
       // 1. Real-time Tasks Listener
-      const tasksQuery = profile.role === 'admin' 
-         ? query(collection(db, 'tasks'))
-         : query(collection(db, 'tasks'), where('assignedTo', '==', profile.id));
-
-      const unsubTasks = onSnapshot(tasksQuery, (tasksSnap) => {
-        const today = new Date();
-        const startOfToday = startOfDay(today);
-        const weekStart = startOfWeek(today);
-        const weekEnd = endOfWeek(today);
-        let urgentTasks = 0;
-        let overdueTasks = 0;
-        let completedTasks = 0;
-        tasksSnap.docs.forEach(doc => {
-          const t = doc.data() as Task;
-          if (t.status === 'completed') {
-            completedTasks++;
-          } else if (t.status !== 'archived') {
-            if (t.priority === 'urgent') urgentTasks++;
-            if (t.deadline && isBefore(safeParseISO(t.deadline), startOfToday)) overdueTasks++;
-          }
-        });
-        setUrgentTasksCount(urgentTasks);
-        setTasksOverdueCount(overdueTasks);
-        setTotalTasksCount(tasksSnap.docs.length);
-        setCompletedTasksCount(completedTasks);
-        setWeekTasksCount(tasksSnap.docs.filter(d => {
-          const t = d.data() as Task;
-          return t.deadline && safeParseISO(t.deadline) >= weekStart && safeParseISO(t.deadline) <= weekEnd && t.status !== 'archived';
-        }).length);
-        setLoading(false);
-        stopLoading('dashboard');
-      }, (e) => {
-        console.warn('Dashboard tasks subscription fallback:', e);
-        setLoading(false);
-        stopLoading('dashboard');
-      });
+      const unsubTasks = subscribeVisibleWorkspaceCollection<Task>(
+        'tasks',
+        profile,
+        tasksList => {
+          const today = new Date();
+          const startOfToday = startOfDay(today);
+          const weekStart = startOfWeek(today);
+          const weekEnd = endOfWeek(today);
+          let urgentTasks = 0;
+          let overdueTasks = 0;
+          let completedTasks = 0;
+          tasksList.forEach(t => {
+            if (t.status === 'completed') {
+              completedTasks++;
+            } else if (t.status !== 'archived') {
+              if (t.priority === 'urgent') urgentTasks++;
+              if (t.deadline && isBefore(safeParseISO(t.deadline), startOfToday)) overdueTasks++;
+            }
+          });
+          setUrgentTasksCount(urgentTasks);
+          setTasksOverdueCount(overdueTasks);
+          setTotalTasksCount(tasksList.length);
+          setCompletedTasksCount(completedTasks);
+          setWeekTasksCount(
+            tasksList.filter(t => t.deadline && safeParseISO(t.deadline) >= weekStart && safeParseISO(t.deadline) <= weekEnd && t.status !== 'archived').length
+          );
+          setLoading(false);
+          stopLoading('dashboard');
+        },
+        e => {
+          console.warn('Dashboard tasks subscription fallback:', e);
+          setLoading(false);
+          stopLoading('dashboard');
+        },
+        { includeAssignedTo: true }
+      );
       unsubscribers.push(unsubTasks);
 
       // 2. Real-time Projects Listener
-      const unsubProjects = onSnapshot(collection(db, 'projects'), (projSnap) => {
-        setTotalProjectsCount(projSnap.docs.length);
-        const active = projSnap.docs.filter(d => (d.data() as any).status === 'active').length;
-        setActiveProjectsCount(active);
-      }, (e) => console.warn('Dashboard projects subscription fallback:', e));
+      const unsubProjects = subscribeVisibleWorkspaceCollection<any>(
+        'projects',
+        profile,
+        projectsList => {
+          setTotalProjectsCount(projectsList.length);
+          const active = projectsList.filter(p => p.status === 'active').length;
+          setActiveProjectsCount(active);
+        },
+        e => console.warn('Dashboard projects subscription fallback:', e)
+      );
       unsubscribers.push(unsubProjects);
 
       // 3. Real-time Meetings Listener
-      const meetingsQuery = query(collection(db, 'meetings'));
-      const unsubMeetings = onSnapshot(meetingsQuery, (meetingsSnap) => {
-        const today = new Date();
-        const weekStart = startOfWeek(today);
-        const weekEnd = endOfWeek(today);
-        let meetingsToday = 0;
-        let meetingsWeek = 0;
-        meetingsSnap.docs.forEach(doc => {
-          const m = doc.data() as Meeting;
-          const mDate = safeParseISO(m.date);
-          if (isToday(mDate)) meetingsToday++;
-          if (mDate >= weekStart && mDate <= weekEnd) meetingsWeek++;
-        });
-        setTodayMeetingsCount(meetingsToday);
-        setMeetingsThisWeekCount(meetingsWeek);
-      }, (e) => console.warn('Dashboard meetings subscription fallback:', e));
+      const unsubMeetings = subscribeVisibleWorkspaceCollection<Meeting>(
+        'meetings',
+        profile,
+        meetingsList => {
+          const today = new Date();
+          const weekStart = startOfWeek(today);
+          const weekEnd = endOfWeek(today);
+          let meetingsToday = 0;
+          let meetingsWeek = 0;
+          meetingsList.forEach(m => {
+            const mDate = safeParseISO(m.date);
+            if (isToday(mDate)) meetingsToday++;
+            if (mDate >= weekStart && mDate <= weekEnd) meetingsWeek++;
+          });
+          setTodayMeetingsCount(meetingsToday);
+          setMeetingsThisWeekCount(meetingsWeek);
+        },
+        e => console.warn('Dashboard meetings subscription fallback:', e)
+      );
       unsubscribers.push(unsubMeetings);
 
       // 4. Real-time Clients Waiting Listener
-      const clientsQuery = query(collection(db, 'clients'), where('status', '==', 'lead'));
-      const unsubClients = onSnapshot(clientsQuery, (clientsSnap) => {
-        setClientsWaitingCount(clientsSnap.docs.length);
-      }, (e) => console.warn('Dashboard clients subscription fallback:', e));
+      const unsubClients = subscribeVisibleWorkspaceCollection<Client>(
+        'clients',
+        profile,
+        clientsList => {
+          setClientsWaitingCount(clientsList.filter(c => c.status === 'lead').length);
+        },
+        e => console.warn('Dashboard clients subscription fallback:', e)
+      );
       unsubscribers.push(unsubClients);
 
       // 5. Real-time Inbox Listener
@@ -230,15 +243,17 @@ export function Dashboard() {
       unsubscribers.push(unsubInbox);
 
       // 6. Real-time Follow-Ups Listener
-      const followUpsQuery = profile.role === 'admin'
-        ? query(collection(db, 'followUps'))
-        : query(collection(db, 'followUps'), where('ownerId', '==', profile.id));
-      const unsubFollowUps = onSnapshot(followUpsQuery, (followUpsSnap) => {
-        const active = followUpsSnap.docs.filter(d => !['resolved', 'cancelled'].includes((d.data() as any).status));
-        const now = Date.now();
-        setFollowUpsDueCount(active.filter(d => new Date((d.data() as any).dueAt).getTime() <= now).length);
-        setFollowUpsWaitingCount(active.filter(d => (d.data() as any).status === 'waiting').length);
-      }, (e) => console.warn('Dashboard follow-ups subscription fallback:', e));
+      const unsubFollowUps = subscribeVisibleWorkspaceCollection<any>(
+        'followUps',
+        profile,
+        followUpsList => {
+          const active = followUpsList.filter(d => !['resolved', 'cancelled'].includes(d.status));
+          const now = Date.now();
+          setFollowUpsDueCount(active.filter(d => new Date(d.dueAt).getTime() <= now).length);
+          setFollowUpsWaitingCount(active.filter(d => d.status === 'waiting').length);
+        },
+        e => console.warn('Dashboard follow-ups subscription fallback:', e)
+      );
       unsubscribers.push(unsubFollowUps);
 
       // 7. Real-time Activity Logs Listener
@@ -249,9 +264,8 @@ export function Dashboard() {
       unsubscribers.push(unsubActivity);
 
       // 8. One-time reads for Documents Attention & Notes
-      getDocs(collection(db, 'documents')).then((docsSnap) => {
-        const attention = docsSnap.docs.filter(d => {
-          const x = d.data() as any;
+      getVisibleWorkspaceDocs<any>('documents', profile).then((docsList) => {
+        const attention = docsList.filter(x => {
           return x.status === 'pending_review' || x.status === 'needs_review' || x.reviewRequired === true;
         }).length;
         setDocumentsAttentionCount(attention);
@@ -297,13 +311,13 @@ export function Dashboard() {
     setScheduleSending(true);
     try {
       const today = new Date();
-      const [tasksSnap, meetingsSnap] = await Promise.all([
-        getDocs(query(collection(db, 'tasks'), profile.role === 'admin' ? undefined : where('assignedTo', '==', profile.id) as any)),
-        getDocs(collection(db, 'meetings'))
+      const [tasksAll, meetingsAll] = await Promise.all([
+        getVisibleWorkspaceDocs<any>('tasks', profile, { includeAssignedTo: true }),
+        getVisibleWorkspaceDocs<any>('meetings', profile)
       ]);
-      const tasks = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
+      const tasks = tasksAll
         .filter((t: any) => t.deadline && isToday(safeParseISO(t.deadline)));
-      const meetings = meetingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
+      const meetings = meetingsAll
         .filter((m: any) => m.date && isToday(safeParseISO(m.date)));
       const lines = [
         `Schedule for Today - ${format(today, 'dd MMMM yyyy')}`,

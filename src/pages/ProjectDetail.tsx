@@ -26,6 +26,7 @@ import {
 import { ShareResourceModal } from '../components/ShareResourceModal';
 import { deleteProject } from '../services/projectService';
 import { ProjectGanttTimeline } from '../components/ProjectGanttTimeline';
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
 
 export function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
@@ -56,19 +57,27 @@ export function ProjectDetail() {
         setProject(null);
       }
       setLoading(false);
+    }, () => {
+      setProject(null);
+      setLoading(false);
     });
 
-    const tQ = query(collection(db, 'tasks'), where('projectId', '==', id));
-    const mQ = query(collection(db, 'meetings'), where('projectId', '==', id));
-    const dQ = query(collection(db, 'documents'), where('projectId', '==', id));
-    const cQ = query(collection(db, 'clients'), where('projectId', '==', id));
     const aQ = query(collection(db, 'activityLogs'), where('entityId', '==', id));
 
-    const unsubTasks = onSnapshot(tQ, s => setTasks(s.docs.map(d => ({ id: d.id, ...d.data() } as Task))));
-    const unsubMeetings = onSnapshot(mQ, s => setMeetings(s.docs.map(d => ({ id: d.id, ...d.data() } as Meeting))));
-    const unsubDocs = onSnapshot(dQ, s => setDocuments(s.docs.map(d => ({ id: d.id, ...d.data() } as DocumentInfo))));
-    const unsubClients = onSnapshot(cQ, s => setClients(s.docs.map(d => ({ id: d.id, ...d.data() } as Client))));
-    const unsubLogs = onSnapshot(aQ, s => setLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as ActivityLog))));
+    const unsubTasks = subscribeVisibleWorkspaceCollection<Task>('tasks', profile, setTasks, undefined, {
+      includeAssignedTo: true,
+      filter: (t: Task) => t.projectId === id,
+    });
+    const unsubMeetings = subscribeVisibleWorkspaceCollection<Meeting>('meetings', profile, setMeetings, undefined, {
+      filter: (m: Meeting) => m.projectId === id,
+    });
+    const unsubDocs = subscribeVisibleWorkspaceCollection<DocumentInfo>('documents', profile, setDocuments, undefined, {
+      filter: (d: DocumentInfo) => d.projectId === id,
+    });
+    const unsubClients = subscribeVisibleWorkspaceCollection<Client>('clients', profile, setClients, undefined, {
+      filter: (c: Client) => c.projectId === id,
+    });
+    const unsubLogs = onSnapshot(aQ, s => setLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as ActivityLog))), () => {});
 
     return () => {
       unsubProject();

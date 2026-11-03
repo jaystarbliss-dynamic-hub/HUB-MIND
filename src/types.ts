@@ -238,6 +238,7 @@ export interface FollowUp extends ResourceAccess {
   lastContactAt?: string;
   nextContactAt?: string;
   notes?: string;
+  createdBy?: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -19,13 +19,19 @@ export type RuntimeConfig = {
     firestoreDatabaseId?: string;
   };
   googleClientId?: string;
+  firebaseGoogleClientId?: string;
 };
 
 const isBrowser = typeof window !== 'undefined';
 
-export let FIRESTORE_DATABASE_ID = '(default)';
-export let FIREBASE_PROJECT_ID = '';
+export const CANONICAL_FIRESTORE_DATABASE_ID = 'ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430';
+export const CANONICAL_FIREBASE_PROJECT_ID = 'gen-lang-client-0197530608';
+export const CANONICAL_FIREBASE_GOOGLE_CLIENT_ID = '691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com';
+
+export let FIRESTORE_DATABASE_ID = CANONICAL_FIRESTORE_DATABASE_ID;
+export let FIREBASE_PROJECT_ID = CANONICAL_FIREBASE_PROJECT_ID;
 export let GOOGLE_CLIENT_ID = '';
+export let FIREBASE_GOOGLE_CLIENT_ID = CANONICAL_FIREBASE_GOOGLE_CLIENT_ID;
 
 export let app: FirebaseApp;
 export let auth: Auth;
@@ -35,9 +41,10 @@ const createFirebaseInstances = (runtimeConfig: RuntimeConfig) => {
   if (app) return;
 
   const firebaseConfig = runtimeConfig.firebase;
-  FIRESTORE_DATABASE_ID = firebaseConfig.firestoreDatabaseId || '(default)';
-  FIREBASE_PROJECT_ID = firebaseConfig.projectId;
-  GOOGLE_CLIENT_ID = runtimeConfig.googleClientId || '';
+  FIRESTORE_DATABASE_ID = firebaseConfig.firestoreDatabaseId || CANONICAL_FIRESTORE_DATABASE_ID;
+  FIREBASE_PROJECT_ID = firebaseConfig.projectId || CANONICAL_FIREBASE_PROJECT_ID;
+  GOOGLE_CLIENT_ID = runtimeConfig.googleClientId || runtimeConfig.firebaseGoogleClientId || '';
+  FIREBASE_GOOGLE_CLIENT_ID = runtimeConfig.firebaseGoogleClientId || runtimeConfig.googleClientId || CANONICAL_FIREBASE_GOOGLE_CLIENT_ID;
 
   app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 

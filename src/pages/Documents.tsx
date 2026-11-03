@@ -14,6 +14,7 @@ import { ShareResourceModal } from '../components/ShareResourceModal';
 import { sanitizeClipboardHtml } from '../components/documents/clipboard/clipboard-sanitizer';
 import { normalizeClipboardHtml } from '../components/documents/clipboard/clipboard-normalizer';
 import { deleteDocumentOffline, repairBlankDocumentsFromHistory, getLocalDocsMap, setLocalDocsMap } from '../lib/offlineSync';
+import { buildVisibleWorkspaceQueries, subscribeVisibleWorkspaceCollection, getVisibleWorkspaceDocs } from '../lib/visibleWorkspaceQueries';
 
 const LEGACY_DEMO_DOCUMENT_PREFIXES = ['doc-seed-'];
 
@@ -285,22 +286,7 @@ export function Documents() {
     };
 
     try {
-      // Firestore evaluates security rules against every document returned by a
-      // query. A staff user's old collection-wide listener therefore fails as
-      // soon as it encounters a private document they cannot read. Subscribe to
-      // four rule-safe slices instead and merge them locally.
-      const documentQueries = profile.role === 'admin'
-        ? [query(collection(db, 'documents'))]
-        : [
-            query(collection(db, 'documents'), where('ownerId', '==', profile.id)),
-            query(collection(db, 'documents'), where('createdBy', '==', profile.id)),
-            query(collection(db, 'documents'), where('visibility', '==', 'workspace')),
-            query(
-              collection(db, 'documents'),
-              where('visibility', '==', 'shared'),
-              where('sharedWith', 'array-contains', profile.id),
-            ),
-          ];
+      const documentQueries = buildVisibleWorkspaceQueries('documents', profile);
 
       const querySnapshots = new Map<number, any[]>();
       const refreshMergedDocuments = () => {
@@ -337,13 +323,29 @@ export function Documents() {
       setLoading(false);
     }
 
-    unsubClients = onSnapshot(collection(db, 'clients'), snapshot => {
-      if (!cancelled) setClients(snapshot.docs.map(d => ({ id: d.id, ...(d.data() as any) } as Client)).sort((a, b) => (a.name || '').localeCompare(b.name || '')));
-    }, error => console.warn('[HubMind] Clients listener failed:', error));
+    unsubClients = subscribeVisibleWorkspaceCollection<Client>(
+      'clients',
+      profile,
+      items => {
+        if (!cancelled) setClients(items.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+      },
+      error => console.warn('[HubMind] Clients listener failed:', error)
+    );
 
-    unsubProjects = onSnapshot(collection(db, 'projects'), snapshot => {
-      if (!cancelled) setProjectsList(snapshot.docs.map(d => ({ id: d.id, name: String((d.data() as any).name || 'Untitled Project') })).sort((a, b) => a.name.localeCompare(b.name)));
-    }, error => console.warn('[HubMind] Projects listener failed:', error));
+    unsubProjects = subscribeVisibleWorkspaceCollection<any>(
+      'projects',
+      profile,
+      items => {
+        if (!cancelled) {
+          setProjectsList(
+            items
+              .map(d => ({ id: d.id, name: String(d.name || 'Untitled Project') }))
+              .sort((a, b) => a.name.localeCompare(b.name))
+          );
+        }
+      },
+      error => console.warn('[HubMind] Projects listener failed:', error)
+    );
 
     return () => {
       cancelled = true;
@@ -354,34 +356,13 @@ export function Documents() {
   }, [user, profile]);
 
   const fetchData = async () => {
+    if (!profile) return;
     try {
-      const documentQueries = profile?.role === 'admin'
-        ? [query(collection(db, 'documents'))]
-        : profile
-          ? [
-              query(collection(db, 'documents'), where('ownerId', '==', profile.id)),
-              query(collection(db, 'documents'), where('createdBy', '==', profile.id)),
-              query(collection(db, 'documents'), where('visibility', '==', 'workspace')),
-              query(
-                collection(db, 'documents'),
-                where('visibility', '==', 'shared'),
-                where('sharedWith', 'array-contains', profile.id),
-              ),
-            ]
-          : [];
-
-      const [docSnapshots, clientsSnap] = await Promise.all([
-        Promise.all(documentQueries.map(documentQuery => getDocs(documentQuery))),
-        getDocs(collection(db, 'clients')),
+      const [docsDataRaw, clientsData] = await Promise.all([
+        getVisibleWorkspaceDocs<DocumentInfo>('documents', profile),
+        getVisibleWorkspaceDocs<Client>('clients', profile),
       ]);
-      const uniqueDocs = new Map<string, DocumentInfo>();
-      docSnapshots.forEach(snap => {
-        snap.docs.forEach(documentSnap => {
-          uniqueDocs.set(documentSnap.id, { id: documentSnap.id, ...(documentSnap.data() as any) } as DocumentInfo);
-        });
-      });
-      const docsData = Array.from(uniqueDocs.values()).filter(d => !isLegacyDemoDocumentId(d.id));
-      const clientsData = clientsSnap.docs.map(documentSnap => ({ id: documentSnap.id, ...(documentSnap.data() as any) } as Client));
+      const docsData = docsDataRaw.filter(d => !isLegacyDemoDocumentId(d.id));
       setDocsList(sortDocuments(docsData));
       setClients(clientsData.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
       setLoading(false);
@@ -406,6 +387,7 @@ export function Documents() {
         version: 1,
         createdBy: profile.id,
         ownerId: profile.id,
+        visibility: profile.defaultVisibility || 'workspace',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });

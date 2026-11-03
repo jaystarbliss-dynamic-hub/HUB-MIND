@@ -4,6 +4,7 @@ import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
 import { RecurringTaskTemplate } from '../types';
 import { Repeat2, Plus, Trash2, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { subscribeOwnerScopedCollection } from '../lib/visibleWorkspaceQueries';
 
 const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const COLLAPSED_STORAGE_KEY = 'hubmind_recurring_tasks_collapsed';
@@ -31,11 +32,15 @@ export function RecurringTasksPanel() {
 
   useEffect(() => {
     if (!profile) return;
-    return onSnapshot(collection(db, 'recurringTaskTemplates'), snap => {
-      const next = snap.docs.map(d => ({ id: d.id, ...d.data() } as RecurringTaskTemplate))
-        .filter(x => !x.ownerId || x.ownerId === profile.id);
-      setItems(next);
-    }, e => console.warn('Recurring tasks subscription:', e));
+    return subscribeOwnerScopedCollection<RecurringTaskTemplate>(
+      'recurringTaskTemplates',
+      profile,
+      all => {
+        const next = all.filter(x => profile.role === 'admin' || x.ownerId === profile.id);
+        setItems(next);
+      },
+      e => console.warn('Recurring tasks subscription:', e)
+    );
   }, [profile]);
 
   const toggleCollapse = () => {

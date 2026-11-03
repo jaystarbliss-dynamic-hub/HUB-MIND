@@ -64,12 +64,30 @@ function replaceCollection(name: string, records: CachedRecord[]) {
 function authorizedQuery(collectionName: string, userId: string, isAdmin: boolean) {
   const col = collection(db, collectionName);
   if (isAdmin) return query(col, limit(MAX_PER_COLLECTION));
+  if (collectionName === 'recurringMeetingTemplates' || collectionName === 'recurringTaskTemplates') {
+    return query(col, where('ownerId', '==', userId), limit(MAX_PER_COLLECTION));
+  }
+  if (collectionName === 'tasks') {
+    return query(
+      col,
+      or(
+        where('ownerId', '==', userId),
+        where('createdBy', '==', userId),
+        where('assignedTo', '==', userId),
+        where('visibility', '==', 'workspace'),
+        where('sharedWith', 'array-contains', userId),
+        where('sharedWith.' + userId, 'in', ['read', 'write'])
+      ),
+      limit(MAX_PER_COLLECTION)
+    );
+  }
   return query(
     col,
     or(
       where('ownerId', '==', userId),
       where('createdBy', '==', userId),
       where('visibility', '==', 'workspace'),
+      where('sharedWith', 'array-contains', userId),
       where('sharedWith.' + userId, 'in', ['read', 'write'])
     ),
     limit(MAX_PER_COLLECTION)

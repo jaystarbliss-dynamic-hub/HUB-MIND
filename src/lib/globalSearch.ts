@@ -126,7 +126,12 @@ async function getVisibleDocs(collectionName: string, userId: string, max: numbe
     query(colRef, where('ownerId', '==', userId), limit(max)),
     query(colRef, where('createdBy', '==', userId), limit(max)),
     query(colRef, where('visibility', '==', 'workspace'), limit(max)),
+    query(colRef, where('sharedWith', 'array-contains', userId), limit(max)),
+    query(colRef, where(`sharedWith.${userId}`, 'in', ['read', 'write']), limit(max)),
   ];
+  if (collectionName === 'tasks') {
+    queries.push(query(colRef, where('assignedTo', '==', userId), limit(max)));
+  }
 
   await Promise.all(
     queries.map(async q => {

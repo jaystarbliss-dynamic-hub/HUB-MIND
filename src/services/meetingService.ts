@@ -41,10 +41,16 @@ export async function createMeeting(params: {
 }): Promise<Meeting> {
   // Check for deduplication if externalEventId provided
   if (params.externalEventId) {
-    const existingQ = query(
-      collection(db, 'meetings'),
-      where('externalEventId', '==', params.externalEventId)
-    );
+    const existingQ = params.currentUser.role === 'admin'
+      ? query(
+          collection(db, 'meetings'),
+          where('externalEventId', '==', params.externalEventId)
+        )
+      : query(
+          collection(db, 'meetings'),
+          where('ownerId', '==', params.currentUser.id),
+          where('externalEventId', '==', params.externalEventId)
+        );
     const snap = await getDocs(existingQ);
     if (!snap.empty) {
       const existingId = snap.docs[0].id;
@@ -82,6 +88,7 @@ export async function createMeeting(params: {
     actionPoints: [],
     generatedDocs: [],
     ownerId: params.currentUser.id,
+    createdBy: params.currentUser.id,
     visibility: params.visibility || params.currentUser.defaultVisibility || 'workspace',
     sharedWith: [],
     permissions: {},
@@ -141,28 +148,38 @@ export function subscribeToMeetings(
   callback: (meetings: Meeting[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'meetings'), orderBy('date', 'asc'));
+  const queries = currentUser.role === 'admin'
+    ? [query(collection(db, 'meetings'), orderBy('date', 'asc'))]
+    : [
+        query(collection(db, 'meetings'), where('ownerId', '==', currentUser.id)),
+        query(collection(db, 'meetings'), where('createdBy', '==', currentUser.id)),
+        query(collection(db, 'meetings'), where('visibility', '==', 'workspace')),
+        query(collection(db, 'meetings'), where('sharedWith', 'array-contains', currentUser.id)),
+        query(collection(db, 'meetings'), where(`sharedWith.${currentUser.id}`, 'in', ['read', 'write'])),
+      ];
 
-  return onSnapshot(q, (snap) => {
-    let meetings = snap.docs.map(d => ({ id: d.id, ...d.data() } as Meeting));
+  const snapshots = new Map<number, Meeting[]>();
+  const emit = () => {
+    const merged = new Map<string, Meeting>();
+    snapshots.forEach(items => items.forEach(m => merged.set(m.id, m)));
+    let list = Array.from(merged.values());
+    if (projectId) list = list.filter(m => m.projectId === projectId);
+    list.sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+    callback(list);
+  };
 
-    if (currentUser.role !== 'admin') {
-      meetings = meetings.filter(m => {
-        if (m.ownerId === currentUser.id) return true;
-        if (m.visibility === 'workspace') return true;
-        if (m.visibility === 'shared' && isSharedWith(m.sharedWith, currentUser.id)) return true;
-        return false;
-      });
-    }
+  const unsubs = queries.map((q, idx) =>
+    onSnapshot(
+      q,
+      snap => {
+        snapshots.set(idx, snap.docs.map(d => ({ id: d.id, ...d.data() } as Meeting)));
+        emit();
+      },
+      err => console.warn('Meetings subscription warning:', err)
+    )
+  );
 
-    if (projectId) {
-      meetings = meetings.filter(m => m.projectId === projectId);
-    }
-
-    callback(meetings);
-  }, (err) => {
-    console.warn('Meetings subscription warning:', err);
-  });
+  return () => unsubs.forEach(u => u());
 }
 
 // Recurring Meeting Templates Engine
@@ -189,13 +206,14 @@ export function subscribeToRecurringMeetingTemplates(
   currentUser: User,
   callback: (templates: RecurringMeetingTemplate[]) => void
 ): () => void {
-  const q = query(collection(db, 'recurringMeetingTemplates'), orderBy('createdAt', 'desc'));
+  const q = currentUser.role === 'admin'
+    ? query(collection(db, 'recurringMeetingTemplates'), orderBy('createdAt', 'desc'))
+    : query(collection(db, 'recurringMeetingTemplates'), where('ownerId', '==', currentUser.id));
 
   return onSnapshot(q, (snap) => {
-    let templates = snap.docs.map(d => ({ id: d.id, ...d.data() } as RecurringMeetingTemplate));
-    if (currentUser.role !== 'admin') {
-      templates = templates.filter(t => t.ownerId === currentUser.id || t.visibility === 'workspace');
-    }
+    const templates = snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as RecurringMeetingTemplate))
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     callback(templates);
   }, (err) => {
     console.warn('Recurring templates subscription warning:', err);

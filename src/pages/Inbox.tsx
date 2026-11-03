@@ -12,6 +12,7 @@ import { format, parseISO } from 'date-fns';
 import { ShareResourceModal } from '../components/ShareResourceModal';
 import { InboxCommunication } from '../components/InboxCommunication';
 import { MessageSquare, Inbox as InboxIcon } from 'lucide-react';
+import { getVisibleWorkspaceDocs } from '../lib/visibleWorkspaceQueries';
 
 function CapturedInbox() {
   const { profile } = useAuth();
@@ -32,13 +33,16 @@ function CapturedInbox() {
   const [viewMode, setViewMode] = useState<'unprocessed' | 'processed'>('unprocessed');
 
   useEffect(() => {
+    if (!profile) return;
     const fetchClients = async () => {
-      const { getDocs, collection } = await import('firebase/firestore');
-      const snap = await getDocs(collection(db, 'clients'));
-      setClients(snap.docs.map(d => ({id: d.id, name: d.data().name})));
+      try {
+        const docs = await getVisibleWorkspaceDocs<any>('clients', profile);
+        setClients(docs.map(d => ({ id: d.id, name: d.name })));
+      } catch (err) {
+        console.warn('Could not load clients for inbox:', err);
+      }
     };
     fetchClients();
-    if (!profile) return;
     const q = profile.role === 'admin'
       ? query(
           collection(db, 'inbox'),

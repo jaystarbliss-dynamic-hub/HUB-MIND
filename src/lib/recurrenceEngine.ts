@@ -5,11 +5,25 @@ import { shouldGenerate, occurrenceKey } from './recurrenceRules';
 
 export { shouldGenerate, occurrenceKey } from './recurrenceRules';
 
-export async function materializeRecurringTasksForDate(date = new Date()) {
-  const snap = await getDocs(query(collection(db, 'recurringTaskTemplates'), where('active', '==', true)));
+import { auth } from '../firebaseConfig';
+
+export async function materializeRecurringTasksForDate(
+  date = new Date(),
+  userContext?: { id: string; role?: string }
+) {
+  const uid = userContext?.id || auth?.currentUser?.uid;
+  const isAdmin = userContext?.role === 'admin';
+  if (!uid && !isAdmin) return [];
+
+  const templatesQuery = isAdmin
+    ? query(collection(db, 'recurringTaskTemplates'), where('active', '==', true))
+    : query(collection(db, 'recurringTaskTemplates'), where('ownerId', '==', uid), where('active', '==', true));
+
+  const snap = await getDocs(templatesQuery);
   const created: string[] = [];
   for (const templateDoc of snap.docs) {
     const template = templateDoc.data() as RecurringTaskTemplate;
+    if (template.active === false) continue;
     if (!shouldGenerate(date, template)) continue;
     const key = occurrenceKey(templateDoc.id, date);
     const occurrenceRef = doc(db, 'tasks', `recurring-task-${key}`);

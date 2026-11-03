@@ -6,6 +6,7 @@ import { RecurringMeetingTemplate } from '../types';
 import { CalendarClock, Plus, Trash2, X, CheckCircle2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { format } from 'date-fns';
 import { materializeRecurringMeetings, recurringMeetingSummary } from '../lib/recurringMeetings';
+import { subscribeOwnerScopedCollection } from '../lib/visibleWorkspaceQueries';
 
 const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const fullDays = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -41,17 +42,20 @@ export function RecurringSchedulePanel() {
 
   useEffect(() => {
     if (!profile) return;
-    const templatesQuery = collection(db, 'recurringMeetingTemplates');
-    return onSnapshot(templatesQuery, snap => {
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as RecurringMeetingTemplate));
-      const visible = profile.role === 'admin'
-        ? all
-        : all.filter(x => x.ownerId === profile.id);
-      setItems(visible.filter(x => x.active !== false));
-    }, e => {
-      console.error('Recurring schedule subscription failed:', e);
-      setError('Unable to load recurring events. Please check your permissions or connection.');
-    });
+    return subscribeOwnerScopedCollection<RecurringMeetingTemplate>(
+      'recurringMeetingTemplates',
+      profile,
+      all => {
+        const visible = profile.role === 'admin'
+          ? all
+          : all.filter(x => x.ownerId === profile.id);
+        setItems(visible.filter(x => x.active !== false));
+      },
+      e => {
+        console.error('Recurring schedule subscription failed:', e);
+        setError('Unable to load recurring events. Please check your permissions or connection.');
+      }
+    );
   }, [profile]);
 
   const toggleCollapse = () => {

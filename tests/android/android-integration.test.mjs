@@ -209,3 +209,68 @@ test('Website lists CI-published Android debug prereleases as clearly labelled t
   assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
   assert.equal(manifest.apkUrl, '');
 });
+
+test('Firebase Google Sign-In Web OAuth client ID is separated from Google Drive/Calendar OAuth client ID across backend, web, and Android', () => {
+  const configFn = read('netlify/functions/config.ts');
+  const serverTs = read('server.ts');
+  const fbConfigTs = read('src/firebaseConfig.ts');
+  const clientKt = read('android/app/src/main/java/com/example/hubmind/data/remote/HubMindBackendClient.kt');
+  const authScreenKt = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthScreen.kt');
+
+  assert.match(configFn, /CANONICAL_PROJECT_NUMBER\s*=\s*'691762959980'/);
+  assert.match(configFn, /CANONICAL_WEB_APP_ID\s*=\s*'1:691762959980:web:0979e7745677270cc92a49'/);
+  assert.match(configFn, /firebaseGoogleClientId/);
+  assert.match(serverTs, /firebaseGoogleClientId/);
+  assert.match(fbConfigTs, /export let FIREBASE_GOOGLE_CLIENT_ID/);
+  assert.match(clientKt, /val firebaseGoogleClientId: String/);
+  assert.match(authScreenKt, /cfg\.firebaseGoogleClientId\.ifBlank \{ cfg\.googleClientId \}/);
+});
+
+test('Android HubMindBackendClient strictly enforces canonical named Firestore database and never falls back to default database', () => {
+  const clientKt = read('android/app/src/main/java/com/example/hubmind/data/remote/HubMindBackendClient.kt');
+  assert.match(clientKt, /Refusing to fall back to the default database/);
+  assert.match(clientKt, /FirebaseFirestore\.getInstance\(app, cfg\.firestoreDatabaseId\)/);
+  assert.doesNotMatch(clientKt, /catch \(_: Throwable\) \{\s*FirebaseFirestore\.getInstance\(app\)\s*\}/);
+});
+
+test('Android Gradle files configure com.google.gms.google-services plugin safely', () => {
+  const libsToml = read('android/gradle/libs.versions.toml');
+  const rootGradle = read('android/build.gradle.kts');
+  const appGradle = read('android/app/build.gradle.kts');
+
+  assert.match(libsToml, /com\.google\.gms\.google-services/);
+  assert.match(rootGradle, /alias\(libs\.plugins\.google\.services\) apply false/);
+  assert.match(appGradle, /apply\(plugin = "com\.google\.gms\.google-services"\)/);
+});
+
+test('Web workspace services and pages use rule-compliant visibleWorkspaceQueries', () => {
+  const visibleQueries = read('src/lib/visibleWorkspaceQueries.ts');
+  assert.match(visibleQueries, /export function buildVisibleWorkspaceQueries/);
+  assert.match(visibleQueries, /export function subscribeVisibleWorkspaceCollection/);
+  assert.match(visibleQueries, /export async function getVisibleWorkspaceDocs/);
+  assert.match(visibleQueries, /export function subscribeOwnerScopedCollection/);
+
+  for (const rel of [
+    'src/services/projectService.ts',
+    'src/services/taskService.ts',
+    'src/services/clientService.ts',
+    'src/services/followUpService.ts',
+    'src/services/documentService.ts',
+    'src/pages/Documents.tsx',
+    'src/pages/Projects.tsx',
+    'src/pages/Tasks.tsx',
+    'src/pages/Clients.tsx',
+    'src/pages/Calendar.tsx',
+    'src/pages/FollowUps.tsx',
+    'src/pages/Dashboard.tsx',
+    'src/pages/Knowledge.tsx',
+    'src/pages/Inbox.tsx',
+    'src/pages/ProjectDetail.tsx',
+    'src/pages/ClientDetail.tsx',
+    'src/components/RecurringSchedulePanel.tsx',
+    'src/components/RecurringTasksPanel.tsx',
+  ]) {
+    const content = read(rel);
+    assert.match(content, /visibleWorkspaceQueries/, `${rel} should use visibleWorkspaceQueries`);
+  }
+});

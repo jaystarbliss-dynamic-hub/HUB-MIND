@@ -94,31 +94,21 @@ export async function deleteClient(clientId: string, currentUser: User): Promise
   });
 }
 
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
+
 export function subscribeToClients(
   currentUser: User,
   callback: (clients: Client[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'clients'), orderBy('createdAt', 'desc'));
-
-  return onSnapshot(q, (snap) => {
-    let clients = snap.docs.map(d => ({ id: d.id, ...d.data() } as Client));
-
-    if (currentUser.role !== 'admin') {
-      clients = clients.filter(c => {
-        if (c.ownerId === currentUser.id || c.createdBy === currentUser.id) return true;
-        if (c.visibility === 'workspace') return true;
-        if (c.visibility === 'shared' && isSharedWith(c.sharedWith, currentUser.id)) return true;
-        return false;
-      });
+  return subscribeVisibleWorkspaceCollection<Client>(
+    'clients',
+    currentUser,
+    callback,
+    err => console.warn('Clients subscription warning:', err),
+    {
+      filter: projectId ? (c: Client) => c.projectId === projectId : undefined,
+      sort: (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
     }
-
-    if (projectId) {
-      clients = clients.filter(c => c.projectId === projectId);
-    }
-
-    callback(clients);
-  }, (err) => {
-    console.warn('Clients subscription warning:', err);
-  });
+  );
 }

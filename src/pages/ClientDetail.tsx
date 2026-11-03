@@ -12,6 +12,7 @@ import { safeParseISO, safeFormat } from "../lib/dateUtils";
 import { format, parseISO } from 'date-fns';
 import { useUsers } from '../lib/useUsers';
 import { getThumbnailUrl } from '../lib/cloudinary';
+import { getVisibleWorkspaceDocs } from '../lib/visibleWorkspaceQueries';
 
 export function ClientDetail() {
   const { id } = useParams();
@@ -34,7 +35,7 @@ export function ClientDetail() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !profile) return;
     
     const fetchData = async () => {
       setLoading(true);
@@ -51,17 +52,19 @@ export function ClientDetail() {
           setEditStatus(c.status);
         }
         
-        // Fetch tasks
-        const tasksQ = query(collection(db, 'tasks'), where('clientId', '==', id));
-        const tasksSnap = await getDocs(tasksQ);
-        const t = tasksSnap.docs.map(d => ({ id: d.id, ...d.data() } as Task));
-        setTasks(t.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-        
-        // Fetch meetings
-        const meetingsQ = query(collection(db, 'meetings'), where('clientId', '==', id));
-        const meetingsSnap = await getDocs(meetingsQ);
-        const m = meetingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Meeting));
-        setMeetings(m.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        const [t, m] = await Promise.all([
+          getVisibleWorkspaceDocs<Task>('tasks', profile, {
+            includeAssignedTo: true,
+            filter: (item: Task) => item.clientId === id,
+            sort: (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime(),
+          }),
+          getVisibleWorkspaceDocs<Meeting>('meetings', profile, {
+            filter: (item: Meeting) => item.clientId === id,
+            sort: (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+          }),
+        ]);
+        setTasks(t);
+        setMeetings(m);
         
       } catch (error) {
         console.error("Error fetching client details:", error);
@@ -71,7 +74,7 @@ export function ClientDetail() {
     };
     
     fetchData();
-  }, [id]);
+  }, [id, profile]);
 
   
   const handleUpdate = async (e: React.FormEvent) => {

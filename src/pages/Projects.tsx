@@ -8,6 +8,8 @@ import { Loader2, Plus, Folder, Search, LayoutGrid, CalendarRange, AlertTriangle
 import { Link } from 'react-router-dom';
 import { ProjectTimelineView } from '../components/ProjectTimelineView';
 
+import { buildVisibleWorkspaceQueries } from '../lib/visibleWorkspaceQueries';
+
 function mergeSnapshots<T extends { id: string }>(...lists: T[][]) { const map = new Map<string, T>(); lists.flat().forEach(item => map.set(item.id, item)); return [...map.values()]; }
 
 export function Projects() {
@@ -18,7 +20,7 @@ export function Projects() {
     if (!profile) return; setLoading(true); const unsubs: (() => void)[] = [];
     const listenResource = (collectionName: string, setter: (items: any[]) => void) => {
       const lists: any[][] = [];
-      const queries = profile.role === 'admin' ? [collection(db, collectionName)] : [query(collection(db, collectionName), where('ownerId', '==', profile.id)), query(collection(db, collectionName), where('visibility', '==', 'workspace')), query(collection(db, collectionName), where(`sharedWith.${profile.id}`, 'in', ['read', 'write']))];
+      const queries = buildVisibleWorkspaceQueries(collectionName, profile, { includeAssignedTo: collectionName === 'tasks' });
       queries.forEach((q: any, index) => { unsubs.push(onSnapshot(q, (snap: any) => { lists[index] = snap.docs ? snap.docs.map((d: any) => ({ id: d.id, ...d.data() })) : []; setter(mergeSnapshots(...lists)); setLoading(false); }, () => setLoading(false))); });
     };
     listenResource('projects', items => { const value = items as Project[]; setProjects(value); setLocalProjects(value); });
@@ -29,7 +31,7 @@ export function Projects() {
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault(); if (!profile || !name.trim()) return; setWriteError(null); const now = new Date().toISOString();
-    try { const ref = await addDoc(collection(db, 'projects'), { name: name.trim(), description, status: 'active', ownerId: profile.id, visibility: 'private', createdAt: now, updatedAt: now }); setProjects(current => [{ id: ref.id, name: name.trim(), description, status: 'active', ownerId: profile.id, visibility: 'private', createdAt: now, updatedAt: now } as Project, ...current]); setName(''); setDescription(''); setShow(false); }
+    try { const ref = await addDoc(collection(db, 'projects'), { name: name.trim(), description, status: 'active', ownerId: profile.id, createdBy: profile.id, visibility: 'private', createdAt: now, updatedAt: now }); setProjects(current => [{ id: ref.id, name: name.trim(), description, status: 'active', ownerId: profile.id, createdBy: profile.id, visibility: 'private', createdAt: now, updatedAt: now } as Project, ...current]); setName(''); setDescription(''); setShow(false); }
     catch (err: any) { console.error('Project cloud write failed', err); setWriteError(err?.message || 'Project could not be saved. Nothing was marked as created.'); }
   };
 

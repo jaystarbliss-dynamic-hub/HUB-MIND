@@ -24,7 +24,8 @@ data class HubMindFirebaseRuntimeConfig(
     val authDomain: String,
     val storageBucket: String,
     val firestoreDatabaseId: String,
-    val googleClientId: String
+    val googleClientId: String,
+    val firebaseGoogleClientId: String = googleClientId
 )
 
 data class EphemeralTokenResult(
@@ -52,7 +53,9 @@ class HubMindBackendClient(
     companion object {
         const val DEFAULT_BASE_URL = "https://hub-mind.netlify.app"
         const val CANONICAL_PROJECT_ID = "gen-lang-client-0197530608"
+        const val CANONICAL_PROJECT_NUMBER = "691762959980"
         const val CANONICAL_DATABASE_ID = "ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430"
+        const val CANONICAL_FIREBASE_GOOGLE_CLIENT_ID = "691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com"
         private const val FIREBASE_APP_NAME = "HubMindCanonical"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
@@ -96,11 +99,18 @@ class HubMindBackendClient(
                     val apiKey = fb.optString("apiKey", "").trim()
                     val projectId = fb.optString("projectId", CANONICAL_PROJECT_ID).trim()
                     val appId = fb.optString("appId", "").trim()
-                    val messagingSenderId = fb.optString("messagingSenderId", "").trim()
+                    val messagingSenderId = fb.optString("messagingSenderId", CANONICAL_PROJECT_NUMBER).trim()
                     val authDomain = fb.optString("authDomain", "$projectId.firebaseapp.com").trim()
                     val storageBucket = fb.optString("storageBucket", "$projectId.firebasestorage.app").trim()
                     val firestoreDatabaseId = fb.optString("firestoreDatabaseId", CANONICAL_DATABASE_ID).trim()
                     val googleClientId = root.optString("googleClientId", "").trim()
+                    val rawFirebaseGoogleClientId = root.optString("firebaseGoogleClientId", "").trim()
+                    val firebaseGoogleClientId = when {
+                        rawFirebaseGoogleClientId.startsWith("$CANONICAL_PROJECT_NUMBER-") -> rawFirebaseGoogleClientId
+                        googleClientId.startsWith("$CANONICAL_PROJECT_NUMBER-") -> googleClientId
+                        rawFirebaseGoogleClientId.isNotBlank() -> rawFirebaseGoogleClientId
+                        else -> CANONICAL_FIREBASE_GOOGLE_CLIENT_ID
+                    }
 
                     if (apiKey.isBlank() || apiKey == "dev-api-key" || apiKey == "test-api-key" || apiKey.startsWith("YOUR_")) {
                         throw IllegalStateException(
@@ -110,6 +120,17 @@ class HubMindBackendClient(
                     if (projectId.isBlank() || appId.isBlank()) {
                         throw IllegalStateException("Incomplete Firebase configuration from /api/config.")
                     }
+                    if (projectId != CANONICAL_PROJECT_ID) {
+                        throw IllegalStateException(
+                            "Firebase project mismatch: expected '$CANONICAL_PROJECT_ID' but /api/config returned '$projectId'."
+                        )
+                    }
+                    val resolvedDbId = firestoreDatabaseId.ifBlank { CANONICAL_DATABASE_ID }
+                    if (resolvedDbId == "(default)" || resolvedDbId != CANONICAL_DATABASE_ID) {
+                        throw IllegalStateException(
+                            "Firestore database mismatch: expected named database '$CANONICAL_DATABASE_ID' but received '$resolvedDbId'. Refusing to fall back to the default database."
+                        )
+                    }
 
                     val config = HubMindFirebaseRuntimeConfig(
                         apiKey = apiKey,
@@ -118,8 +139,9 @@ class HubMindBackendClient(
                         messagingSenderId = messagingSenderId,
                         authDomain = authDomain,
                         storageBucket = storageBucket,
-                        firestoreDatabaseId = firestoreDatabaseId.ifBlank { CANONICAL_DATABASE_ID },
-                        googleClientId = googleClientId
+                        firestoreDatabaseId = resolvedDbId,
+                        googleClientId = googleClientId.ifBlank { firebaseGoogleClientId },
+                        firebaseGoogleClientId = firebaseGoogleClientId
                     )
                     cachedConfig = config
                     ensureFirebaseInitialized(config)
@@ -167,11 +189,12 @@ class HubMindBackendClient(
         return cfgRes.mapCatching { cfg ->
             val app = ensureFirebaseInitialized(cfg)
                 ?: throw IllegalStateException("Android Context unavailable for FirebaseFirestore initialization.")
-            try {
-                FirebaseFirestore.getInstance(app, cfg.firestoreDatabaseId)
-            } catch (_: Throwable) {
-                FirebaseFirestore.getInstance(app)
+            if (cfg.firestoreDatabaseId.isBlank() || cfg.firestoreDatabaseId == "(default)" || cfg.firestoreDatabaseId != CANONICAL_DATABASE_ID) {
+                throw IllegalStateException(
+                    "Invalid Firestore database ID '${cfg.firestoreDatabaseId}'. Hub-Mind requires named database '$CANONICAL_DATABASE_ID'."
+                )
             }
+            FirebaseFirestore.getInstance(app, cfg.firestoreDatabaseId)
         }
     }
 

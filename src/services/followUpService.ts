@@ -45,6 +45,7 @@ export async function createFollowUp(params: {
     status: 'scheduled',
     notes: params.notes?.trim() || undefined,
     ownerId: params.currentUser.id,
+    createdBy: params.currentUser.id,
     visibility: params.visibility || params.currentUser.defaultVisibility || 'workspace',
     sharedWith: [],
     permissions: {},
@@ -97,31 +98,21 @@ export async function deleteFollowUp(followUpId: string, currentUser: User): Pro
   });
 }
 
+import { subscribeVisibleWorkspaceCollection } from '../lib/visibleWorkspaceQueries';
+
 export function subscribeToFollowUps(
   currentUser: User,
   callback: (followUps: FollowUp[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'followUps'), orderBy('dueAt', 'asc'));
-
-  return onSnapshot(q, (snap) => {
-    let list = snap.docs.map(d => ({ id: d.id, ...d.data() } as FollowUp));
-
-    if (currentUser.role !== 'admin') {
-      list = list.filter(fu => {
-        if (fu.ownerId === currentUser.id) return true;
-        if (fu.visibility === 'workspace') return true;
-        if (fu.visibility === 'shared' && isSharedWith(fu.sharedWith, currentUser.id)) return true;
-        return false;
-      });
+  return subscribeVisibleWorkspaceCollection<FollowUp>(
+    'followUps',
+    currentUser,
+    callback,
+    err => console.warn('Follow-ups subscription warning:', err),
+    {
+      filter: projectId ? (fu: FollowUp) => fu.relatedProjectId === projectId : undefined,
+      sort: (a, b) => new Date(a.dueAt || 0).getTime() - new Date(b.dueAt || 0).getTime(),
     }
-
-    if (projectId) {
-      list = list.filter(fu => fu.relatedProjectId === projectId);
-    }
-
-    callback(list);
-  }, (err) => {
-    console.warn('Follow-ups subscription warning:', err);
-  });
+  );
 }
