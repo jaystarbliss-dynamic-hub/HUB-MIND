@@ -1,4 +1,4 @@
-import { 
+import {
   collection, 
   doc, 
   getDoc, 
@@ -11,6 +11,7 @@ import {
   orderBy, 
   onSnapshot 
 } from 'firebase/firestore';
+import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueries';
 import { db } from '../firebaseConfig';
 import { 
   Meeting, 
@@ -138,34 +139,24 @@ export async function deleteMeeting(meetingId: string, currentUser: User): Promi
 
 export function subscribeToMeetings(
   currentUser: User,
-  callback: (meetings: Meeting[]) => void,
+  callback: (records: Meeting[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'meetings'), orderBy('date', 'asc'));
-
-  return onSnapshot(q, (snap) => {
-    let meetings = snap.docs.map(d => ({ id: d.id, ...d.data() } as Meeting));
-
-    if (currentUser.role !== 'admin') {
-      meetings = meetings.filter(m => {
-        if (m.ownerId === currentUser.id) return true;
-        if (m.visibility === 'workspace') return true;
-        if (m.visibility === 'shared' && isSharedWith(m.sharedWith, currentUser.id)) return true;
-        return false;
-      });
-    }
-
-    if (projectId) {
-      meetings = meetings.filter(m => m.projectId === projectId);
-    }
-
-    callback(meetings);
-  }, (err) => {
-    console.warn('Meetings subscription warning:', err);
-  });
+  return subscribeToVisibleWorkspaceRecords<Meeting>(
+    'meetings',
+    currentUser,
+    (records) => {
+      let visible = records;
+      
+      if (projectId) visible = visible.filter(record => record.projectId === projectId);
+      callback(visible);
+    },
+    'date',
+    'asc',
+    (error) => console.warn('Meetings subscription warning:', error),
+    false
+  );
 }
-
-// Recurring Meeting Templates Engine
 export async function createRecurringMeetingTemplate(
   template: Omit<RecurringMeetingTemplate, 'id' | 'createdAt' | 'updatedAt'>,
   currentUser: User
@@ -189,13 +180,16 @@ export function subscribeToRecurringMeetingTemplates(
   currentUser: User,
   callback: (templates: RecurringMeetingTemplate[]) => void
 ): () => void {
-  const q = query(collection(db, 'recurringMeetingTemplates'), orderBy('createdAt', 'desc'));
+  // Rules grant staff access only to templates they own; do not query the whole
+  // collection and try to filter workspace visibility on the client.
+  const q = currentUser.role?.toLowerCase() === 'admin'
+    ? query(collection(db, 'recurringMeetingTemplates'))
+    : query(collection(db, 'recurringMeetingTemplates'), where('ownerId', '==', currentUser.id));
 
   return onSnapshot(q, (snap) => {
-    let templates = snap.docs.map(d => ({ id: d.id, ...d.data() } as RecurringMeetingTemplate));
-    if (currentUser.role !== 'admin') {
-      templates = templates.filter(t => t.ownerId === currentUser.id || t.visibility === 'workspace');
-    }
+    const templates = snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as RecurringMeetingTemplate))
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     callback(templates);
   }, (err) => {
     console.warn('Recurring templates subscription warning:', err);

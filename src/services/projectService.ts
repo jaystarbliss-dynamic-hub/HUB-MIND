@@ -1,4 +1,4 @@
-import { 
+import {
   collection, 
   doc, 
   getDoc, 
@@ -11,6 +11,7 @@ import {
   orderBy, 
   onSnapshot 
 } from 'firebase/firestore';
+import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueries';
 import { db } from '../firebaseConfig';
 import { Project, User, ResourceVisibility } from '../types';
 import { logActivity } from './activityService';
@@ -145,24 +146,20 @@ export function subscribeToProject(projectId: string, callback: (proj: Project |
 
 export function subscribeToProjects(
   currentUser: User,
-  callback: (projects: Project[]) => void
+  callback: (records: Project[]) => void
 ): () => void {
-  const q = query(collection(db, 'projects'), orderBy('updatedAt', 'desc'));
-
-  return onSnapshot(q, (snap) => {
-    let projects = snap.docs.map(d => ({ id: d.id, ...d.data() } as Project));
-
-    if (currentUser.role !== 'admin') {
-      projects = projects.filter(p => {
-        if (p.ownerId === currentUser.id || p.createdBy === currentUser.id) return true;
-        if (p.visibility === 'workspace') return true;
-        if (p.visibility === 'shared' && isSharedWith(p.sharedWith, currentUser.id)) return true;
-        return false;
-      });
-    }
-
-    callback(projects);
-  }, (err) => {
-    console.warn('Projects subscription warning:', err);
-  });
+  return subscribeToVisibleWorkspaceRecords<Project>(
+    'projects',
+    currentUser,
+    (records) => {
+      let visible = records;
+      
+      
+      callback(visible);
+    },
+    'updatedAt',
+    'desc',
+    (error) => console.warn('Projects subscription warning:', error),
+    false
+  );
 }

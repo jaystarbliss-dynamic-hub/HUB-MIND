@@ -35,6 +35,13 @@ const createFirebaseInstances = (runtimeConfig: RuntimeConfig) => {
   if (app) return;
 
   const firebaseConfig = runtimeConfig.firebase;
+  if (isBrowser) {
+    const required = ['apiKey', 'projectId', 'appId', 'messagingSenderId'] as const;
+    const missing = required.filter((key) => !String(firebaseConfig[key] || '').trim());
+    if (missing.length || /^(dev|test)-api-key$|^YOUR_/i.test(firebaseConfig.apiKey || '')) {
+      throw new Error(`Production Firebase configuration is incomplete or contains placeholders (${missing.join(', ') || 'invalid API key'}). Check Netlify environment variables.`);
+    }
+  }
   FIRESTORE_DATABASE_ID = firebaseConfig.firestoreDatabaseId || '(default)';
   FIREBASE_PROJECT_ID = firebaseConfig.projectId;
   GOOGLE_CLIENT_ID = runtimeConfig.googleClientId || '';
@@ -61,10 +68,9 @@ const createFirebaseInstances = (runtimeConfig: RuntimeConfig) => {
       db = FIRESTORE_DATABASE_ID === '(default)'
         ? getFirestore(app)
         : getFirestore(app, FIRESTORE_DATABASE_ID);
-    } catch {
-      db = initializeFirestore(
-        app, {}, FIRESTORE_DATABASE_ID === '(default)' ? undefined : FIRESTORE_DATABASE_ID
-      );
+    } catch (error) {
+      // Never silently fall back to (default): Hub-Mind data is in a named DB.
+      throw new Error(`Unable to initialize Firestore database '${FIRESTORE_DATABASE_ID}': ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 };
@@ -111,19 +117,7 @@ export async function initializeFirebaseConfig(config?: RuntimeConfig) {
     console.warn('[HubMind] /api/config fetch warning, using client runtime defaults:', err);
   }
 
-  // Graceful fallback if /api/config is unreachable
-  createFirebaseInstances({
-    firebase: {
-      apiKey: 'test-api-key',
-      projectId: 'test-project',
-      appId: 'test-app-id',
-      messagingSenderId: 'test-sender-id',
-      authDomain: 'test-project.firebaseapp.com',
-      storageBucket: 'test-project.firebasestorage.app',
-      firestoreDatabaseId: '(default)',
-    },
-    googleClientId: '',
-  });
+  throw new Error('Hub-Mind could not load production Firebase configuration from /api/config. Check the Netlify function and Firebase environment variables.');
 }
 
 // Node-based tests need Firebase bindings immediately; browser startup is

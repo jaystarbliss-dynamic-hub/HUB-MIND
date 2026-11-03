@@ -69,7 +69,19 @@ fun AuthScreen(
                 viewModel.onGoogleSignInError("Google Sign-In failed (code ${e.statusCode}): ${e.message}")
             }
         } else {
-            viewModel.onGoogleSignInError("Google Sign-In was cancelled or failed. You can also sign in with your Hub-Mind email and password.")
+            val diagnostic = result.data?.let { intent ->
+                try {
+                    GoogleSignIn.getSignedInAccountFromIntent(intent).getResult(ApiException::class.java)
+                    "Google Sign-In did not complete (activity result " + result.resultCode + ")."
+                } catch (e: ApiException) {
+                    "Google Sign-In failed (status " + e.statusCode + "): " + (e.statusMessage ?: e.message ?: "Unknown Google authentication error") + "."
+                }
+            } ?: if (result.resultCode == Activity.RESULT_CANCELED) {
+                "Google Sign-In was cancelled. If you did not cancel it, verify the Android SHA-1/SHA-256 fingerprints and Web OAuth client ID in Firebase."
+            } else {
+                "Google Sign-In did not complete (activity result " + result.resultCode + "). Verify the Android OAuth client configuration."
+            }
+            viewModel.onGoogleSignInError(diagnostic + " You can also sign in with your Hub-Mind email and password.")
         }
     }
 
@@ -208,14 +220,14 @@ fun AuthScreen(
                         val cfgRes = ServiceLocator.backendClient.fetchAndValidateRuntimeConfig()
                         cfgRes.fold(
                             onSuccess = { cfg ->
-                                if (cfg.googleClientId.isBlank()) {
+                                if (cfg.firebaseGoogleClientId.isBlank()) {
                                     viewModel.onGoogleSignInError(
-                                        "Google Web Client ID is not configured on /api/config. Please sign in with your Hub-Mind email and password."
+                                        "Firebase Google OAuth Web Client ID is not configured on /api/config. Please sign in with your Hub-Mind email and password."
                                     )
                                 } else {
                                     val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                                         .requestEmail()
-                                        .requestIdToken(cfg.googleClientId)
+                                        .requestIdToken(cfg.firebaseGoogleClientId)
                                         .build()
                                     val googleClient = GoogleSignIn.getClient(context, gso)
                                     googleSignInLauncher.launch(googleClient.signInIntent)

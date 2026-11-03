@@ -24,7 +24,8 @@ data class HubMindFirebaseRuntimeConfig(
     val authDomain: String,
     val storageBucket: String,
     val firestoreDatabaseId: String,
-    val googleClientId: String
+    val googleClientId: String,
+    val firebaseGoogleClientId: String
 )
 
 data class EphemeralTokenResult(
@@ -101,6 +102,7 @@ class HubMindBackendClient(
                     val storageBucket = fb.optString("storageBucket", "$projectId.firebasestorage.app").trim()
                     val firestoreDatabaseId = fb.optString("firestoreDatabaseId", CANONICAL_DATABASE_ID).trim()
                     val googleClientId = root.optString("googleClientId", "").trim()
+                    val firebaseGoogleClientId = root.optString("firebaseGoogleClientId", "").trim()
 
                     if (apiKey.isBlank() || apiKey == "dev-api-key" || apiKey == "test-api-key" || apiKey.startsWith("YOUR_")) {
                         throw IllegalStateException(
@@ -119,7 +121,8 @@ class HubMindBackendClient(
                         authDomain = authDomain,
                         storageBucket = storageBucket,
                         firestoreDatabaseId = firestoreDatabaseId.ifBlank { CANONICAL_DATABASE_ID },
-                        googleClientId = googleClientId
+                        googleClientId = googleClientId,
+                        firebaseGoogleClientId = firebaseGoogleClientId
                     )
                     cachedConfig = config
                     ensureFirebaseInitialized(config)
@@ -134,8 +137,11 @@ class HubMindBackendClient(
         firebaseApp?.let { return it }
 
         val existing = FirebaseApp.getApps(ctx).firstOrNull { it.name == FIREBASE_APP_NAME }
-            ?: FirebaseApp.getApps(ctx).firstOrNull { it.options.projectId == config.projectId }
         if (existing != null) {
+            val options = existing.options
+            if (options.projectId != config.projectId || options.applicationId != config.appId) {
+                throw IllegalStateException("The existing Hub-Mind Firebase app is configured for a different project/app. Clear app data and reinstall the correctly configured build.")
+            }
             firebaseApp = existing
             return existing
         }
@@ -167,11 +173,11 @@ class HubMindBackendClient(
         return cfgRes.mapCatching { cfg ->
             val app = ensureFirebaseInitialized(cfg)
                 ?: throw IllegalStateException("Android Context unavailable for FirebaseFirestore initialization.")
-            try {
-                FirebaseFirestore.getInstance(app, cfg.firestoreDatabaseId)
-            } catch (_: Throwable) {
-                FirebaseFirestore.getInstance(app)
+            if (cfg.firestoreDatabaseId.isBlank()) {
+                throw IllegalStateException("The canonical Hub-Mind Firestore database ID is missing from runtime configuration.")
             }
+            // Never fall back to (default): web and Android must use the same DB.
+            FirebaseFirestore.getInstance(app, cfg.firestoreDatabaseId)
         }
     }
 
