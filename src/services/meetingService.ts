@@ -1,5 +1,4 @@
-import { 
-import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueries';
+import {
   collection, 
   doc, 
   getDoc, 
@@ -12,6 +11,7 @@ import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueri
   orderBy, 
   onSnapshot 
 } from 'firebase/firestore';
+import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueries';
 import { db } from '../firebaseConfig';
 import { 
   Meeting, 
