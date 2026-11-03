@@ -1,4 +1,5 @@
 import { 
+import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueries';
   collection, 
   doc, 
   getDoc, 
@@ -96,29 +97,21 @@ export async function deleteClient(clientId: string, currentUser: User): Promise
 
 export function subscribeToClients(
   currentUser: User,
-  callback: (clients: Client[]) => void,
+  callback: (records: Client[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'clients'), orderBy('createdAt', 'desc'));
-
-  return onSnapshot(q, (snap) => {
-    let clients = snap.docs.map(d => ({ id: d.id, ...d.data() } as Client));
-
-    if (currentUser.role !== 'admin') {
-      clients = clients.filter(c => {
-        if (c.ownerId === currentUser.id || c.createdBy === currentUser.id) return true;
-        if (c.visibility === 'workspace') return true;
-        if (c.visibility === 'shared' && isSharedWith(c.sharedWith, currentUser.id)) return true;
-        return false;
-      });
-    }
-
-    if (projectId) {
-      clients = clients.filter(c => c.projectId === projectId);
-    }
-
-    callback(clients);
-  }, (err) => {
-    console.warn('Clients subscription warning:', err);
-  });
+  return subscribeToVisibleWorkspaceRecords<Client>(
+    'clients',
+    currentUser,
+    (records) => {
+      let visible = records;
+      
+      if (projectId) visible = visible.filter(record => record.projectId === projectId);
+      callback(visible);
+    },
+    'createdAt',
+    'desc',
+    (error) => console.warn('Clients subscription warning:', error),
+    false
+  );
 }
