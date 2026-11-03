@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'android/**'
+      - 'src/firebaseConfig.ts'
       - 'tests/android/**'
       - 'src/services/crossDeviceService.ts'
       - 'src/components/DesktopUpdatesModal.tsx'
@@ -16,6 +17,7 @@ on:
       - main
     paths:
       - 'android/**'
+      - 'src/firebaseConfig.ts'
       - 'tests/android/**'
       - 'src/services/crossDeviceService.ts'
       - 'src/components/DesktopUpdatesModal.tsx'
