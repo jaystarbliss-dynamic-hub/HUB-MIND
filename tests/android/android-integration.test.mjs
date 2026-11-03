@@ -288,7 +288,7 @@ test('Android sign-in UI exposes Google authentication only', () => {
 
   assert.match(screen, /google_sign_in_button/);
   assert.match(screen, /Continue with Google/);
-  assert.doesNotMatch(screen, /Studio Email|Password|email_input|password_input|sign_in_button|viewModel\.signIn\(/);
+  assert.doesNotMatch(screen, /Studio Email|Password|email_input|password_input|testTag\("sign_in_button"\)|Text\("Sign In to Hub-Mind"/);
   assert.doesNotMatch(viewModel, /email: String|password: String|fun signIn\(/);
   assert.match(viewModel, /signInWithGoogleIdToken/);
 });
