@@ -180,13 +180,16 @@ export function subscribeToRecurringMeetingTemplates(
   currentUser: User,
   callback: (templates: RecurringMeetingTemplate[]) => void
 ): () => void {
-  const q = query(collection(db, 'recurringMeetingTemplates'), orderBy('createdAt', 'desc'));
+  // Rules grant staff access only to templates they own; do not query the whole
+  // collection and try to filter workspace visibility on the client.
+  const q = currentUser.role?.toLowerCase() === 'admin'
+    ? query(collection(db, 'recurringMeetingTemplates'))
+    : query(collection(db, 'recurringMeetingTemplates'), where('ownerId', '==', currentUser.id));
 
   return onSnapshot(q, (snap) => {
-    let templates = snap.docs.map(d => ({ id: d.id, ...d.data() } as RecurringMeetingTemplate));
-    if (currentUser.role !== 'admin') {
-      templates = templates.filter(t => t.ownerId === currentUser.id || t.visibility === 'workspace');
-    }
+    const templates = snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as RecurringMeetingTemplate))
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     callback(templates);
   }, (err) => {
     console.warn('Recurring templates subscription warning:', err);
