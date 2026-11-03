@@ -62,15 +62,15 @@ export function PublicHome() {
         // Windows and Android are separate release streams. Never assume the
         // newest release overall contains both platform installers.
         const windowsRelease = publishedReleases.find((item: any) =>
-          Array.isArray(item.assets) && item.assets.some((asset: any) => /\\.exe$/i.test(String(asset.name || '')))
+          Array.isArray(item.assets) && item.assets.some((asset: any) => /\.exe$/i.test(String(asset.name || '')))
         );
         const androidRelease = publishedReleases.find((item: any) =>
-          Array.isArray(item.assets) && item.assets.some((asset: any) => /\\.apk$/i.test(String(asset.name || '')))
+          Array.isArray(item.assets) && item.assets.some((asset: any) => /\.apk$/i.test(String(asset.name || '')))
         );
-        const windowsAsset = windowsRelease?.assets?.find((asset: any) => /\\.exe$/i.test(String(asset.name || '')));
-        const androidAsset = androidRelease?.assets?.find((asset: any) => /\\.apk$/i.test(String(asset.name || '')));
+        const windowsAsset = windowsRelease?.assets?.find((asset: any) => /\.exe$/i.test(String(asset.name || '')));
+        const androidAsset = androidRelease?.assets?.find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
         const extensionAsset = windowsRelease?.assets?.find((asset: any) =>
-          /Jess-Chrome-Extension\\.zip$/i.test(String(asset.name || ''))
+          /Jess-Chrome-Extension\.zip$/i.test(String(asset.name || ''))
         );
 
         if (active) {
