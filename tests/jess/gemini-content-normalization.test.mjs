@@ -114,7 +114,7 @@ test('both production and self-hosted Jess chat endpoints normalize content befo
   const server = fs.readFileSync(path.join(root, 'server.ts'), 'utf8');
 
   assert.match(netlifyChat, /normalizeGeminiContents\(body\.messages\)/);
-  assert.match(netlifyChat, /contents,/);
+  assert.match(netlifyChat, /contents:\s*contents as any/);
   assert.match(server, /normalizeGeminiContents\(messages\)/);
   assert.match(server, /contents:\s*geminiContents/);
   assert.doesNotMatch(server, /contents:\s*messages\s*[,}]/);
