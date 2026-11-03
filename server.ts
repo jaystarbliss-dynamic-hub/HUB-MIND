@@ -541,7 +541,7 @@ async function startServer() {
             const text = msg.parts
               .map((part) => typeof part.text === 'string' ? part.text : '')
               .filter((value) => value.trim().length > 0)
-              .join('\\n');
+              .join('\n');
             const functionCalls = msg.parts
               .map((part) => part.functionCall)
               .filter((call): call is NonNullable<typeof call> => Boolean(call));
