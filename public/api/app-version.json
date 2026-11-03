@@ -4,7 +4,7 @@
   "versionName": "2.4.0",
   "applicationId": "com.aistudio.hubmind.wzyqkp",
   "apkUrl": "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.4.0/Hub-Mind-Android-v2.4.0.apk",
-  "sha256": "31682dad0a74c89e56b063669edba5791beaec1e2c1eca70d40c4ab2d2c6b989",
+  "sha256": "01de91f33fc85714407754c8c873f45cd9ed9fc067583e910fe4aba4730e82c2",
   "releaseNotes": "Hub-Mind Android v2.4.0 is an official production-signed release.",
   "minSupportedVersionCode": 240
 }
