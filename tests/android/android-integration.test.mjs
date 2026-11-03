@@ -43,7 +43,7 @@ test('Android AuthRepositoryImpl, MainActivity, and AuthViewModel enforce real a
   const repoKt = read('android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
   assert.match(repoKt, /private val _currentUser = MutableStateFlow<User\?>\(null\)/);
   assert.match(repoKt, /private val _isSessionValid = MutableStateFlow\(false\)/);
-  assert.match(repoKt, /signInWithEmailAndPassword/);
+  assert.doesNotMatch(repoKt, /signInWithEmailAndPassword/);
   assert.match(repoKt, /GoogleAuthProvider\.getCredential/);
   assert.match(repoKt, /idToken == "mock-google-token"/);
   assert.match(repoKt, /"johnrufai242@gmail\.com"/);
@@ -52,6 +52,9 @@ test('Android AuthRepositoryImpl, MainActivity, and AuthViewModel enforce real a
   const mainActivityKt = read('android/app/src/main/java/com/example/hubmind/MainActivity.kt');
   assert.match(mainActivityKt, /ServiceLocator\.authRepository\.isSessionValid\.collectAsState\(\)/);
   assert.doesNotMatch(mainActivityKt, /var isAuthenticated by remember \{ mutableStateOf\(true\) \}/);
+
+  const authContractKt = read('android/app/src/main/java/com/example/hubmind/data/repository/Repositories.kt');
+  assert.doesNotMatch(authContractKt, /suspend fun signIn\(email: String, password: String\)/);
 
   const authVmKt = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
   assert.doesNotMatch(authVmKt, /••••••••••••/);
