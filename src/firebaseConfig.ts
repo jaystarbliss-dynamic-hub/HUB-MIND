@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import {
   initializeAuth, getAuth, browserLocalPersistence, browserSessionPersistence,
   indexedDBLocalPersistence, browserPopupRedirectResolver, Auth
