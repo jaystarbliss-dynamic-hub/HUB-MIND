@@ -21,9 +21,9 @@ test('production bundle scan exempts public Firebase metadata but continues scan
     assert.match(buildScript, new RegExp(`'${key}'`), `${key} must be treated as public client configuration`);
   }
 
-  const allowlist = buildScript.match(/const publicClientConfigKeys = new Set\\(\\[([\\s\\S]*?)\\]\\);/)?.[1] || '';
-  assert.match(buildScript, /if \\(publicClientConfigKeys\\.has\\(key\\)\\) continue;/);
+  const allowlist = buildScript.match(/const publicClientConfigKeys = new Set\(\[([\s\S]*?)\]\);/)?.[1] || '';
+  assert.match(buildScript, /if \(publicClientConfigKeys\.has\(key\)\) continue;/);
   assert.match(buildScript, /'VITE_FIREBASE_WEB_API_KEY'/);
   assert.doesNotMatch(allowlist, /VITE_FIREBASE_WEB_API_KEY/);
-  assert.match(buildScript, /AIzaSy\\[A-Za-z0-9_-\\]\\{20,\\}/);
+  assert.match(buildScript, /AIzaSy[A-Za-z0-9_-]{20,}/);
 });
