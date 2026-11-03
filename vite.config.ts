@@ -34,6 +34,10 @@ customLogger.info = (msg, options) => {
 
 export default defineConfig(() => {
   return {
+    // Firebase and Google browser configuration is supplied by /api/config at
+    // runtime. Do not expose Netlify's VITE_* build variables to Vite's client
+    // transform, where they would be inlined into static production bundles.
+    envPrefix: [],
     customLogger,
     plugins: [
       {
