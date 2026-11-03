@@ -165,6 +165,15 @@ test('Android CI fixes Metaspace and fingerprints the built APK instead of assum
   assert.match(workflow, /android-actions\/setup-android@v4/);
   assert.match(read('android/gradlew'), /MaxMetaspaceSize=1g/);
   assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.match(workflow, /release_signing_available != 'true'/);
+  assert.match(workflow, /release_signing_available == 'true'/);
+  assert.match(workflow, /publish-android-release/);
+  assert.match(workflow, /softprops\\/action-gh-release@v2/);
+  assert.match(workflow, /prerelease:\s*false/);
+  assert.match(workflow, /Hub-Mind-Android-v\$VERSION_NAME\.apk/);
+  assert.match(workflow, /actions\\/github-script@v7/);
+  assert.match(workflow, /releaseStatus:\s*'PUBLISHED'/);
+  assert.match(workflow, /APK_SHA256/);
   assert.doesNotMatch(workflow, /\.android\/debug\.keystore/);
   assert.match(workflow, /if: steps\.signing\.outputs\.available == 'true'/);
 });
