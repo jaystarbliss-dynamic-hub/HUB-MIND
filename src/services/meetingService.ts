@@ -1,4 +1,5 @@
 import { 
+import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueries';
   collection, 
   doc, 
   getDoc, 
@@ -138,34 +139,24 @@ export async function deleteMeeting(meetingId: string, currentUser: User): Promi
 
 export function subscribeToMeetings(
   currentUser: User,
-  callback: (meetings: Meeting[]) => void,
+  callback: (records: Meeting[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'meetings'), orderBy('date', 'asc'));
-
-  return onSnapshot(q, (snap) => {
-    let meetings = snap.docs.map(d => ({ id: d.id, ...d.data() } as Meeting));
-
-    if (currentUser.role !== 'admin') {
-      meetings = meetings.filter(m => {
-        if (m.ownerId === currentUser.id) return true;
-        if (m.visibility === 'workspace') return true;
-        if (m.visibility === 'shared' && isSharedWith(m.sharedWith, currentUser.id)) return true;
-        return false;
-      });
-    }
-
-    if (projectId) {
-      meetings = meetings.filter(m => m.projectId === projectId);
-    }
-
-    callback(meetings);
-  }, (err) => {
-    console.warn('Meetings subscription warning:', err);
-  });
+  return subscribeToVisibleWorkspaceRecords<Meeting>(
+    'meetings',
+    currentUser,
+    (records) => {
+      let visible = records;
+      
+      if (projectId) visible = visible.filter(record => record.projectId === projectId);
+      callback(visible);
+    },
+    'date',
+    'asc',
+    (error) => console.warn('Meetings subscription warning:', error),
+    false
+  );
 }
-
-// Recurring Meeting Templates Engine
 export async function createRecurringMeetingTemplate(
   template: Omit<RecurringMeetingTemplate, 'id' | 'createdAt' | 'updatedAt'>,
   currentUser: User
