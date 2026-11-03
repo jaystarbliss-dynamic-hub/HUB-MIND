@@ -1,4 +1,5 @@
 import { 
+import { subscribeToVisibleWorkspaceRecords } from '../lib/visibleWorkspaceQueries';
   collection, 
   doc, 
   getDoc, 
@@ -99,29 +100,21 @@ export async function deleteFollowUp(followUpId: string, currentUser: User): Pro
 
 export function subscribeToFollowUps(
   currentUser: User,
-  callback: (followUps: FollowUp[]) => void,
+  callback: (records: FollowUp[]) => void,
   projectId?: string
 ): () => void {
-  const q = query(collection(db, 'followUps'), orderBy('dueAt', 'asc'));
-
-  return onSnapshot(q, (snap) => {
-    let list = snap.docs.map(d => ({ id: d.id, ...d.data() } as FollowUp));
-
-    if (currentUser.role !== 'admin') {
-      list = list.filter(fu => {
-        if (fu.ownerId === currentUser.id) return true;
-        if (fu.visibility === 'workspace') return true;
-        if (fu.visibility === 'shared' && isSharedWith(fu.sharedWith, currentUser.id)) return true;
-        return false;
-      });
-    }
-
-    if (projectId) {
-      list = list.filter(fu => fu.relatedProjectId === projectId);
-    }
-
-    callback(list);
-  }, (err) => {
-    console.warn('Follow-ups subscription warning:', err);
-  });
+  return subscribeToVisibleWorkspaceRecords<FollowUp>(
+    'followUps',
+    currentUser,
+    (records) => {
+      let visible = records;
+      
+      if (projectId) visible = visible.filter(record => record.relatedProjectId === projectId);
+      callback(visible);
+    },
+    'dueAt',
+    'asc',
+    (error) => console.warn('Follow-ups subscription warning:', error),
+    false
+  );
 }
