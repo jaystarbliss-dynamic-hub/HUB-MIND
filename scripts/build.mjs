@@ -72,8 +72,13 @@ if (!fs.existsSync(distDir) || fs.readdirSync(distDir).length === 0) {
   throw new Error('Build output directory "dist" was not produced!');
 }
 
-// Defense-in-depth: fail the build if a Google API key or any configured
+// Defense-in-depth: fail the build if a Google API key or a sensitive
 // client-side environment value has been embedded into static artifacts.
+// Firebase project IDs are public identifiers and are intentionally present
+// as canonical runtime-validation metadata in the client bundle.
+const publicClientConfigKeys = new Set([
+  'VITE_FIREBASE_PROJECT_ID',
+]);
 const clientEnvKeys = [
   'VITE_FIREBASE_WEB_API_KEY',
   'VITE_FIREBASE_AUTH_DOMAIN',
@@ -102,6 +107,7 @@ for (const file of builtFiles) {
     throw new Error(`Google API key detected in production artifact: ${path.relative(projectRoot, file)}`);
   }
   for (const key of clientEnvKeys) {
+    if (publicClientConfigKeys.has(key)) continue;
     const value = process.env[key];
     if (value && value !== '(default)' && value.length > 4 && output.includes(value)) {
       throw new Error(`Client environment value ${key} was embedded in production artifact: ${path.relative(projectRoot, file)}`);
