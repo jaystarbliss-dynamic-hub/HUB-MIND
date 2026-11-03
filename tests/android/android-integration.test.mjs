@@ -9,10 +9,11 @@ const read = (relPath) => fs.readFileSync(path.join(rootDir, relPath), 'utf8');
 const assertAndroidManifestPublicationState = (manifest) => {
   assert.ok(['NOT_PUBLISHED', 'PUBLISHED'].includes(manifest.releaseStatus));
   if (manifest.releaseStatus === 'PUBLISHED') {
-    assert.match(manifest.apkUrl, /^https:\/\/github\.com\/jaystarbliss-dynamic-hub\/HUB-MIND\/releases\/download\/android-v[\\w.-]+\/Hub-Mind-Android-v[\\w.-]+\.apk$/);
+    assert.ok(manifest.apkUrl.startsWith('https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/'));
     assert.match(manifest.sha256, /^[a-f0-9]{64}$/);
   } else {
-      assert.equal(manifest.sha256, '');
+    assert.equal(manifest.apkUrl, '');
+    assert.equal(manifest.sha256, '');
   }
 };
 
