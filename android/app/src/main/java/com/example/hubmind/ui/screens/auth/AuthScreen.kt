@@ -10,9 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,7 +23,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,59 +44,57 @@ fun AuthScreen(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(state.user, state.isLoading) {
-        if (state.user != null && !state.isLoading) {
-            onAuthSuccess()
-        }
+        if (state.user != null && !state.isLoading) onAuthSuccess()
     }
 
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
             try {
-                val account = task.getResult(ApiException::class.java)
+                val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                    .getResult(ApiException::class.java)
                 val idToken = account?.idToken
                 if (!idToken.isNullOrBlank()) {
                     viewModel.signInWithGoogleIdToken(idToken)
                 } else {
-                    viewModel.onGoogleSignInError("Google Sign-In did not return an ID token. Verify the Android SHA-1 certificate is registered in Firebase.")
+                    viewModel.onGoogleSignInError(
+                        "Google Sign-In did not return an ID token. Verify the registered Android certificate and Firebase Google provider."
+                    )
                 }
             } catch (e: ApiException) {
-                viewModel.onGoogleSignInError("Google Sign-In failed (code ${e.statusCode}): ${e.message}")
+                viewModel.onGoogleSignInError(
+                    "Google Sign-In failed (code ${e.statusCode}): ${e.statusMessage ?: e.message ?: "Unknown Google authentication error"}."
+                )
             }
+        } else if (result.resultCode == Activity.RESULT_CANCELED) {
+            viewModel.onGoogleSignInError("Google Sign-In was cancelled. Tap Continue with Google to try again.")
         } else {
-            viewModel.onGoogleSignInError("Google Sign-In was cancelled or failed. You can also sign in with your Hub-Mind email and password.")
+            viewModel.onGoogleSignInError(
+                "Google Sign-In did not complete (activity result ${result.resultCode}). Check the Android OAuth configuration and try again."
+            )
         }
     }
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Slate950)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(24.dp),
+        modifier = modifier.fillMaxSize().background(Slate950)
+            .statusBarsPadding().navigationBarsPadding().padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 480.dp)
+            modifier = Modifier.fillMaxWidth().widthIn(max = 480.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp))
                     .background(Slate900)
                     .border(1.5.dp, Teal500.copy(alpha = 0.6f), RoundedCornerShape(16.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Hub,
+                    Icons.Filled.Hub,
                     contentDescription = "Hub-Mind Logo",
                     tint = Teal400,
                     modifier = Modifier.size(36.dp)
@@ -108,13 +103,13 @@ fun AuthScreen(
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "Hub-Mind",
+                    "Hub-Mind",
                     style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
                     color = Slate50
                 )
                 Text(
-                    text = "Personal Operating Assistant & Studio Portal",
+                    "Personal Operating Assistant & Studio Portal",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Slate400,
                     textAlign = TextAlign.Center
@@ -131,7 +126,7 @@ fun AuthScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, Rose400.copy(alpha = 0.4f))
                 ) {
                     Text(
-                        text = error,
+                        error,
                         style = MaterialTheme.typography.bodySmall,
                         color = Rose400,
                         modifier = Modifier.padding(12.dp)
@@ -139,113 +134,62 @@ fun AuthScreen(
                 }
             }
 
-            OutlinedTextField(
-                value = state.email,
-                onValueChange = viewModel::onEmailChange,
-                label = { Text("Studio Email", color = Slate400) },
-                leadingIcon = { Icon(Icons.Filled.Email, contentDescription = null, tint = Slate400) },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("email_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Teal400,
-                    unfocusedBorderColor = Slate700,
-                    focusedTextColor = Slate50,
-                    unfocusedTextColor = Slate200,
-                    focusedContainerColor = Slate900,
-                    unfocusedContainerColor = Slate900
-                )
-            )
-
-            OutlinedTextField(
-                value = state.password,
-                onValueChange = viewModel::onPasswordChange,
-                label = { Text("Password", color = Slate400) },
-                leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = Slate400) },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("password_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Teal400,
-                    unfocusedBorderColor = Slate700,
-                    focusedTextColor = Slate50,
-                    unfocusedTextColor = Slate200,
-                    focusedContainerColor = Slate900,
-                    unfocusedContainerColor = Slate900
-                )
-            )
-
-            Button(
-                onClick = viewModel::signIn,
-                enabled = !state.isLoading && state.email.isNotBlank() && state.password.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("sign_in_button"),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Teal500,
-                    contentColor = Slate950
-                )
-            ) {
-                if (state.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = Slate950,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Text("Sign In to Hub-Mind", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                }
-            }
-
             OutlinedButton(
                 onClick = {
                     scope.launch {
-                        val cfgRes = ServiceLocator.backendClient.fetchAndValidateRuntimeConfig()
-                        cfgRes.fold(
+                        ServiceLocator.backendClient.fetchAndValidateRuntimeConfig().fold(
                             onSuccess = { cfg ->
-                                val webClientId = cfg.firebaseGoogleClientId.ifBlank { cfg.googleClientId }
+                                val webClientId = cfg.firebaseGoogleClientId
                                 if (webClientId.isBlank()) {
                                     viewModel.onGoogleSignInError(
-                                        "Firebase Google Web Client ID is not configured on /api/config. Please sign in with your Hub-Mind email and password."
+                                        "Firebase Google OAuth Web Client ID is missing from /api/config."
                                     )
                                 } else {
-                                    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                                    val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                                         .requestEmail()
                                         .requestIdToken(webClientId)
                                         .build()
-                                    val googleClient = GoogleSignIn.getClient(context, gso)
-                                    googleSignInLauncher.launch(googleClient.signInIntent)
+                                    googleSignInLauncher.launch(
+                                        GoogleSignIn.getClient(context, options).signInIntent
+                                    )
                                 }
                             },
-                            onFailure = { err ->
+                            onFailure = { error ->
                                 viewModel.onGoogleSignInError(
-                                    err.message ?: "Could not load runtime configuration from Hub-Mind server."
+                                    error.message ?: "Could not load Hub-Mind Firebase configuration."
                                 )
                             }
                         )
                     }
                 },
                 enabled = !state.isLoading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("google_sign_in_button"),
+                modifier = Modifier.fillMaxWidth().height(52.dp).testTag("google_sign_in_button"),
                 shape = RoundedCornerShape(12.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Slate700),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate200)
             ) {
-                Text("Continue with Google Workspace", fontWeight = FontWeight.Medium)
+                if (state.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Teal400,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Continue with Google", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Sign in securely with your authorized Google account.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Slate400,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Private native build for Jaystarbliss Studios. Connects to canonical Firestore collections and Windows desktop device agent.",
+                "Private native build for Jaystarbliss Studios. Connects to canonical Firestore collections and Windows desktop device agent.",
                 style = MaterialTheme.typography.labelSmall,
                 color = Slate500,
                 textAlign = TextAlign.Center,

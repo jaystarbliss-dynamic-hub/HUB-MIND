@@ -78,7 +78,7 @@ async function startServer() {
 
   app.get("/api/config", (req, res) => {
     const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0197530608';
-    const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || 'dev-api-key';
+    const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '';
     const appId = process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || '1:691762959980:web:0979e7745677270cc92a49';
     const messagingSenderId = process.env.FIREBASE_MESSAGING_SENDER_ID || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '691762959980';
     const authDomain = process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`;
@@ -94,6 +94,17 @@ async function startServer() {
       clientCandidates.find(id => id.startsWith('691762959980-')) ||
       '691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com';
     const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || firebaseGoogleClientId;
+    const missingFirebaseConfig = [];
+    if (!apiKey || /^(dev|test)-api-key$|^YOUR_/i.test(apiKey)) missingFirebaseConfig.push('FIREBASE_WEB_API_KEY');
+    if (projectId !== 'gen-lang-client-0197530608') missingFirebaseConfig.push('FIREBASE_PROJECT_ID');
+    if (appId !== '1:691762959980:web:0979e7745677270cc92a49') missingFirebaseConfig.push('FIREBASE_APP_ID');
+    if (messagingSenderId !== '691762959980') missingFirebaseConfig.push('FIREBASE_MESSAGING_SENDER_ID');
+    if (firestoreDatabaseId !== 'ai-studio-hubmind-4cac2024-c6eb-4208-80cf-928714dfd430') missingFirebaseConfig.push('FIRESTORE_DATABASE_ID');
+    if (missingFirebaseConfig.length) {
+      return res.status(503).json({
+        error: `Hub-Mind Firebase runtime configuration is invalid: ${missingFirebaseConfig.join(', ')}.`
+      });
+    }
 
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json({

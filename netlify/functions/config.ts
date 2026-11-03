@@ -27,7 +27,7 @@ export default async function handler(req) {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
 
   const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || CANONICAL_PROJECT_ID;
-  const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || 'dev-api-key';
+  const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '';
   const appId = process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || CANONICAL_WEB_APP_ID;
   const messagingSenderId = process.env.FIREBASE_MESSAGING_SENDER_ID || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || CANONICAL_PROJECT_NUMBER;
   const authDomain = process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`;
@@ -38,6 +38,16 @@ export default async function handler(req) {
   // from server/workspace Google Drive & Calendar OAuth client ID.
   const firebaseGoogleClientId = resolveFirebaseGoogleClientId(process.env);
   const googleClientId = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || firebaseGoogleClientId;
+
+  const missing = [];
+  if (!apiKey || /^(dev|test)-api-key$|^YOUR_/i.test(apiKey)) missing.push('FIREBASE_WEB_API_KEY');
+  if (projectId !== CANONICAL_PROJECT_ID) missing.push('FIREBASE_PROJECT_ID');
+  if (appId !== CANONICAL_WEB_APP_ID) missing.push('FIREBASE_APP_ID');
+  if (messagingSenderId !== CANONICAL_PROJECT_NUMBER) missing.push('FIREBASE_MESSAGING_SENDER_ID');
+  if (firestoreDatabaseId !== CANONICAL_DATABASE_ID) missing.push('FIRESTORE_DATABASE_ID');
+  if (missing.length) {
+    return json({ error: `Hub-Mind Firebase runtime configuration is invalid: ${missing.join(', ')}.` }, 503);
+  }
 
   // These values are Firebase/Google browser configuration, not authorization
   // credentials. They are fetched at runtime so their values are never embedded

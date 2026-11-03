@@ -10,20 +10,26 @@ import org.junit.Test
 class HubMindArchitectureUnitTest {
 
     @Test
-    fun testAuthRepositoryAdminAndStaffAssignment() = runBlocking {
+    fun testGoogleOnlyAuthRepositoryRequiresConfiguredFirebaseBackend() = runBlocking {
         val authRepo = AuthRepositoryImpl()
-        val adminRes = authRepo.signIn("johnrufai242@gmail.com", "valid-password")
-        assertTrue(adminRes.isSuccess)
-        val adminUser = adminRes.getOrNull()
-        assertNotNull(adminUser)
-        assertEquals("admin", adminUser?.role)
-        assertEquals("active", adminUser?.status)
 
-        val secondAdminRes = authRepo.signIn("rufaijohnny@gmail.com", "valid-password")
-        assertEquals("admin", secondAdminRes.getOrNull()?.role)
+        assertFalse(authRepo.isSessionValid.first())
+        assertNull(authRepo.currentUser.first())
 
-        val staffRes = authRepo.signIn("member@jaystarbliss.com", "valid-password")
-        assertEquals("staff", staffRes.getOrNull()?.role)
+        val missingToken = authRepo.signInWithGoogle("")
+        assertTrue(missingToken.isFailure)
+
+        val noBackend = authRepo.signInWithGoogle("valid-looking-google-id-token")
+        assertTrue(noBackend.isFailure)
+        assertTrue(
+            noBackend.exceptionOrNull()?.message?.contains(
+                "Backend client is not configured",
+                ignoreCase = true
+            ) == true
+        )
+
+        assertFalse(authRepo.isSessionValid.first())
+        assertNull(authRepo.currentUser.first())
     }
 
     @Test

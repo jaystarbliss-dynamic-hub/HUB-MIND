@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'android/**'
+      - 'src/firebaseConfig.ts'
       - 'tests/android/**'
       - 'src/services/crossDeviceService.ts'
       - 'src/components/DesktopUpdatesModal.tsx'
@@ -16,6 +17,7 @@ on:
       - main
     paths:
       - 'android/**'
+      - 'src/firebaseConfig.ts'
       - 'tests/android/**'
       - 'src/services/crossDeviceService.ts'
       - 'src/components/DesktopUpdatesModal.tsx'
@@ -80,7 +82,7 @@ jobs:
         working-directory: android
         run: |
           set -euo pipefail
-          ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
+          bash ./gradlew testDebugUnitTest assembleDebug --no-daemon --stacktrace
           mkdir -p ../release
           cp app/build/outputs/apk/debug/app-debug.apk ../release/Hub-Mind-Android-v2.4.0-debug.apk
 
@@ -93,7 +95,7 @@ jobs:
           HUBMIND_RELEASE_KEY_PASSWORD: ${{ secrets.HUBMIND_RELEASE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          ./gradlew assembleRelease --no-daemon --stacktrace
+          bash ./gradlew assembleRelease --no-daemon --stacktrace
           test -s app/build/outputs/apk/release/app-release.apk
           cp app/build/outputs/apk/release/app-release.apk ../release/Hub-Mind-Android-v2.4.0-release.apk
 

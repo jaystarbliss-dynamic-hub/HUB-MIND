@@ -10,8 +10,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 data class AuthUiState(
-    val email: String = "",
-    val password: String = "",
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
     val user: User? = null
@@ -32,43 +30,15 @@ class AuthViewModel(
         }
     }
 
-    fun onEmailChange(newEmail: String) {
-        _uiState.value = _uiState.value.copy(email = newEmail, errorMessage = null)
-    }
-
-    fun onPasswordChange(newPassword: String) {
-        _uiState.value = _uiState.value.copy(password = newPassword, errorMessage = null)
-    }
-
-    fun signIn() {
-        val email = _uiState.value.email.trim()
-        val password = _uiState.value.password
-        if (email.isBlank() || password.isBlank()) {
-            _uiState.value = _uiState.value.copy(errorMessage = "Please enter both your Hub-Mind email and password.")
+    fun signInWithGoogleIdToken(idToken: String) {
+        if (idToken.isBlank()) {
+            onGoogleSignInError("Google Sign-In did not return a valid ID token. Please try again.")
             return
         }
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            val result = authRepository.signIn(email, password)
-            result.fold(
-                onSuccess = { user ->
-                    _uiState.value = _uiState.value.copy(isLoading = false, user = user)
-                },
-                onFailure = { error ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        errorMessage = error.message ?: "Authentication failed."
-                    )
-                }
-            )
-        }
-    }
 
-    fun signInWithGoogleIdToken(idToken: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-            val result = authRepository.signInWithGoogle(idToken)
-            result.fold(
+            authRepository.signInWithGoogle(idToken).fold(
                 onSuccess = { user ->
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)
                 },
@@ -83,9 +53,6 @@ class AuthViewModel(
     }
 
     fun onGoogleSignInError(message: String) {
-        _uiState.value = _uiState.value.copy(
-            isLoading = false,
-            errorMessage = message
-        )
+        _uiState.value = _uiState.value.copy(isLoading = false, errorMessage = message)
     }
 }
