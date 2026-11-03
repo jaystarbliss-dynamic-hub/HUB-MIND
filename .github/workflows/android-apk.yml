@@ -69,6 +69,7 @@ jobs:
 
       - name: Decode optional Android release keystore
         id: signing
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
           HUBMIND_RELEASE_STORE_PASSWORD: ${{ secrets.HUBMIND_RELEASE_STORE_PASSWORD }}
