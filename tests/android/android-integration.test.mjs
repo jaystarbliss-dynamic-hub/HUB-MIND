@@ -246,6 +246,7 @@ test('Android Gradle files configure com.google.gms.google-services plugin safel
   assert.match(appGradle, /alias\(libs\.plugins\.google\.services\)/);
   assert.ok(fs.existsSync(path.join(rootDir, 'android/app/google-services.json')));
   assert.match(libsToml, /googleServices\s*=\s*"4\.5\.0"/);
+  assert.match(libsToml, /firebaseBom\s*=\s*"35\.1\.0"/);
 });
 
 test('Web workspace services and pages use rule-compliant visibleWorkspaceQueries', () => {
