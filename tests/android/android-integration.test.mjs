@@ -46,6 +46,11 @@ test('HubMindBackendClient uses canonical Firebase project/database, /api/config
   assert.match(clientKt, /\/api\/config/);
   assert.match(clientKt, /\/api\/live-token/);
   assert.match(clientKt, /\/api\/chat/);
+
+  const chatRepositoryKt = read('android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
+  assert.match(chatRepositoryKt, /put\("parts", JSONArray\(\)\.put\(JSONObject\(\)\.put\("text", m\.text\)\)\)/);
+  assert.match(chatRepositoryKt, /put\("parts", JSONArray\(\)\.put\(JSONObject\(\)\.put\("text", prompt\)\)\)/);
+  assert.doesNotMatch(chatRepositoryKt, /put\("content", m\.text\)/);
   assert.match(clientKt, /apiKey\s*==\s*"dev-api-key"\s*\|\|\s*apiKey\s*==\s*"test-api-key"/);
   assert.doesNotMatch(clientKt, /AIzaSy[A-Za-z0-9_-]{33}/);
 });
