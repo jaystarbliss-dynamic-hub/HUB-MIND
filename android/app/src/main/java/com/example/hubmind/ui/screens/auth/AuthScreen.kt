@@ -69,7 +69,19 @@ fun AuthScreen(
                 viewModel.onGoogleSignInError("Google Sign-In failed (code ${e.statusCode}): ${e.message}")
             }
         } else {
-            viewModel.onGoogleSignInError("Google Sign-In was cancelled or failed. You can also sign in with your Hub-Mind email and password.")
+            val diagnostic = result.data?.let { intent ->
+                try {
+                    GoogleSignIn.getSignedInAccountFromIntent(intent).getResult(ApiException::class.java)
+                    "Google Sign-In did not complete (activity result " + result.resultCode + ")."
+                } catch (e: ApiException) {
+                    "Google Sign-In failed (status " + e.statusCode + "): " + (e.statusMessage ?: e.message ?: "Unknown Google authentication error") + "."
+                }
+            } ?: if (result.resultCode == Activity.RESULT_CANCELED) {
+                "Google Sign-In was cancelled. If you did not cancel it, verify the Android SHA-1/SHA-256 fingerprints and Web OAuth client ID in Firebase."
+            } else {
+                "Google Sign-In did not complete (activity result " + result.resultCode + "). Verify the Android OAuth client configuration."
+            }
+            viewModel.onGoogleSignInError(diagnostic + " You can also sign in with your Hub-Mind email and password.")
         }
     }
 
