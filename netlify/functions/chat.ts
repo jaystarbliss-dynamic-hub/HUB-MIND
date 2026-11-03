@@ -182,7 +182,7 @@ export default async (req: Request) => {
       try {
         const response = await ai.models.generateContent({
           model,
-          contents,
+          contents: contents as any,
           config: {
             systemInstruction: system || undefined,
             tools: tools.length ? tools : undefined,
