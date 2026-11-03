@@ -178,51 +178,6 @@ class AuthRepositoryImpl(
         )
     }
 
-    override suspend fun signIn(email: String, password: String): Result<User> {
-        val normalized = email.trim().lowercase()
-        if (normalized.isBlank() || password.isBlank()) {
-            return Result.failure(IllegalArgumentException("Email and password are required."))
-        }
-
-        // Unit-test deterministic path when no Android Context / HubMindBackendClient is attached
-        val client = backendClient
-        if (client == null) {
-            val isAdmin = normalized in BOOTSTRAP_ADMIN_EMAILS
-            val user = User(
-                id = "usr-" + UUID.randomUUID().toString().take(8),
-                email = normalized,
-                displayName = if (isAdmin) "John Rufai" else normalized.substringBefore("@").replaceFirstChar { it.uppercase() },
-                preferredName = if (isAdmin) "Johnny" else "",
-                role = if (isAdmin) "admin" else "staff",
-                status = "active",
-                lastSeenAt = Instant.now().toString()
-            )
-            _currentUser.value = user
-            _isSessionValid.value = true
-            onUserAuthenticated?.invoke(user)
-            return Result.success(user)
-        }
-
-        return runCatching {
-            val auth = client.getFirebaseAuth().getOrThrow()
-            val authResult = auth.signInWithEmailAndPassword(normalized, password).await()
-            val fbUser = authResult.user
-                ?: throw IllegalStateException("Firebase Authentication returned no user.")
-            val profile = loadAndValidateFirestoreUser(
-                uid = fbUser.uid,
-                email = fbUser.email ?: normalized,
-                displayName = fbUser.displayName ?: ""
-            ).getOrElse { err ->
-                runCatching { auth.signOut() }
-                throw err
-            }
-            _currentUser.value = profile
-            _isSessionValid.value = true
-            onUserAuthenticated?.invoke(profile)
-            profile
-        }
-    }
-
     override suspend fun signInWithGoogle(idToken: String): Result<User> {
         if (idToken.isBlank() || idToken == "mock-google-token") {
             return Result.failure(
