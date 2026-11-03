@@ -24,6 +24,20 @@ test('public landing page uses official branding and exposes workspace, install,
   assert.match(vite, /start_url:\s*'\/login'/);
 });
 
+test('public landing page resolves Windows and Android downloads independently from the canonical repository', async () => {
+  const home = await read('src/pages/PublicHome.tsx');
+  assert.match(home, /const GITHUB_REPO_SLUG = 'jaystarbliss-dynamic-hub\\/HUB-MIND'/);
+  assert.match(home, /releases\\?per_page=50/);
+  assert.match(home, /const publishedReleases =/);
+  assert.match(home, /const windowsRelease = publishedReleases\\.find/);
+  assert.match(home, /const androidRelease = publishedReleases\\.find/);
+  assert.match(home, /LAST_KNOWN_PUBLIC_RELEASES/);
+  assert.match(home, /setRelease\\(LAST_KNOWN_PUBLIC_RELEASES\\)/);
+  assert.match(home, /Download for Windows/);
+  assert.match(home, /Download Android APK/);
+  assert.doesNotMatch(home, /repos\\/Jaystarbliss-studios\\/HUB-MIND\\/releases\\/latest/);
+});
+
 test('desktop app starts at sign-in and provides the offline Jess character companion', async () => {
   const [main, orb, css] = await Promise.all([
     read('electron/main.cjs'),
