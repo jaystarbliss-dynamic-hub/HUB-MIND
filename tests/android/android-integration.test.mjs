@@ -220,6 +220,11 @@ test('Website lists CI-published Android debug prereleases as clearly labelled t
   assert.match(modal, /Download Android test APK/);
   assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
   assert.equal(manifest.apkUrl, '');
+  assert.match(workflow, /publish-android-release/);
+  assert.match(workflow, /prerelease:\s*false/);
+  assert.match(workflow, /releaseStatus:\s*'PUBLISHED'/);
+  assert.match(workflow, /APK_URL:/);
+  assert.match(modal, /setExpandedRelease\(latestStableRelease\?\.tag \|\| androidReleases\[0\]\.tag\)/);
 });
 
 test('Firebase Google Sign-In Web OAuth client ID is separated from Google Drive/Calendar OAuth client ID across backend, web, and Android', () => {
