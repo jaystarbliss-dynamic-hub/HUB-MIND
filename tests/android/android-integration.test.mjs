@@ -307,7 +307,7 @@ test('Android sign-in UI exposes Google authentication only', () => {
   assert.match(viewModel, /signInWithGoogleIdToken/);
 });
 
-test('Checked-in google-services.json matches registered Hub-Mind Android app and debug signing certificate', () => {
+test('Checked-in google-services.json registers both debug and production signing certificates for Hub-Mind', () => {
   const config = JSON.parse(read('android/app/google-services.json'));
   assert.equal(config.project_info.project_id, 'gen-lang-client-0197530608');
   assert.equal(config.project_info.project_number, '691762959980');
@@ -321,6 +321,12 @@ test('Checked-in google-services.json matches registered Hub-Mind Android app an
     item.client_id === '691762959980-lpau2iqkss2qgt8b43p3nbefgq90fkln.apps.googleusercontent.com' &&
     item.android_info.certificate_hash === 'bf5d7fccbaa809ca12b92eafc4ccba267f03cfbc'
   ));
+  assert.ok(client.oauth_client.some(item =>
+    item.client_type === 1 &&
+    item.client_id === '691762959980-vb1uadsnrgp364k6tsp12u98gr09oke5.apps.googleusercontent.com' &&
+    item.android_info.package_name === 'com.aistudio.hubmind.wzyqkp' &&
+    item.android_info.certificate_hash === 'd69f476a26978c41c21d7ee1e842c2c980644270'
+  ), 'production release certificate must be registered for Google Sign-In');
   assert.ok(client.oauth_client.some(item =>
     item.client_type === 3 &&
     item.client_id === '691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com'
