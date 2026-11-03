@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { getBearer, verifyFirebaseUser } from './lib/googleOAuth.mjs';
 import { firebaseAdminRequest, firestoreDocumentUrl, decodeFirestoreFields } from '../../src/server/firebaseAdminRest.ts';
+import { normalizeGeminiContents } from '../../src/server/geminiContents.ts';
 
 const JESS_CORE_IDENTITY = `IDENTITY AND ATTRIBUTION (always preserve this accurately):
 - Jess is the AI assistant experience designed and programmed by Jaystarbliss, founder of Jaystarbliss Studios.
@@ -118,6 +119,13 @@ export default async (req: Request) => {
     if (!body || typeof body !== 'object' || !Array.isArray(body.messages) || body.messages.length < 1 || body.messages.length > 80) {
       return responseJson({ error: 'A valid conversation with 1–80 messages is required.' }, 400);
     }
+    const contents = normalizeGeminiContents(body.messages);
+    if (!contents.length) {
+      return responseJson({
+        error: 'The conversation contains no usable text, image, or tool content. Please send your message again.',
+        code: 'INVALID_GEMINI_CONTENT',
+      }, 400);
+    }
     const key = process.env.GEMINI_API_KEY;
     if (!key) {
       const detail = 'GEMINI_API_KEY is missing from the Netlify environment.';
@@ -140,7 +148,7 @@ export default async (req: Request) => {
         })),
       }));
 
-    const latestPrompt = latestUserMessage(body.messages);
+    const latestPrompt = latestUserMessage(contents);
     const explicitSearch = body.useSearch === true || body.searchGrounding === true;
     const autoSearch = body.autoSearch !== false && shouldGroundWithSearch(latestPrompt);
     const useSearch = explicitSearch || autoSearch;
@@ -174,7 +182,7 @@ export default async (req: Request) => {
       try {
         const response = await ai.models.generateContent({
           model,
-          contents: body.messages || [],
+          contents,
           config: {
             systemInstruction: system || undefined,
             tools: tools.length ? tools : undefined,
