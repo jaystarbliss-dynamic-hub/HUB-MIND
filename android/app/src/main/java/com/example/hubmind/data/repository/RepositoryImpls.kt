@@ -842,6 +842,12 @@ class JessRepositoryImpl(
         lastExecutedToolName = null
         lastExecutionStatus = null
 
+        if (prompt.isBlank()) {
+            _liveState.value = JessLiveState.IDLE
+            emit("I didn't receive any message. Please try again.")
+            return@flow
+        }
+
         val client = backendClient
         if (client == null) {
             // Deterministic unit-test path when no backendClient is attached
@@ -871,16 +877,16 @@ class JessRepositoryImpl(
         }
 
         val messagesJson = JSONArray()
-        for (m in historyMessages) {
+        for (m in historyMessages.filter { it.text.isNotBlank() }) {
             messagesJson.put(JSONObject().apply {
                 put("role", if (m.sender == MessageSender.JESS) "model" else "user")
-                put("content", m.text)
+                put("parts", JSONArray().put(JSONObject().put("text", m.text)))
             })
         }
         if (historyMessages.none { it.text == prompt && it.sender == MessageSender.USER }) {
             messagesJson.put(JSONObject().apply {
                 put("role", "user")
-                put("content", prompt)
+                put("parts", JSONArray().put(JSONObject().put("text", prompt)))
             })
         }
 

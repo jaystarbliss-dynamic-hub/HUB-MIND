@@ -17,6 +17,7 @@ import { WebSocketServer } from "ws";
 import { firebaseAdminRequest, firestoreDocumentUrl, firebaseAuthAdminUrl, decodeFirestoreFields, encodeFirestoreFields } from "./src/server/firebaseAdminRest.ts";
 import { getFullRepositoryStatus, fetchHubMindReleases, fetchHubMindCommits, inspectCodebase } from "./src/server/githubService.ts";
 import { performGlobalWebSearch } from "./src/server/webSearchService.ts";
+import { normalizeGeminiContents } from "./src/server/geminiContents.ts";
 
 const customLogger = createLogger();
 const origLoggerError = customLogger.error.bind(customLogger);
@@ -463,6 +464,10 @@ async function startServer() {
   app.post("/api/chat", async (req, res) => {
     try {
       const { messages, tools } = req.body;
+      const geminiContents = normalizeGeminiContents(messages);
+      if (geminiContents.length === 0) {
+        return res.status(400).json({ error: "The conversation contains no usable text, image, or tool content." });
+      }
       let systemInstruction = req.body.systemInstruction;
       if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
         try {
@@ -501,7 +506,7 @@ async function startServer() {
       const geminiApiKey = process.env.GEMINI_API_KEY;
 
       // Prefer Groq / Ollama as requested
-      const hasScreenImage = Array.isArray(messages) && messages.some((message: any) => Array.isArray(message.parts) && message.parts.some((part: any) => part?.inlineData?.data));
+      const hasScreenImage = geminiContents.some((message) => message.parts.some((part) => Boolean(part.inlineData?.data)));
       const requiresGoogleGrounding = req.body.useSearch === true || req.body.searchGrounding === true || req.body.useMaps === true || req.body.mapsGrounding === true;
       // Search/map grounding must go through Gemini's grounding tools. The Groq/Ollama
       // compatibility path silently ignored these flags, which made Jess claim to search
@@ -531,30 +536,47 @@ async function startServer() {
             groqMessages.push({ role: 'system', content: fullSystemPrompt });
           }
 
-          for (const msg of messages) {
-            const role = msg.role === 'model' ? 'assistant' : msg.role;
-            if (msg.parts[0].text) {
-              groqMessages.push({ role, content: msg.parts[0].text });
-            } else if (msg.parts[0].functionResponse) {
-              groqMessages.push({
-                role: 'tool',
-                tool_call_id: msg.parts[0].functionResponse.id,
-                name: msg.parts[0].functionResponse.name,
-                content: JSON.stringify(msg.parts[0].functionResponse.response)
-              });
-            } else if (msg.parts[0].functionCall) {
+          for (const msg of geminiContents) {
+            const role = msg.role === 'model' ? 'assistant' : 'user';
+            const text = msg.parts
+              .map((part) => typeof part.text === 'string' ? part.text : '')
+              .filter((value) => value.trim().length > 0)
+              .join('\n');
+            const functionCalls = msg.parts
+              .map((part) => part.functionCall)
+              .filter((call): call is NonNullable<typeof call> => Boolean(call));
+            const functionResponses = msg.parts
+              .map((part) => part.functionResponse)
+              .filter((response): response is NonNullable<typeof response> => Boolean(response));
+
+            if (role === 'user') {
+              if (text) groqMessages.push({ role, content: text });
+              for (const functionResponse of functionResponses) {
+                groqMessages.push({
+                  role: 'tool',
+                  tool_call_id: functionResponse.id || functionResponse.name,
+                  name: functionResponse.name,
+                  content: JSON.stringify(functionResponse.response),
+                });
+              }
+              continue;
+            }
+
+            if (functionCalls.length) {
               groqMessages.push({
                 role: 'assistant',
-                content: null,
-                tool_calls: msg.parts.map((p: any) => ({
-                  id: p.functionCall.id,
+                content: text || null,
+                tool_calls: functionCalls.map((call) => ({
+                  id: call.id || call.name,
                   type: 'function',
                   function: {
-                    name: p.functionCall.name,
-                    arguments: JSON.stringify(p.functionCall.args)
-                  }
-                }))
+                    name: call.name,
+                    arguments: JSON.stringify(call.args || {}),
+                  },
+                })),
               });
+            } else if (text) {
+              groqMessages.push({ role: 'assistant', content: text });
             }
           }
 
@@ -684,7 +706,7 @@ async function startServer() {
           try {
             response = await ai.models.generateContent({
               model: modelName,
-              contents: messages,
+              contents: geminiContents as any,
               config: {
                 tools: geminiTools.length > 0 ? geminiTools : undefined,
                 toolConfig: Object.keys(toolConfig).length > 0 ? toolConfig : undefined,
