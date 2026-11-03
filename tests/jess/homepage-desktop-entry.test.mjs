@@ -26,18 +26,18 @@ test('public landing page uses official branding and exposes workspace, install,
 
 test('public landing page resolves Windows and Android downloads independently from the canonical repository', async () => {
   const home = await read('src/pages/PublicHome.tsx');
-  assert.match(home, /const GITHUB_REPO_SLUG = 'jaystarbliss-dynamic-hub\\/HUB-MIND'/);
-  assert.match(home, /releases\\?per_page=50/);
-  assert.match(home, /const publishedReleases =/);
-  assert.match(home, /const windowsRelease = publishedReleases\\.find/);
-  assert.match(home, /const androidRelease = publishedReleases\\.find/);
+  assert.ok(home.includes("const GITHUB_REPO_SLUG = 'jaystarbliss-dynamic-hub/HUB-MIND'"));
+  assert.ok(home.includes('releases?per_page=50'));
+  assert.ok(home.includes('const publishedReleases ='));
+  assert.ok(home.includes('const windowsRelease = publishedReleases.find'));
+  assert.ok(home.includes('const androidRelease = publishedReleases.find'));
   assert.ok(home.includes('/\\.exe$/i'));
   assert.ok(home.includes('/\\.apk$/i'));
-  assert.match(home, /LAST_KNOWN_PUBLIC_RELEASES/);
-  assert.match(home, /setRelease\\(LAST_KNOWN_PUBLIC_RELEASES\\)/);
-  assert.match(home, /Download for Windows/);
-  assert.match(home, /Download Android APK/);
-  assert.doesNotMatch(home, /repos\\/Jaystarbliss-studios\\/HUB-MIND\\/releases\\/latest/);
+  assert.ok(home.includes('LAST_KNOWN_PUBLIC_RELEASES'));
+  assert.ok(home.includes('setRelease(LAST_KNOWN_PUBLIC_RELEASES)'));
+  assert.ok(home.includes('Download for Windows'));
+  assert.ok(home.includes('Download Android APK'));
+  assert.ok(!home.includes('repos/Jaystarbliss-studios/HUB-MIND/releases/latest'));
 });
 
 test('desktop app starts at sign-in and provides the offline Jess character companion', async () => {
