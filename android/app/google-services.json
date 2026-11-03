@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "691762959980-vb1uadsnrgp364k6tsp12u98gr09oke5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.hubmind.wzyqkp",
+            "certificate_hash": "d69f476a26978c41c21d7ee1e842c2c980644270"
+          }
+        },
+        {
           "client_id": "691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com",
           "client_type": 3
         }

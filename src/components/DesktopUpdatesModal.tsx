@@ -86,6 +86,12 @@ export function DesktopUpdatesModal({
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
 
+  useEffect(() => {
+    if (activeTab !== 'android' || androidReleases.length === 0) return;
+    const latestStableRelease = androidReleases.find((release) => !release.isPrerelease);
+    setExpandedRelease(latestStableRelease?.tag || androidReleases[0].tag);
+  }, [activeTab, androidReleases]);
+
   const handleClose = () => {
     setInternalOpen(false);
     if (propOnClose) propOnClose();

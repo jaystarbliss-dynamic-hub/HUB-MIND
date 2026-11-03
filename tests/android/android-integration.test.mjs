@@ -6,6 +6,17 @@ import path from 'node:path';
 const rootDir = process.cwd();
 const read = (relPath) => fs.readFileSync(path.join(rootDir, relPath), 'utf8');
 
+const assertAndroidManifestPublicationState = (manifest) => {
+  assert.ok(['NOT_PUBLISHED', 'PUBLISHED'].includes(manifest.releaseStatus));
+  if (manifest.releaseStatus === 'PUBLISHED') {
+    assert.ok(manifest.apkUrl.startsWith('https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/'));
+    assert.match(manifest.sha256, /^[a-f0-9]{64}$/);
+  } else {
+    assert.equal(manifest.apkUrl, '');
+    assert.equal(manifest.sha256, '');
+  }
+};
+
 test('Android Gradle configuration enforces canonical applicationId, version 2.4.0 (240), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
@@ -151,7 +162,7 @@ test('Android updater only offers a published matching app with a valid SHA-256 
   assert.match(checker, /releaseStatus/);
   assert.match(checker, /applicationId != context\.packageName/);
   assert.match(checker, /verifyApkChecksum/);
-  assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
+  assertAndroidManifestPublicationState(manifest);
   assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
   assert.equal(manifest.versionCode, 240);
   assert.equal(manifest.versionName, '2.4.0');
@@ -164,9 +175,25 @@ test('Android CI fixes Metaspace and fingerprints the built APK instead of assum
   assert.match(workflow, /verify --print-certs/);
   assert.match(workflow, /android-actions\/setup-android@v4/);
   assert.match(read('android/gradlew'), /MaxMetaspaceSize=1g/);
-  assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.match(workflow, /Hub-Mind-Android-v\$\{VERSION_NAME\}-debug\.apk/);
+  assert.match(workflow, /release_signing_available != 'true'/);
+  assert.match(workflow, /release_signing_available == 'true'/);
+  assert.match(workflow, /publish-android-release/);
+  assert.match(workflow, /softprops\/action-gh-release@v2/);
+  assert.match(workflow, /prerelease:\s*false/);
+  assert.match(workflow, /Hub-Mind-Android-v\$VERSION_NAME\.apk/);
+  assert.match(workflow, /EXPECTED_VERSION_CODE: \$\{\{ steps\.app-version\.outputs\.version_code \}\}/);
+  assert.match(workflow, /EXPECTED_VERSION_NAME: \$\{\{ steps\.app-version\.outputs\.version_name \}\}/);
+  assert.doesNotMatch(workflow, /EXPECTED_VERSION_(?:CODE|NAME): ['"](?:240|2\.4\.0)/);
+  const dispatchMainBranchGuard = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_release == true";
+  assert.equal(workflow.split(dispatchMainBranchGuard).length - 1, 2);
+  assert.match(workflow, /actions\/github-script@v7/);
+  assert.match(workflow, /releaseStatus:\s*'PUBLISHED'/);
+  assert.match(workflow, /APK_SHA256/);
   assert.doesNotMatch(workflow, /\.android\/debug\.keystore/);
   assert.match(workflow, /if: steps\.signing\.outputs\.available == 'true'/);
+  assert.match(workflow, /hub-mind-android-v\$\{\{ steps\.app-version\.outputs\.version_name \}\}-build/);
+  assert.match(workflow, /needs\.build-android-apk\.outputs\.version_name/);
 });
 
 test('Version history has separate Windows/Android tabs and uses a viewport-safe mobile modal', () => {
@@ -204,13 +231,17 @@ test('Website lists CI-published Android debug prereleases as clearly labelled t
   assert.match(workflow, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /contents:\s*write/);
   assert.match(workflow, /prerelease:\s*true/);
-  assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.match(workflow, /Hub-Mind-Android-v\$\{\{ needs\.build-android-apk\.outputs\.version_name \}\}-debug\.apk/);
   assert.match(modal, /isPrerelease:\s*Boolean\(rel\.prerelease\)/);
   assert.match(modal, /TEST BUILD · DEBUG SIGNED/);
   assert.match(modal, /cannot update an installation signed with a different certificate/i);
   assert.match(modal, /Download Android test APK/);
-  assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
-  assert.equal(manifest.apkUrl, '');
+  assertAndroidManifestPublicationState(manifest);
+  assert.match(workflow, /publish-android-release/);
+  assert.match(workflow, /prerelease:\s*false/);
+  assert.match(workflow, /releaseStatus:\s*'PUBLISHED'/);
+  assert.match(workflow, /APK_URL:/);
+  assert.match(modal, /setExpandedRelease\(latestStableRelease\?\.tag \|\| androidReleases\[0\]\.tag\)/);
 });
 
 test('Firebase Google Sign-In Web OAuth client ID is separated from Google Drive/Calendar OAuth client ID across backend, web, and Android', () => {
@@ -293,7 +324,7 @@ test('Android sign-in UI exposes Google authentication only', () => {
   assert.match(viewModel, /signInWithGoogleIdToken/);
 });
 
-test('Checked-in google-services.json matches registered Hub-Mind Android app and debug signing certificate', () => {
+test('Checked-in google-services.json registers both debug and production signing certificates for Hub-Mind', () => {
   const config = JSON.parse(read('android/app/google-services.json'));
   assert.equal(config.project_info.project_id, 'gen-lang-client-0197530608');
   assert.equal(config.project_info.project_number, '691762959980');
@@ -307,6 +338,12 @@ test('Checked-in google-services.json matches registered Hub-Mind Android app an
     item.client_id === '691762959980-lpau2iqkss2qgt8b43p3nbefgq90fkln.apps.googleusercontent.com' &&
     item.android_info.certificate_hash === 'bf5d7fccbaa809ca12b92eafc4ccba267f03cfbc'
   ));
+  assert.ok(client.oauth_client.some(item =>
+    item.client_type === 1 &&
+    item.client_id === '691762959980-vb1uadsnrgp364k6tsp12u98gr09oke5.apps.googleusercontent.com' &&
+    item.android_info.package_name === 'com.aistudio.hubmind.wzyqkp' &&
+    item.android_info.certificate_hash === 'd69f476a26978c41c21d7ee1e842c2c980644270'
+  ), 'production release certificate must be registered for Google Sign-In');
   assert.ok(client.oauth_client.some(item =>
     item.client_type === 3 &&
     item.client_id === '691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com'
