@@ -31,8 +31,8 @@ test('public landing page resolves Windows and Android downloads independently f
   assert.match(home, /const publishedReleases =/);
   assert.match(home, /const windowsRelease = publishedReleases\\.find/);
   assert.match(home, /const androidRelease = publishedReleases\\.find/);
-  assert.match(home, /\/\\\\\\.exe\$/);
-  assert.match(home, /\/\\\\\\.apk\$/);
+  assert.ok(home.includes('/\\.exe$/i'));
+  assert.ok(home.includes('/\\.apk$/i'));
   assert.match(home, /LAST_KNOWN_PUBLIC_RELEASES/);
   assert.match(home, /setRelease\\(LAST_KNOWN_PUBLIC_RELEASES\\)/);
   assert.match(home, /Download for Windows/);
