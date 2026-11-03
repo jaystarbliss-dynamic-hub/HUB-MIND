@@ -222,8 +222,8 @@ jobs:
       - name: Publish official signed Android release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${ steps.release.outputs.tag_name }
-          name: Hub-Mind Android v${ steps.release.outputs.version_name }
+          tag_name: ${{ steps.release.outputs.tag_name }}
+          name: Hub-Mind Android v${{ steps.release.outputs.version_name }}
           body: |
             **OFFICIAL HUB-MIND ANDROID RELEASE**
 
@@ -231,25 +231,25 @@ jobs:
             Download the APK directly from the Hub-Mind website's Android downloads section.
 
             - Application ID: com.aistudio.hubmind.wzyqkp
-            - Version: ${ steps.release.outputs.version_name }
-            - Version code: ${ steps.release.outputs.version_code }
-            - SHA-256: ${ steps.release.outputs.sha256 }
+            - Version: ${{ steps.release.outputs.version_name }}
+            - Version code: ${{ steps.release.outputs.version_code }}
+            - SHA-256: ${{ steps.release.outputs.sha256 }}
 
             Keep the original release keystore and passwords backed up securely. Future updates must use the same signing identity.
           prerelease: false
           make_latest: false
           fail_on_unmatched_files: true
-          files: ${ steps.release.outputs.apk_file }
+          files: ${{ steps.release.outputs.apk_file }}
         env:
-          GITHUB_TOKEN: ${ secrets.GITHUB_TOKEN }
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update website and in-app update manifest
         uses: actions/github-script@v7
         env:
-          VERSION_NAME: ${ steps.release.outputs.version_name }
-          VERSION_CODE: ${ steps.release.outputs.version_code }
-          APK_SHA256: ${ steps.release.outputs.sha256 }
-          APK_URL: https://github.com/${ github.repository }/releases/download/${ steps.release.outputs.tag_name }/Hub-Mind-Android-v${ steps.release.outputs.version_name }.apk
+          VERSION_NAME: ${{ steps.release.outputs.version_name }}
+          VERSION_CODE: ${{ steps.release.outputs.version_code }}
+          APK_SHA256: ${{ steps.release.outputs.sha256 }}
+          APK_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.release.outputs.tag_name }}/Hub-Mind-Android-v${{ steps.release.outputs.version_name }}.apk
         with:
           script: |
             const manifest = {
