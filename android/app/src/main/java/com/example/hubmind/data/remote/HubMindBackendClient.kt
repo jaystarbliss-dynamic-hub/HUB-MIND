@@ -24,7 +24,8 @@ data class HubMindFirebaseRuntimeConfig(
     val authDomain: String,
     val storageBucket: String,
     val firestoreDatabaseId: String,
-    val googleClientId: String
+    val googleClientId: String,
+    val firebaseGoogleClientId: String
 )
 
 data class EphemeralTokenResult(
@@ -101,6 +102,7 @@ class HubMindBackendClient(
                     val storageBucket = fb.optString("storageBucket", "$projectId.firebasestorage.app").trim()
                     val firestoreDatabaseId = fb.optString("firestoreDatabaseId", CANONICAL_DATABASE_ID).trim()
                     val googleClientId = root.optString("googleClientId", "").trim()
+                    val firebaseGoogleClientId = root.optString("firebaseGoogleClientId", "").trim()
 
                     if (apiKey.isBlank() || apiKey == "dev-api-key" || apiKey == "test-api-key" || apiKey.startsWith("YOUR_")) {
                         throw IllegalStateException(
@@ -119,7 +121,8 @@ class HubMindBackendClient(
                         authDomain = authDomain,
                         storageBucket = storageBucket,
                         firestoreDatabaseId = firestoreDatabaseId.ifBlank { CANONICAL_DATABASE_ID },
-                        googleClientId = googleClientId
+                        googleClientId = googleClientId,
+                        firebaseGoogleClientId = firebaseGoogleClientId
                     )
                     cachedConfig = config
                     ensureFirebaseInitialized(config)
