@@ -706,7 +706,7 @@ async function startServer() {
           try {
             response = await ai.models.generateContent({
               model: modelName,
-              contents: geminiContents,
+              contents: geminiContents as any,
               config: {
                 tools: geminiTools.length > 0 ? geminiTools : undefined,
                 toolConfig: Object.keys(toolConfig).length > 0 ? toolConfig : undefined,
