@@ -105,3 +105,17 @@ test('splits accidental multi-field Part objects into valid oneof Parts and reje
   }]);
   assert.deepEqual(normalizeGeminiContents([{ role: 'user', parts: [{}, { text: '' }] }]), []);
 });
+
+test('both production and self-hosted Jess chat endpoints normalize content before calling Gemini', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const root = process.cwd();
+  const netlifyChat = fs.readFileSync(path.join(root, 'netlify/functions/chat.ts'), 'utf8');
+  const server = fs.readFileSync(path.join(root, 'server.ts'), 'utf8');
+
+  assert.match(netlifyChat, /normalizeGeminiContents\(body\.messages\)/);
+  assert.match(netlifyChat, /contents,/);
+  assert.match(server, /normalizeGeminiContents\(messages\)/);
+  assert.match(server, /contents:\s*geminiContents/);
+  assert.doesNotMatch(server, /contents:\s*messages\s*[,}]/);
+});
