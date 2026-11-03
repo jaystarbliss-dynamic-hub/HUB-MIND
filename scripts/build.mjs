@@ -77,7 +77,14 @@ if (!fs.existsSync(distDir) || fs.readdirSync(distDir).length === 0) {
 // Firebase project IDs are public identifiers and are intentionally present
 // as canonical runtime-validation metadata in the client bundle.
 const publicClientConfigKeys = new Set([
+  // Public Firebase/OAuth identifiers used for runtime project-integrity checks.
+  'VITE_FIREBASE_AUTH_DOMAIN',
   'VITE_FIREBASE_PROJECT_ID',
+  'VITE_FIREBASE_APP_ID',
+  'VITE_FIREBASE_MESSAGING_SENDER_ID',
+  'VITE_FIREBASE_STORAGE_BUCKET',
+  'VITE_FIRESTORE_DATABASE_ID',
+  'VITE_GOOGLE_CLIENT_ID',
 ]);
 const clientEnvKeys = [
   'VITE_FIREBASE_WEB_API_KEY',
