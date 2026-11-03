@@ -175,18 +175,25 @@ test('Android CI fixes Metaspace and fingerprints the built APK instead of assum
   assert.match(workflow, /verify --print-certs/);
   assert.match(workflow, /android-actions\/setup-android@v4/);
   assert.match(read('android/gradlew'), /MaxMetaspaceSize=1g/);
-  assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.match(workflow, /Hub-Mind-Android-v\$\{VERSION_NAME\}-debug\.apk/);
   assert.match(workflow, /release_signing_available != 'true'/);
   assert.match(workflow, /release_signing_available == 'true'/);
   assert.match(workflow, /publish-android-release/);
   assert.match(workflow, /softprops\/action-gh-release@v2/);
   assert.match(workflow, /prerelease:\s*false/);
   assert.match(workflow, /Hub-Mind-Android-v\$VERSION_NAME\.apk/);
+  assert.match(workflow, /EXPECTED_VERSION_CODE: \$\{\{ steps\.app-version\.outputs\.version_code \}\}/);
+  assert.match(workflow, /EXPECTED_VERSION_NAME: \$\{\{ steps\.app-version\.outputs\.version_name \}\}/);
+  assert.doesNotMatch(workflow, /EXPECTED_VERSION_(?:CODE|NAME): ['"](?:240|2\.4\.0)/);
+  const dispatchMainBranchGuard = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_release == true";
+  assert.equal(workflow.split(dispatchMainBranchGuard).length - 1, 2);
   assert.match(workflow, /actions\/github-script@v7/);
   assert.match(workflow, /releaseStatus:\s*'PUBLISHED'/);
   assert.match(workflow, /APK_SHA256/);
   assert.doesNotMatch(workflow, /\.android\/debug\.keystore/);
   assert.match(workflow, /if: steps\.signing\.outputs\.available == 'true'/);
+  assert.match(workflow, /hub-mind-android-v\$\{\{ steps\.app-version\.outputs\.version_name \}\}-build/);
+  assert.match(workflow, /needs\.build-android-apk\.outputs\.version_name/);
 });
 
 test('Version history has separate Windows/Android tabs and uses a viewport-safe mobile modal', () => {
@@ -224,7 +231,7 @@ test('Website lists CI-published Android debug prereleases as clearly labelled t
   assert.match(workflow, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /contents:\s*write/);
   assert.match(workflow, /prerelease:\s*true/);
-  assert.match(workflow, /Hub-Mind-Android-v2\.4\.0-debug\.apk/);
+  assert.match(workflow, /Hub-Mind-Android-v\$\{\{ needs\.build-android-apk\.outputs\.version_name \}\}-debug\.apk/);
   assert.match(modal, /isPrerelease:\s*Boolean\(rel\.prerelease\)/);
   assert.match(modal, /TEST BUILD · DEBUG SIGNED/);
   assert.match(modal, /cannot update an installation signed with a different certificate/i);
