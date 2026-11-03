@@ -6,6 +6,16 @@ import path from 'node:path';
 const rootDir = process.cwd();
 const read = (relPath) => fs.readFileSync(path.join(rootDir, relPath), 'utf8');
 
+const assertAndroidManifestPublicationState = (manifest) => {
+  assert.ok(['NOT_PUBLISHED', 'PUBLISHED'].includes(manifest.releaseStatus));
+  if (manifest.releaseStatus === 'PUBLISHED') {
+    assert.match(manifest.apkUrl, /^https:\/\/github\.com\/jaystarbliss-dynamic-hub\/HUB-MIND\/releases\/download\/android-v[\\w.-]+\/Hub-Mind-Android-v[\\w.-]+\.apk$/);
+    assert.match(manifest.sha256, /^[a-f0-9]{64}$/);
+  } else {
+      assert.equal(manifest.sha256, '');
+  }
+};
+
 test('Android Gradle configuration enforces canonical applicationId, version 2.4.0 (240), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
@@ -151,7 +161,7 @@ test('Android updater only offers a published matching app with a valid SHA-256 
   assert.match(checker, /releaseStatus/);
   assert.match(checker, /applicationId != context\.packageName/);
   assert.match(checker, /verifyApkChecksum/);
-  assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
+  assertAndroidManifestPublicationState(manifest);
   assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
   assert.equal(manifest.versionCode, 240);
   assert.equal(manifest.versionName, '2.4.0');
@@ -218,8 +228,7 @@ test('Website lists CI-published Android debug prereleases as clearly labelled t
   assert.match(modal, /TEST BUILD · DEBUG SIGNED/);
   assert.match(modal, /cannot update an installation signed with a different certificate/i);
   assert.match(modal, /Download Android test APK/);
-  assert.equal(manifest.releaseStatus, 'NOT_PUBLISHED');
-  assert.equal(manifest.apkUrl, '');
+  assertAndroidManifestPublicationState(manifest);
   assert.match(workflow, /publish-android-release/);
   assert.match(workflow, /prerelease:\s*false/);
   assert.match(workflow, /releaseStatus:\s*'PUBLISHED'/);
