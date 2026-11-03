@@ -11,6 +11,21 @@ const FEATURES = [
   { icon: LockKeyhole, title: 'Private by design', text: 'Your workspace stays invitation-based, with access controls and clear ownership.' },
 ];
 
+const GITHUB_REPO_SLUG = 'jaystarbliss-dynamic-hub/HUB-MIND';
+
+// Keep the last verified installers available if GitHub's unauthenticated API
+// is rate-limited or temporarily unavailable. A successful release lookup
+// always supersedes these URLs with the newest asset for each platform.
+const LAST_KNOWN_PUBLIC_RELEASES = {
+  url: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/desktop-v704/Hub-Mind-Setup-0.1.0-x64.exe',
+  name: 'Hub-Mind-Setup-0.1.0-x64.exe',
+  version: 'desktop-v704',
+  extensionUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/desktop-v704/Jess-Chrome-Extension.zip',
+  apkUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.4.0/Hub-Mind-Android-v2.4.0.apk',
+  apkName: 'Hub-Mind-Android-v2.4.0.apk',
+  apkVersion: '2.4.0',
+};
+
 export function PublicHome() {
   const navigate = useNavigate();
   const { user, profile, loading } = useAuth();
@@ -18,7 +33,7 @@ export function PublicHome() {
   const [inviteValue, setInviteValue] = useState('');
   const [error, setError] = useState('');
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [release, setRelease] = useState<{ url: string; name: string; version: string; extensionUrl?: string; apkUrl?: string; apkName?: string } | null>(null);
+  const [release, setRelease] = useState<typeof LAST_KNOWN_PUBLIC_RELEASES | null>(LAST_KNOWN_PUBLIC_RELEASES);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [installHelpOpen, setInstallHelpOpen] = useState(false);
 
@@ -36,24 +51,45 @@ export function PublicHome() {
   }, []);
   useEffect(() => {
     let active = true;
-    fetch('https://api.github.com/repos/Jaystarbliss-studios/HUB-MIND/releases/latest')
-      .then(response => response.ok ? response.json() : Promise.reject(new Error('No public release yet')))
-      .then(data => {
-        const asset = (data.assets || []).find((item: any) => /\.exe$/i.test(item.name));
-        const extension = (data.assets || []).find((item: any) => /Jess-Chrome-Extension\.zip$/i.test(item.name));
-        const apk = (data.assets || []).find((item: any) => /\.apk$/i.test(item.name));
-        if (active && (asset || apk)) {
+    fetch(`https://api.github.com/repos/${GITHUB_REPO_SLUG}/releases?per_page=50`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    })
+      .then(response => response.ok ? response.json() : Promise.reject(new Error('GitHub releases are temporarily unavailable')))
+      .then(rawReleases => {
+        const publishedReleases = (Array.isArray(rawReleases) ? rawReleases : [])
+          .filter((item: any) => !item.draft && !item.prerelease);
+
+        // Windows and Android are separate release streams. Never assume the
+        // newest release overall contains both platform installers.
+        const windowsRelease = publishedReleases.find((item: any) =>
+          Array.isArray(item.assets) && item.assets.some((asset: any) => /\.exe$/i.test(String(asset.name || '')))
+        );
+        const androidRelease = publishedReleases.find((item: any) =>
+          Array.isArray(item.assets) && item.assets.some((asset: any) => /\.apk$/i.test(String(asset.name || '')))
+        );
+        const windowsAsset = windowsRelease?.assets?.find((asset: any) => /\.exe$/i.test(String(asset.name || '')));
+        const androidAsset = androidRelease?.assets?.find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
+        const extensionAsset = windowsRelease?.assets?.find((asset: any) =>
+          /Jess-Chrome-Extension\.zip$/i.test(String(asset.name || ''))
+        );
+
+        if (active) {
           setRelease({
-            url: asset?.browser_download_url || '',
-            name: asset?.name || '',
-            version: data.tag_name || 'v2.4.0',
-            extensionUrl: extension?.browser_download_url,
-            apkUrl: apk?.browser_download_url,
-            apkName: apk?.name,
+            url: windowsAsset?.browser_download_url || LAST_KNOWN_PUBLIC_RELEASES.url,
+            name: windowsAsset?.name || LAST_KNOWN_PUBLIC_RELEASES.name,
+            version: windowsRelease?.tag_name || LAST_KNOWN_PUBLIC_RELEASES.version,
+            extensionUrl: extensionAsset?.browser_download_url || LAST_KNOWN_PUBLIC_RELEASES.extensionUrl,
+            apkUrl: androidAsset?.browser_download_url || LAST_KNOWN_PUBLIC_RELEASES.apkUrl,
+            apkName: androidAsset?.name || LAST_KNOWN_PUBLIC_RELEASES.apkName,
+            apkVersion: String(androidRelease?.tag_name || LAST_KNOWN_PUBLIC_RELEASES.apkVersion).replace(/^android-v/i, ''),
           });
         }
       })
-      .catch(() => { if (active) setRelease(null); });
+      .catch(() => {
+        // Preserve the last verified Windows and Android downloads during API
+        // outages/rate limits instead of incorrectly showing "coming soon".
+        if (active) setRelease(LAST_KNOWN_PUBLIC_RELEASES);
+      });
     return () => { active = false; };
   }, []);
 
@@ -175,18 +211,18 @@ export function PublicHome() {
         </section>
 
         <section id="desktop" className="hm-desktop-section hm-reveal">
-          <div className="hm-desktop-copy"><div className="hm-eyebrow">TAKE IT WITH YOU</div><h2>Your workspace.<br/><span>At home on Windows.</span></h2><p>{release ? 'The Hub-Mind Windows desktop installer is available now, with a dedicated window and a persistent Jess companion.' : 'A dedicated Windows desktop experience is being prepared. The installer will appear here as soon as a release is published and verified.'}</p>
+          <div className="hm-desktop-copy"><div className="hm-eyebrow">TAKE IT WITH YOU</div><h2>Your workspace.<br/><span>At home on Windows.</span></h2><p>{release?.url ? 'The Hub-Mind Windows desktop installer is available now, with a dedicated window and a persistent Jess companion.' : 'A dedicated Windows desktop experience is being prepared. The installer will appear here as soon as a release is published and verified.'}</p>
           <div className="hm-desktop-points"><span><Check size={15}/> Dedicated desktop window</span><span><Check size={15}/> Floating Jess companion</span><span><Check size={15}/> Controlled system integrations</span></div>
           {release?.url ? <a className="hm-button hm-button-primary hm-button-large" href={release.url}><Download size={17}/> Download for Windows <span className="hm-version">{release.version}</span></a> : <button className="hm-button hm-button-disabled hm-button-large" disabled title="A verified Windows installer has not been published yet"><Download size={17}/> Windows app coming soon</button>}
           <div className="hm-install-actions">
             {release?.apkUrl ? (
-              <a className="hm-button hm-button-outline hm-button-large" href={release.apkUrl}><Download size={16}/> Download Android APK <span className="hm-version">v2.4.0</span></a>
+              <a className="hm-button hm-button-outline hm-button-large" href={release.apkUrl}><Download size={16}/> Download Android APK <span className="hm-version">v{release.apkVersion}</span></a>
             ) : (
-              <a className="hm-button hm-button-outline hm-button-large" href="/downloads/hubmind-v2.4.0.apk"><Download size={16}/> Android Companion APK (v2.4.0)</a>
+              <a className="hm-button hm-button-outline hm-button-large" href={release?.apkUrl || LAST_KNOWN_PUBLIC_RELEASES.apkUrl}><Download size={16}/> Android Companion APK (v2.4.0)</a>
             )}
             <button className="hm-button hm-button-outline hm-button-large" onClick={installWebApp}><Download size={16}/> Install Chrome app</button>
             <button type="button" className="hm-button hm-button-outline hm-button-large" onClick={() => window.dispatchEvent(new CustomEvent('hubmind:open-updates-panel'))}><Layers size={16}/> View Version History</button>
-            <a className="hm-text-link" href={release?.extensionUrl || "https://github.com/Jaystarbliss-studios/HUB-MIND/tree/main/chrome-extension"} target="_blank" rel="noreferrer">Get Jess Chrome extension <ArrowUpRight size={15}/></a>
+            <a className="hm-text-link" href={release?.extensionUrl || "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/tree/main/chrome-extension"} target="_blank" rel="noreferrer">Get Jess Chrome extension <ArrowUpRight size={15}/></a>
           </div>
           {release?.name && <small className="hm-release-name">{release.name}</small>}
           </div>
