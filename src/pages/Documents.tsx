@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../lib/auth';
-import { collection, getDocs, addDoc, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, onSnapshot, query, where, doc as firestoreDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { DocumentInfo, Client } from '../types';
-import { isSharedWith } from '../lib/rbac';
+import { isSharedWith, hasSharedWriteAccess, isWritePermission } from '../lib/rbac';
 import { Loader2, FileText, Search, MoreVertical, Share2, ArrowUpDown } from 'lucide-react';
 import { DriveUpload } from '../components/DriveUpload';
 import { formatShortTimestampWithSeconds } from "../lib/dateUtils";
@@ -15,6 +15,8 @@ import { sanitizeClipboardHtml } from '../components/documents/clipboard/clipboa
 import { normalizeClipboardHtml } from '../components/documents/clipboard/clipboard-normalizer';
 import { deleteDocumentOffline, repairBlankDocumentsFromHistory, getLocalDocsMap, setLocalDocsMap } from '../lib/offlineSync';
 import { buildVisibleWorkspaceQueries, subscribeVisibleWorkspaceCollection, getVisibleWorkspaceDocs } from '../lib/visibleWorkspaceQueries';
+import { subscribeToSharesForUser } from '../services/sharingService';
+import { ResourceShare } from '../types';
 
 const LEGACY_DEMO_DOCUMENT_PREFIXES = ['doc-seed-'];
 
@@ -46,8 +48,11 @@ function localDocsForOfflineDisplay(): DocumentInfo[] {
         category: 'other',
         type: 'internal' as const,
         version: 1,
-        ownerId: '',
-        createdBy: '',
+        ownerId: doc.ownerId || '',
+        createdBy: doc.createdBy || '',
+        visibility: doc.visibility as any,
+        sharedWith: doc.sharedWith,
+        permissions: doc.permissions,
         createdAt: doc.updatedAt || new Date().toISOString(),
       } as DocumentInfo));
     return sortDocuments(items);
@@ -80,6 +85,7 @@ export function Documents() {
   const [docToDelete, setDocToDelete] = useState<string | null>(null);
   const [openPropertiesId, setOpenPropertiesId] = useState<string | null>(null);
   const [sharingDoc, setSharingDoc] = useState<DocumentInfo | null>(null);
+  const [sharedDocPermissions, setSharedDocPermissions] = useState<Record<string, 'read' | 'write'>>({});
 
   const handleUpdateTitle = async (id: string) => {
     if (!editTitle.trim()) return;
@@ -195,6 +201,8 @@ export function Documents() {
         lastSavedAt: now,
         lastEditedAt: now,
         lastModifiedBy: profile.preferredName || profile.displayName || profile.name || `@${profile.username}`,
+        ownerId: profile.id,
+        createdBy: profile.id,
         synced: true,
       };
       setLocalDocsMap(localDocs);
@@ -211,23 +219,67 @@ export function Documents() {
 
     let cancelled = false;
     let unsubDocs: (() => void) | null = null;
+    let unsubShares: (() => void) | null = null;
     let unsubClients: (() => void) | null = null;
     let unsubProjects: (() => void) | null = null;
 
     setLoading(true);
     setDataError(null);
 
+    let latestSnapshotDocs: any[] = [];
+    let extraSharedDocsMap = new Map<string, DocumentInfo>();
+    let latestSharePermissions: Record<string, 'read' | 'write'> = {};
+
     const applyCloudDocuments = (snapshotDocs: any[]) => {
-      let cloudDocs = snapshotDocs
-        .map(d => ({ id: d.id, ...(d.data() as any) } as DocumentInfo))
-        .filter(d => !isLegacyDemoDocumentId(d.id));
+      latestSnapshotDocs = snapshotDocs;
+      const mergedMap = new Map<string, DocumentInfo>();
+
+      snapshotDocs.forEach(d => {
+        const data = d.data() as any;
+        const sharePerm = latestSharePermissions[d.id];
+        mergedMap.set(d.id, {
+          id: d.id,
+          ...data,
+          ...(sharePerm
+            ? {
+                permissions: { ...(data.permissions || {}), [profile.id]: sharePerm },
+              }
+            : {}),
+        } as DocumentInfo);
+      });
+
+      extraSharedDocsMap.forEach((docItem, docId) => {
+        const existing = mergedMap.get(docId);
+        const sharePerm = latestSharePermissions[docId];
+        if (!existing) {
+          mergedMap.set(docId, {
+            ...docItem,
+            ...(sharePerm
+              ? {
+                  permissions: { ...((docItem as any).permissions || {}), [profile.id]: sharePerm },
+                }
+              : {}),
+          });
+        } else if (sharePerm) {
+          mergedMap.set(docId, {
+            ...existing,
+            permissions: { ...((existing as any).permissions || {}), [profile.id]: sharePerm },
+          });
+        }
+      });
+
+      let cloudDocs = Array.from(mergedMap.values()).filter(d => !isLegacyDemoDocumentId(d.id));
 
       cloudDocs = sortDocuments(cloudDocs);
 
       if (profile.role === 'staff') {
         cloudDocs = cloudDocs.filter(d =>
-          !d.ownerId || d.ownerId === profile.id || d.createdBy === profile.id ||
-          d.visibility === 'workspace' || (d.visibility === 'shared' && isSharedWith(d.sharedWith, profile.id))
+          !d.ownerId ||
+          d.ownerId === profile.id ||
+          d.createdBy === profile.id ||
+          d.visibility === 'workspace' ||
+          isSharedWith(d.sharedWith, profile.id, (d as any).permissions) ||
+          Boolean(latestSharePermissions[d.id])
         );
       }
 
@@ -249,8 +301,8 @@ export function Documents() {
           category: 'other',
           type: 'internal' as const,
           version: 1,
-          ownerId: profile.id,
-          createdBy: profile.id,
+          ownerId: localDoc.ownerId || profile.id,
+          createdBy: localDoc.createdBy || profile.id,
           createdAt: localDoc.updatedAt || new Date().toISOString(),
         } as DocumentInfo));
 
@@ -270,6 +322,11 @@ export function Documents() {
           updatedAt: d.updatedAt || d.lastEditedAt || d.createdAt || new Date().toISOString(),
           lastSavedAt: d.lastSavedAt || d.updatedAt || d.createdAt || new Date().toISOString(),
           lastEditedAt: d.lastEditedAt || d.updatedAt || d.createdAt,
+          ownerId: d.ownerId,
+          createdBy: d.createdBy,
+          visibility: d.visibility,
+          sharedWith: d.sharedWith,
+          permissions: (d as any).permissions,
           synced: true,
         };
       });
@@ -317,6 +374,45 @@ export function Documents() {
       );
 
       unsubDocs = () => unsubs.forEach(unsub => unsub());
+
+      unsubShares = subscribeToSharesForUser(
+        profile.id,
+        async (shares: ResourceShare[]) => {
+          if (cancelled) return;
+          const docShares = shares.filter(s => s.resourceType === 'document');
+          const nextPermMap: Record<string, 'read' | 'write'> = {};
+          docShares.forEach(s => {
+            nextPermMap[s.resourceId] = isWritePermission(s.permission) ? 'write' : 'read';
+          });
+          latestSharePermissions = nextPermMap;
+          setSharedDocPermissions(nextPermMap);
+
+          const nextExtra = new Map<string, DocumentInfo>();
+          await Promise.all(
+            docShares.map(async s => {
+              try {
+                const snap = await getDoc(firestoreDoc(db, 'documents', s.resourceId));
+                if (snap.exists()) {
+                  const data = snap.data() as any;
+                  nextExtra.set(snap.id, {
+                    id: snap.id,
+                    ...data,
+                    permissions: {
+                      ...(data.permissions || {}),
+                      [profile.id]: isWritePermission(s.permission) ? 'write' : 'read',
+                    },
+                  } as DocumentInfo);
+                }
+              } catch {
+                // Ignore if document was deleted
+              }
+            })
+          );
+          if (cancelled) return;
+          extraSharedDocsMap = nextExtra;
+          applyCloudDocuments(latestSnapshotDocs);
+        }
+      );
     } catch (error) {
       console.error('[HubMind] Failed to subscribe to documents:', error);
       setDataError(error instanceof Error ? error.message : 'Could not connect to Firebase.');
@@ -350,6 +446,7 @@ export function Documents() {
     return () => {
       cancelled = true;
       unsubDocs?.();
+      unsubShares?.();
       unsubClients?.();
       unsubProjects?.();
     };
@@ -593,7 +690,9 @@ export function Documents() {
                 const previousDoc = filteredDocs[index - 1];
                 const previousCreatedByAdmin = previousDoc && (previousDoc.createdBy === profile?.id || previousDoc.ownerId === profile?.id);
                 const showAdminGroupHeading = profile?.role === 'admin' && (index === 0 || createdByAdmin !== previousCreatedByAdmin);
-                const canManage = profile?.role === 'admin' || doc.ownerId === profile?.id || doc.createdBy === profile?.id;
+                const isOwnDoc = doc.ownerId === profile?.id || doc.createdBy === profile?.id;
+                const sharedPerm = profile ? (sharedDocPermissions[doc.id] || (hasSharedWriteAccess(doc.sharedWith, profile.id, (doc as any).permissions) ? 'write' : isSharedWith(doc.sharedWith, profile.id, (doc as any).permissions) ? 'read' : undefined)) : undefined;
+                const canManage = profile?.role === 'admin' || isOwnDoc || sharedPerm === 'write';
                 return (
                   <React.Fragment key={doc.id}>
                   {showAdminGroupHeading && <div className="px-4 py-3 bg-slate-900/70 border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-400">{createdByAdmin ? 'Documents created by admin' : 'Documents created by workspace users'}</div>}
@@ -602,13 +701,32 @@ export function Documents() {
                       <button onClick={() => openDocument(doc)} className="flex items-center gap-3 min-w-0 flex-1 text-left">
                         <div className="w-11 h-12 sm:w-12 sm:h-14 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-accent shrink-0 shadow-sm"><FileText className="w-5 h-5 sm:w-6 sm:h-6" /></div>
                         <div className="min-w-0 flex-1">
-                          <h3 className="font-semibold text-slate-100 truncate">{doc.title || 'Untitled Document'}</h3>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <h3 className="font-semibold text-slate-100 truncate">{doc.title || 'Untitled Document'}</h3>
+                            {!isOwnDoc && sharedPerm && (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                                sharedPerm === 'write'
+                                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-slate-800 text-slate-300 border border-slate-700'
+                              }`}>
+                                {sharedPerm === 'write' ? 'Shared • Can Edit' : 'Shared • View Only'}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-slate-500 truncate mt-1">{doc.category || 'Document'}{client ? ' • ' + client.name : ''}</p>
                           <p className="text-[11px] text-slate-500 mt-1">Edited {formatShortTimestampWithSeconds(doc.lastEditedAt || doc.updatedAt || doc.createdAt)}</p>
                         </div>
                       </button>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button onClick={() => openDocument(doc)} className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-accent text-slate-950 text-xs font-bold hover:bg-accent-hover transition-colors">{(doc.type === 'internal' || !!(doc as any).content || !!(doc as any).contentJson || !!(doc as any).templateId || !(doc as any).fileRef) ? 'Open' : 'View'}</button>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => setSharingDoc(doc)}
+                          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                          title="Share document with a teammate"
+                        >
+                          <Share2 className="w-3.5 h-3.5 text-teal-400" />
+                          Share
+                        </button>
+                        <button onClick={() => openDocument(doc)} className="hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-accent text-slate-950 text-xs font-bold hover:bg-accent-hover transition-colors">{(doc.type === 'internal' || !!(doc as any).content || !!(doc as any).contentJson || !!(doc as any).templateId || !(doc as any).fileRef) ? (sharedPerm === 'write' || isOwnDoc ? 'Open & Edit' : 'Open') : 'View'}</button>
                         <button onClick={() => setOpenPropertiesId(openPropertiesId === doc.id ? null : doc.id)} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors" aria-label="Document options"><MoreVertical className="w-5 h-5" /></button>
                       </div>
                     </div>
@@ -624,9 +742,9 @@ export function Documents() {
                           <button onClick={() => { setOpenPropertiesId(null); openDocument(doc); }} className="px-3 py-2 rounded-lg bg-accent text-slate-950 text-xs font-bold cursor-pointer">Open</button>
                           <button onClick={() => { setOpenPropertiesId(null); setSharingDoc(doc); }} className="px-3 py-2 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-teal-500/30">
                             <Share2 className="w-3.5 h-3.5" />
-                            Share with Friends
+                            Share with Teammate
                           </button>
-                          {canManage && <><button onClick={() => { setOpenPropertiesId(null); setEditingDocId(doc.id); setEditTitle(doc.title); }} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs cursor-pointer">Rename</button><button onClick={() => handleDuplicateDoc(doc)} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs cursor-pointer">Duplicate</button><button onClick={() => { setOpenPropertiesId(null); confirmDelete(doc.id); }} className="px-3 py-2 rounded-lg bg-rose-950/40 text-rose-300 text-xs cursor-pointer">Delete</button></>}
+                          {canManage && <><button onClick={() => { setOpenPropertiesId(null); setEditingDocId(doc.id); setEditTitle(doc.title); }} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs cursor-pointer">Rename</button><button onClick={() => handleDuplicateDoc(doc)} className="px-3 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs cursor-pointer">Duplicate</button>{(profile?.role === 'admin' || isOwnDoc) && <button onClick={() => { setOpenPropertiesId(null); confirmDelete(doc.id); }} className="px-3 py-2 rounded-lg bg-rose-950/40 text-rose-300 text-xs cursor-pointer">Delete</button>}</>}
                         </div>
                       </div>
                     )}

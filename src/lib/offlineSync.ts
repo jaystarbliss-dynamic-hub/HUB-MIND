@@ -13,6 +13,11 @@ export interface OfflineDocRecord {
   pageSize?: 'a4' | 'letter' | 'legal';
   orientation?: 'portrait' | 'landscape';
   marginOption?: 'normal' | 'narrow' | 'moderate' | 'wide' | 'custom';
+  ownerId?: string;
+  createdBy?: string;
+  visibility?: string;
+  sharedWith?: any;
+  permissions?: Record<string, any>;
   synced: boolean;
   allowEmpty?: boolean;
   allowUntitled?: boolean;
@@ -388,11 +393,16 @@ export async function getDocumentWithOfflineFallback(docId: string): Promise<any
         pageSize: cloudData.pageSize,
         orientation: cloudData.orientation,
         marginOption: cloudData.marginOption,
+        ownerId: cloudData.ownerId,
+        createdBy: cloudData.createdBy,
+        visibility: cloudData.visibility,
+        sharedWith: cloudData.sharedWith,
+        permissions: cloudData.permissions,
         synced: true,
       };
       localDocs[docId] = syncedRecord;
       setLocalDocsMap(localDocs);
-      return { ...cloudData, content: recoveredHtml, contentJson: recoveredJson, title: syncedRecord.title };
+      return { id: docId, ...cloudData, content: recoveredHtml, contentJson: recoveredJson, title: syncedRecord.title };
     } catch (err) {
       // Do NOT fall back to a cached document while online. A stale cache is
       // exactly what caused deleted documents to appear to come back.

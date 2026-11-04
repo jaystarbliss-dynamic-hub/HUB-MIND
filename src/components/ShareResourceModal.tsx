@@ -1,26 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { ResourceType, SharePermission, ResourceShare, UserConnection, User } from '../types';
-import { 
-  shareResourceWithUser, 
-  revokeResourceShare, 
-  subscribeToResourceShares 
+import {
+  shareResourceWithUser,
+  revokeResourceShare,
+  updateResourceSharePermission,
+  subscribeToResourceShares,
+  getResourceActionUrl,
 } from '../services/sharingService';
 import { subscribeToMyConnections } from '../services/connectionService';
 import { subscribeToUsers } from '../services/userService';
-import { 
-  Share2, 
-  AtSign, 
-  Copy, 
-  Check, 
-  Trash2, 
-  Shield, 
-  Link as LinkIcon, 
-  ExternalLink,
+import {
+  Share2,
+  AtSign,
+  Check,
+  Trash2,
+  Link as LinkIcon,
   MessageCircle,
   AlertCircle,
   Loader2,
-  Users
 } from 'lucide-react';
 
 interface ShareResourceModalProps {
@@ -43,15 +41,21 @@ export function ShareResourceModal({
   const [connections, setConnections] = useState<UserConnection[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [targetUsername, setTargetUsername] = useState('');
-  const [permission, setPermission] = useState<SharePermission>('read');
+  const [permission, setPermission] = useState<SharePermission>('write');
+  const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const [updatingShareId, setUpdatingShareId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !resourceId) return;
-    const unsubShares = profile?.id ? subscribeToResourceShares(resourceId, profile.id, setShares) : () => {};
+    setError('');
+    setSuccess('');
+    const unsubShares = profile?.id
+      ? subscribeToResourceShares(resourceId, profile.id, setShares)
+      : () => {};
     const unsubUsers = subscribeToUsers(setAllUsers);
     let unsubConn: (() => void) | undefined;
     if (profile) {
@@ -69,8 +73,7 @@ export function ShareResourceModal({
 
   const getDirectLink = () => {
     const origin = window.location.origin;
-    let path = `/${resourceType}s/${resourceId}`;
-    if (resourceType === 'followup') path = `/follow-ups/${resourceId}`;
+    const path = getResourceActionUrl(resourceType, resourceId);
     return `${origin}${path}`;
   };
 
@@ -82,8 +85,8 @@ export function ShareResourceModal({
 
   const handleShareToWhatsApp = () => {
     const link = getDirectLink();
-    const text = `*${resourceTitle}*\nReview here in Hub-Mind: ${link}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    const text = `*${resourceTitle}*\nOpen in Hub-Mind: ${link}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleShare = async (e: React.FormEvent) => {
@@ -100,13 +103,19 @@ export function ShareResourceModal({
         resourceId,
         resourceTitle,
         ownerId: profile.id,
-        ownerName: profile.displayName || profile.name || `@${profile.username}`,
+        ownerName: profile.preferredName || profile.displayName || profile.name || `@${profile.username}`,
         recipientUsernameOrId: targetUsername.trim(),
         permission,
+        message: note.trim() || undefined,
       });
 
-      setSuccess(`Shared with @${targetUsername.replace(/^@/, '')} (${permission === 'write' ? 'Can Edit' : 'Read Only'})`);
+      setSuccess(
+        `Shared with @${targetUsername.replace(/^@/, '')} (${
+          permission === 'write' ? 'Can Edit' : 'Read Only'
+        }) — delivered to their Inbox.`
+      );
       setTargetUsername('');
+      setNote('');
     } catch (err: any) {
       setError(err.message || 'Failed to share resource.');
     } finally {
@@ -114,15 +123,34 @@ export function ShareResourceModal({
     }
   };
 
+  const handlePermissionChange = async (share: ResourceShare, nextPermission: SharePermission) => {
+    setUpdatingShareId(share.id);
+    setError('');
+    try {
+      await updateResourceSharePermission(share.id, nextPermission);
+      setSuccess(
+        `Updated @${share.recipientUsername} to ${nextPermission === 'write' ? 'Can Edit' : 'Read Only'}.`
+      );
+    } catch (err: any) {
+      setError(err.message || 'Could not update collaborator access.');
+    } finally {
+      setUpdatingShareId(null);
+    }
+  };
+
   const handleRevoke = async (shareId: string) => {
+    setError('');
     try {
       await revokeResourceShare(shareId);
     } catch (err: any) {
-      alert(`Error revoking share: ${err.message}`);
+      setError(`Error revoking share: ${err.message}`);
     }
   };
 
   const acceptedConnections = connections.filter(c => c.status === 'accepted');
+  const directorySuggestions = allUsers
+    .filter(u => u.id !== profile?.id && u.status === 'active')
+    .slice(0, 6);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -132,11 +160,9 @@ export function ShareResourceModal({
           <div className="space-y-1">
             <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
               <Share2 className="w-5 h-5 text-teal-400" />
-              Share Resource
+              Share {resourceType.charAt(0).toUpperCase() + resourceType.slice(1)}
             </h2>
-            <p className="text-xs text-slate-400 line-clamp-1">
-              {resourceTitle}
-            </p>
+            <p className="text-xs text-slate-400 line-clamp-1">{resourceTitle}</p>
           </div>
           <button
             onClick={onClose}
@@ -163,7 +189,7 @@ export function ShareResourceModal({
         {/* Share Form */}
         <form onSubmit={handleShare} className="space-y-3">
           <label className="block text-xs font-semibold text-slate-300">
-            Share with Colleague (@username)
+            Share with Colleague (@username or email)
           </label>
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
@@ -171,19 +197,20 @@ export function ShareResourceModal({
               <input
                 type="text"
                 value={targetUsername}
-                onChange={(e) => setTargetUsername(e.target.value)}
-                placeholder="Username (e.g. john or mary)..."
+                onChange={e => setTargetUsername(e.target.value)}
+                placeholder="Username or email..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-teal-500/60"
               />
             </div>
 
             <select
               value={permission}
-              onChange={(e) => setPermission(e.target.value as SharePermission)}
-              className="bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-teal-500/60 cursor-pointer"
+              onChange={e => setPermission(e.target.value as SharePermission)}
+              className="bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-teal-500/60 cursor-pointer font-semibold"
+              aria-label="Share permission level"
             >
-              <option value="read">Read Only</option>
               <option value="write">Can Edit</option>
+              <option value="read">Read Only</option>
             </select>
 
             <button
@@ -191,29 +218,56 @@ export function ShareResourceModal({
               disabled={loading || !targetUsername.trim()}
               className="flex items-center justify-center gap-1.5 bg-teal-500 hover:bg-teal-400 text-slate-950 font-semibold px-4 py-2 rounded-xl text-xs transition-all shadow-md shadow-teal-500/10 disabled:opacity-50 cursor-pointer shrink-0"
             >
-              {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}
+              {loading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Share2 className="w-3.5 h-3.5" />
+              )}
               Share
             </button>
           </div>
 
-          {/* Quick connection chips */}
-          {acceptedConnections.length > 0 && (
+          <input
+            type="text"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Optional message for their Inbox (e.g. Please review and edit section 2)..."
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-teal-500/60"
+          />
+
+          {/* Quick connection / directory chips */}
+          {(acceptedConnections.length > 0 || directorySuggestions.length > 0) && (
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
               <span className="text-[11px] text-slate-500">Quick select:</span>
-              {acceptedConnections.slice(0, 5).map(c => {
-                const isRec = c.recipientId === profile?.id;
-                const u = isRec ? c.requesterUsername : c.recipientUsername;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setTargetUsername(u)}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-teal-400 font-mono text-[10px] transition-colors cursor-pointer border border-slate-700/60"
-                  >
-                    @{u}
-                  </button>
-                );
-              })}
+              {acceptedConnections.length > 0
+                ? acceptedConnections.slice(0, 6).map(c => {
+                    const isRec = c.recipientId === profile?.id;
+                    const u = isRec ? c.requesterUsername : c.recipientUsername;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setTargetUsername(u)}
+                        className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-teal-400 font-mono text-[10px] transition-colors cursor-pointer border border-slate-700/60"
+                      >
+                        @{u}
+                      </button>
+                    );
+                  })
+                : directorySuggestions.map(u => {
+                    const handle = u.username || u.email;
+                    if (!handle) return null;
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => setTargetUsername(u.username || u.email)}
+                        className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-teal-400 font-mono text-[10px] transition-colors cursor-pointer border border-slate-700/60"
+                      >
+                        {u.username ? `@${u.username}` : u.displayName || u.name || u.email}
+                      </button>
+                    );
+                  })}
             </div>
           )}
         </form>
@@ -223,24 +277,40 @@ export function ShareResourceModal({
           <div className="text-xs font-semibold text-slate-300">Active Collaborators</div>
           <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
             {shares.map(s => (
-              <div key={s.id} className="p-2.5 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-teal-500/20 text-teal-300 font-bold flex items-center justify-center text-[10px]">
-                    {s.recipientUsername.charAt(0).toUpperCase()}
+              <div
+                key={s.id}
+                className="p-2.5 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between gap-2 text-xs"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-6 h-6 rounded-full bg-teal-500/20 text-teal-300 font-bold flex items-center justify-center text-[10px] shrink-0">
+                    {(s.recipientUsername || '?').charAt(0).toUpperCase()}
                   </div>
-                  <span className="font-mono text-teal-400 font-medium">@{s.recipientUsername}</span>
-                  <span className="text-[11px] text-slate-500">
-                    ({s.permission === 'write' ? 'Can Edit' : 'Read Only'})
+                  <span className="font-mono text-teal-400 font-medium truncate">
+                    @{s.recipientUsername}
                   </span>
                 </div>
 
-                <button
-                  onClick={() => handleRevoke(s.id)}
-                  className="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-950/50 transition-colors cursor-pointer"
-                  title="Revoke access"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <select
+                    value={s.permission === 'write' ? 'write' : 'read'}
+                    disabled={updatingShareId === s.id}
+                    onChange={e =>
+                      void handlePermissionChange(s, e.target.value as SharePermission)
+                    }
+                    className="bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:border-teal-500/60 cursor-pointer"
+                  >
+                    <option value="write">Can Edit</option>
+                    <option value="read">Read Only</option>
+                  </select>
+
+                  <button
+                    onClick={() => void handleRevoke(s.id)}
+                    className="text-rose-400 hover:text-rose-300 p-1 rounded hover:bg-rose-950/50 transition-colors cursor-pointer"
+                    title="Revoke access"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
             {shares.length === 0 && (
@@ -257,8 +327,12 @@ export function ShareResourceModal({
             onClick={handleCopyLink}
             className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-2 px-3 rounded-xl text-xs transition-all border border-slate-700 cursor-pointer"
           >
-            {copiedLink ? <Check className="w-3.5 h-3.5 text-teal-400" /> : <LinkIcon className="w-3.5 h-3.5" />}
-            {copiedLink ? 'Link Copied!' : 'Copy Direct Link'}
+            {copiedLink ? (
+              <Check className="w-3.5 h-3.5 text-teal-400" />
+            ) : (
+              <LinkIcon className="w-3.5 h-3.5" />
+            )}
+            {copiedLink ? 'Link Copied!' : 'Copy Workspace Link'}
           </button>
 
           <button

@@ -52,8 +52,8 @@ export function buildVisibleWorkspaceQueries(
     query(colRef, where('createdBy', '==', uid), ...extra, ...limitConstraint),
     query(colRef, where('visibility', '==', 'workspace'), ...extra, ...limitConstraint),
     query(colRef, where('sharedWith', 'array-contains', uid), ...extra, ...limitConstraint),
-    query(colRef, where(`sharedWith.${uid}`, 'in', ['read', 'write']), ...extra, ...limitConstraint),
-    query(colRef, where(`permissions.${uid}`, 'in', ['read', 'write']), ...extra, ...limitConstraint),
+    query(colRef, where(`sharedWith.${uid}`, 'in', ['read', 'write', 'view', 'edit']), ...extra, ...limitConstraint),
+    query(colRef, where(`permissions.${uid}`, 'in', ['read', 'write', 'view', 'edit']), ...extra, ...limitConstraint),
   ];
 
   if (includeAssignedTo) {

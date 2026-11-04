@@ -26,8 +26,23 @@ export function resolveFirebaseGoogleClientId(env = process.env) {
 export default async function handler(req) {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
 
+  let apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '';
+  if (!apiKey) {
+    try {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const gsPath = path.resolve(process.cwd(), 'android/app/google-services.json');
+      if (fs.existsSync(gsPath)) {
+        const gsJson = JSON.parse(fs.readFileSync(gsPath, 'utf8'));
+        const foundKey = gsJson.client?.[0]?.api_key?.[0]?.current_key;
+        if (foundKey && typeof foundKey === 'string' && foundKey.startsWith('AIzaSy')) {
+          apiKey = foundKey;
+        }
+      }
+    } catch {}
+  }
+
   const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || CANONICAL_PROJECT_ID;
-  const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '';
   const appId = process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || CANONICAL_WEB_APP_ID;
   const messagingSenderId = process.env.FIREBASE_MESSAGING_SENDER_ID || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || CANONICAL_PROJECT_NUMBER;
   const authDomain = process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`;

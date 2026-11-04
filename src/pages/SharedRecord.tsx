@@ -1,18 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { collection, doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import DOMPurify from 'dompurify';
 import { db } from '../firebaseConfig';
-import { Loader2, ArrowLeft, Calendar, CheckSquare, FileText, Users, Folder, Clock3, ExternalLink } from 'lucide-react';
+import { Loader2, ArrowLeft, Calendar, CheckSquare, FileText, Users, Folder, Clock3, ExternalLink, Edit3 } from 'lucide-react';
+import { getResourceActionUrl, ResourceType } from '../services/sharingService';
 
 const config: Record<string, { collection: string; label: string; icon: React.ReactNode; back: string }> = {
-  task: { collection: 'tasks', label: 'Task', icon: <CheckSquare className="w-5 h-5" />, back: '/tasks' },
-  meeting: { collection: 'meetings', label: 'Meeting', icon: <Calendar className="w-5 h-5" />, back: '/calendar' },
-  document: { collection: 'documents', label: 'Document', icon: <FileText className="w-5 h-5" />, back: '/documents' },
-  client: { collection: 'clients', label: 'Client', icon: <Users className="w-5 h-5" />, back: '/clients' },
-  project: { collection: 'projects', label: 'Project', icon: <Folder className="w-5 h-5" />, back: '/projects' },
-  followup: { collection: 'followUps', label: 'Follow-up', icon: <Clock3 className="w-5 h-5" />, back: '/follow-ups' },
-  report: { collection: 'sharedRecords', label: 'Daily Report', icon: <FileText className="w-5 h-5" />, back: '/' },
+  task: { collection: 'tasks', label: 'Task', icon: <CheckSquare className="w-5 h-5" />, back: '/workspace/tasks' },
+  meeting: { collection: 'meetings', label: 'Meeting', icon: <Calendar className="w-5 h-5" />, back: '/workspace/calendar' },
+  document: { collection: 'documents', label: 'Document', icon: <FileText className="w-5 h-5" />, back: '/workspace/documents' },
+  client: { collection: 'clients', label: 'Client', icon: <Users className="w-5 h-5" />, back: '/workspace/clients' },
+  project: { collection: 'projects', label: 'Project', icon: <Folder className="w-5 h-5" />, back: '/workspace/projects' },
+  followup: { collection: 'followUps', label: 'Follow-up', icon: <Clock3 className="w-5 h-5" />, back: '/workspace/follow-ups' },
+  report: { collection: 'sharedRecords', label: 'Daily Report', icon: <FileText className="w-5 h-5" />, back: '/workspace' },
 };
 
 function valueText(value: unknown): string {
@@ -49,6 +50,12 @@ export function SharedRecord() {
     return data.title || data.name || (meta.label === 'Meeting' ? 'Meeting' : meta.label);
   }, [data, meta]);
 
+  const workspaceActionUrl = useMemo(() => {
+    if (!type || !id) return '/workspace';
+    if (type === 'report') return '/workspace';
+    return getResourceActionUrl(type as ResourceType, decodeURIComponent(id));
+  }, [type, id]);
+
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="w-7 h-7 animate-spin text-accent" /></div>;
   if (!meta || !data) return (
     <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-5">
@@ -56,7 +63,7 @@ export function SharedRecord() {
         <div className="mx-auto mb-4 w-12 h-12 rounded-2xl bg-red-500/10 text-red-400 flex items-center justify-center"><ExternalLink className="w-5 h-5" /></div>
         <h1 className="text-xl font-bold">This Hub-Mind item is unavailable</h1>
         <p className="text-sm text-slate-500 mt-2">It may have been deleted, moved, or you may not have permission to view it.</p>
-        <Link to="/" className="inline-flex mt-5 px-4 py-2 rounded-xl bg-accent text-slate-950 font-bold">Open Hub-Mind</Link>
+        <Link to="/workspace" className="inline-flex mt-5 px-4 py-2 rounded-xl bg-accent text-slate-950 font-bold">Open Hub-Mind</Link>
       </div>
     </div>
   );
@@ -79,20 +86,38 @@ export function SharedRecord() {
     <div className="min-h-screen bg-slate-950 text-slate-200">
       <header className="sticky top-0 z-20 border-b border-slate-800/90 bg-slate-950/95 backdrop-blur">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          <Link to={meta.back} className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors"><ArrowLeft className="w-4 h-4" /> Back</Link>
-          <span className="text-[10px] sm:text-xs uppercase tracking-[0.18em] font-bold text-accent">Hub-Mind • Shared {meta.label}</span>
+          <Link to={meta.back} className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors"><ArrowLeft className="w-4 h-4" /> Back to {meta.label}s</Link>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline text-[10px] sm:text-xs uppercase tracking-[0.18em] font-bold text-accent">Hub-Mind • Shared {meta.label}</span>
+            <Link
+              to={workspaceActionUrl}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-slate-950 text-xs font-bold transition-colors"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              {type === 'document' ? 'Open & Edit in Document Editor' : `Open in Workspace`}
+            </Link>
+          </div>
         </div>
       </header>
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-7 sm:py-10">
         <section className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
           <div className="p-5 sm:p-7 border-b border-slate-800">
-            <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-accent/10 text-accent flex items-center justify-center shrink-0">{meta.icon}</div>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs uppercase tracking-wider font-bold text-slate-500">{meta.label}</p>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-1 break-words">{title}</h1>
-                <p className="text-xs text-slate-500 mt-2">Read-only shared view • ID {data.id}</p>
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+              <div className="flex items-start gap-3 min-w-0 flex-1">
+                <div className="w-11 h-11 rounded-2xl bg-accent/10 text-accent flex items-center justify-center shrink-0">{meta.icon}</div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs uppercase tracking-wider font-bold text-slate-500">{meta.label}</p>
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-1 break-words">{title}</h1>
+                  <p className="text-xs text-slate-500 mt-2">Shared preview • ID {data.id}</p>
+                </div>
               </div>
+              <Link
+                to={workspaceActionUrl}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-slate-950 text-xs font-bold transition-colors shrink-0"
+              >
+                <Edit3 className="w-4 h-4" />
+                {type === 'document' ? 'Open & Edit Document' : `Open ${meta.label} in Workspace`}
+              </Link>
             </div>
           </div>
           {fields.length > 0 && <div className="p-5 sm:p-7 grid grid-cols-1 sm:grid-cols-2 gap-3">{fields.map(([label, value]) => <div key={label} className="rounded-xl bg-slate-950/60 border border-slate-800 p-3.5"><p className="text-[11px] uppercase tracking-wider text-slate-500 font-bold">{label}</p><p className="text-sm text-slate-200 mt-1 break-words">{valueText(value)}</p></div>)}</div>}
@@ -102,9 +127,15 @@ export function SharedRecord() {
               ? <div className="prose prose-invert max-w-none bg-white text-slate-900 rounded-xl p-5 sm:p-8 overflow-x-auto" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(String(body)) }} />
               : <div className="whitespace-pre-wrap text-sm leading-7 text-slate-300 bg-slate-950/60 border border-slate-800 rounded-xl p-4 sm:p-5">{String(body)}</div>}
           </div>}
-          <div className="px-5 sm:px-7 py-4 bg-slate-950/40 border-t border-slate-800 text-xs text-slate-500">This view is read-only. Changes must be made from the authenticated Hub-Mind workspace.</div>
+          <div className="px-5 sm:px-7 py-4 bg-slate-950/40 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+            <span>Want to edit or collaborate on this {meta.label.toLowerCase()}?</span>
+            <Link to={workspaceActionUrl} className="text-accent hover:underline font-bold inline-flex items-center gap-1">
+              {type === 'document' ? 'Open in Document Editor' : 'Open in Workspace'} <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          </div>
         </section>
       </main>
     </div>
   );
 }
+

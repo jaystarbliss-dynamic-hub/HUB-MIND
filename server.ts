@@ -78,8 +78,24 @@ async function startServer() {
   });
 
   app.get("/api/config", (req, res) => {
+    let resolvedApiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '';
+    if (!resolvedApiKey) {
+      try {
+        const gsPath = path.join(process.cwd(), 'android/app/google-services.json');
+        if (fs.existsSync(gsPath)) {
+          const gsJson = JSON.parse(fs.readFileSync(gsPath, 'utf8'));
+          const foundKey = gsJson.client?.[0]?.api_key?.[0]?.current_key;
+          if (foundKey && typeof foundKey === 'string' && foundKey.startsWith('AIzaSy')) {
+            resolvedApiKey = foundKey;
+          }
+        }
+      } catch (err) {
+        console.warn('[Server] Could not read fallback key from google-services.json:', err);
+      }
+    }
+
     const projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0197530608';
-    const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_API_KEY || '';
+    const apiKey = resolvedApiKey;
     const appId = process.env.FIREBASE_APP_ID || process.env.VITE_FIREBASE_APP_ID || '1:691762959980:web:0979e7745677270cc92a49';
     const messagingSenderId = process.env.FIREBASE_MESSAGING_SENDER_ID || process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '691762959980';
     const authDomain = process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`;
@@ -148,7 +164,16 @@ async function startServer() {
     const authHeader = String(req.headers.authorization || '');
     const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
     if (!idToken || idToken.length > 10000) { const e: any = new Error('Sign in again to manage users.'); e.status = 401; throw e; }
-    const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
+    let apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.VITE_FIREBASE_WEB_API_KEY || process.env.FIREBASE_API_KEY;
+    if (!apiKey) {
+      try {
+        const gsPath = path.join(process.cwd(), 'android/app/google-services.json');
+        if (fs.existsSync(gsPath)) {
+          const gsJson = JSON.parse(fs.readFileSync(gsPath, 'utf8'));
+          apiKey = gsJson.client?.[0]?.api_key?.[0]?.current_key;
+        }
+      } catch {}
+    }
     if (!apiKey) { const e: any = new Error('Firebase token verification is not configured on this server.'); e.status = 503; throw e; }
     const response = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(apiKey), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }), signal: AbortSignal.timeout(10000),

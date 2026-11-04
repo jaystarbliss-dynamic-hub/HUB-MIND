@@ -18,7 +18,13 @@ test('sharedReadData supports sharedWith array, sharedWith map, and permissions 
 test('users conversations rule covers nested messages subcollections for Android and Web sync',()=>{
   assert.match(rules,/match \/conversations\/\{document=\*\*\} \{ allow read, write: if self\(userId\) \|\| admin\(\); \}/);
 });
-test('tasks rule allows assignedTo member to get, list, and update assigned tasks',()=>{
-  assert.match(rules,/match \/tasks\/\{id\} \{ allow get: if member\(\) && \(readable\(\) \|\| resource\.data\.assignedTo == request\.auth\.uid\);/);
-  assert.match(rules,/allow update: if member\(\) && \(writable\(\) \|\| resource\.data\.assignedTo == request\.auth\.uid\);/);
+test('tasks rule allows assignedTo member and shared recipients to get, list, and update tasks',()=>{
+  assert.match(rules,/match \/tasks\/\{id\} \{ allow get: if member\(\) && \(readable\(\) \|\| \('assignedTo' in resource\.data && resource\.data\.assignedTo == request\.auth\.uid\) \|\| hasShareDocRead\('task', id\)\);/);
+  assert.match(rules,/allow update: if member\(\) && \(writable\(\) \|\| \('assignedTo' in resource\.data && resource\.data\.assignedTo == request\.auth\.uid\) \|\| hasShareDocWrite\('task', id\)\);/);
+});
+test('documents and document versions allow shared editors via sharedWriteData and hasShareDocWrite',()=>{
+  assert.match(rules,/match \/documents\/\{id\} \{ allow get: if member\(\) && \(readable\(\) \|\| hasShareDocRead\('document', id\)\);/);
+  assert.match(rules,/allow update: if member\(\) && \(writable\(\) \|\| hasShareDocWrite\('document', id\)\);/);
+  assert.match(rules,/sharedWriteData\(get\(\/databases\/\$\(database\)\/documents\/documents\/\$\(documentId\)\)\.data\)/);
+  assert.match(rules,/hasShareDocWrite\('document', documentId\)/);
 });

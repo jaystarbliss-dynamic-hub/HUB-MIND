@@ -139,16 +139,22 @@ export async function initializeFirebaseConfig(config?: RuntimeConfig) {
       headers: { Accept: 'application/json' },
     });
 
-    if (response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    if (response.ok && contentType.includes('application/json')) {
       const data = await response.json() as RuntimeConfig;
       if (data?.firebase?.projectId && data?.firebase?.apiKey) {
         createFirebaseInstances(data);
         return;
       }
+    } else if (!response.ok && contentType.includes('application/json')) {
+      const errorJson = await response.json().catch(() => null);
+      if (errorJson?.error) {
+        throw new Error(String(errorJson.error));
+      }
     }
   } catch (err) {
     console.error('[HubMind] Unable to load Firebase runtime configuration:', err);
-    throw new Error('Hub-Mind could not load production Firebase configuration from /api/config. Check the Netlify function and Firebase environment variables.');
+    throw err instanceof Error ? err : new Error('Hub-Mind could not load production Firebase configuration from /api/config.');
   }
 
   throw new Error('Hub-Mind /api/config returned an invalid or incomplete Firebase configuration. Refusing to initialize a placeholder project.');

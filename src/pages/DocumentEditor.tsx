@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { shareHubMindItem, copyShareUrl } from '../lib/shareLinks';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebaseConfig';
+import { ShareResourceModal } from '../components/ShareResourceModal';
+import { subscribeToUserResourceShare } from '../services/sharingService';
+import { hasSharedWriteAccess, isWritePermission } from '../lib/rbac';
+import { ResourceShare } from '../types';
 import { useEditor } from '@tiptap/react';
 import { StarterKit } from '@tiptap/starter-kit';
 import { Highlight } from '@tiptap/extension-highlight';
@@ -41,7 +46,7 @@ import { JessDocumentBridge } from '../components/JessDocumentBridge';
 import { formatExactTimestamp, formatTimeWithSeconds } from '../lib/dateUtils';
 import { 
   ArrowLeft, Loader2, Save, Sun, Moon, 
-  FileText, Eye,
+  FileText, Eye, Share2,
   Clock, Cloud, History, WifiOff, RefreshCw,
   Bold, Italic, List, Undo, Redo,
   SplitSquareVertical, AlertTriangle, Table as TableIcon
@@ -128,21 +133,59 @@ function resolveInitialEditorContent(data: any): any {
 function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId: string }) {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const requestedSharedView = new URLSearchParams(window.location.search).get('shared') === '1';
-  const sharedPermission = initialDoc?.permissions?.[profile?.id]
-    || (initialDoc?.sharedWith && !Array.isArray(initialDoc.sharedWith) ? initialDoc.sharedWith[profile?.id] : undefined);
-  const canEditDocument = Boolean(profile && (
-    profile.role === 'admin'
-    || initialDoc?.ownerId === profile.id
-    || initialDoc?.createdBy === profile.id
-    || initialDoc?.visibility === 'workspace'
-    || (initialDoc?.visibility === 'shared' && sharedPermission === 'write')
-  ));
-  // Read permission opens the document in the same page-like surface, but with
-  // editing and autosave disabled. Explicit shared links remain read-only.
-  const isSharedView = requestedSharedView || !canEditDocument;
-
   const [docMeta, setDocMeta] = useState<any>(initialDoc);
+  const [activeShare, setActiveShare] = useState<ResourceShare | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+
+  // Keep document permissions/metadata synced in real time and also listen to /shares
+  useEffect(() => {
+    if (!docId) return;
+    const unsubDoc = onSnapshot(
+      doc(db, 'documents', docId),
+      snap => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        setDocMeta((prev: any) => ({
+          ...(prev || {}),
+          ownerId: data.ownerId ?? prev?.ownerId,
+          createdBy: data.createdBy ?? prev?.createdBy,
+          visibility: data.visibility ?? prev?.visibility,
+          sharedWith: data.sharedWith ?? prev?.sharedWith,
+          permissions: data.permissions ?? prev?.permissions,
+          title: prev?.title || data.title || 'Untitled Document',
+        }));
+      },
+      () => {}
+    );
+    return () => unsubDoc();
+  }, [docId]);
+
+  useEffect(() => {
+    if (!docId || !profile?.id) return;
+    return subscribeToUserResourceShare('document', docId, profile.id, setActiveShare);
+  }, [docId, profile?.id]);
+
+  const isOwnerOrCreator = Boolean(
+    profile &&
+      (!docMeta?.ownerId && !docMeta?.createdBy
+        ? true
+        : docMeta?.ownerId === profile.id || docMeta?.createdBy === profile.id)
+  );
+
+  const canEditDocument = Boolean(
+    profile &&
+      (profile.role === 'admin' ||
+        isOwnerOrCreator ||
+        docMeta?.visibility === 'workspace' ||
+        hasSharedWriteAccess(docMeta?.sharedWith, profile.id, docMeta?.permissions) ||
+        isWritePermission(activeShare?.permission))
+  );
+
+  // Only restrict editing when the user truly lacks write permission.
+  const isSharedView = !canEditDocument;
+  const isSharedViewRef = useRef<boolean>(isSharedView);
+  isSharedViewRef.current = isSharedView;
+
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
@@ -446,7 +489,7 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
     contentJsonOverride?: any,
     forceSave = false
   ) => {
-    if (!docId || isSharedView) return;
+    if (!docId || isSharedViewRef.current) return;
 
     // Guard 1: Must wait for Firestore to load the document before saving
     if (!isDocumentLoadedRef.current && !forceSave) {
@@ -530,7 +573,7 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
 
     if (titleTimeoutRef.current) clearTimeout(titleTimeoutRef.current);
     titleTimeoutRef.current = setTimeout(async () => {
-      if (!docId || isSharedView) return;
+      if (!docId || isSharedViewRef.current) return;
       const finalTitle = newTitle.trim() || 'Untitled Document';
       try {
         setSaveStatus('saving');
@@ -554,7 +597,7 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
   };
 
   const handleManualSave = async () => {
-    if (!editor || !docId || isSharedView) return;
+    if (!editor || !docId || isSharedViewRef.current) return;
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -731,13 +774,27 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
               <FileText className="w-4 h-4" />
             </div>
             <div className="min-w-0 flex-1">
-              <input 
-                type="text" 
-                value={docMeta?.title || ''}
-                onChange={(e) => handleTitleChange(e.target.value)}
-                className="bg-transparent text-slate-100 font-bold focus:outline-none focus:border-b border-accent px-1 truncate w-full max-w-[125px] xs:max-w-[170px] sm:max-w-[240px] md:max-w-sm text-xs sm:text-sm md:text-base"
-                placeholder="Untitled Document"
-              />
+              <div className="flex items-center gap-2">
+                <input 
+                  type="text" 
+                  value={docMeta?.title || ''}
+                  disabled={isSharedView}
+                  onChange={(e) => handleTitleChange(e.target.value)}
+                  className="bg-transparent text-slate-100 font-bold focus:outline-none focus:border-b border-accent px-1 truncate w-full max-w-[125px] xs:max-w-[170px] sm:max-w-[240px] md:max-w-sm text-xs sm:text-sm md:text-base disabled:opacity-80"
+                  placeholder="Untitled Document"
+                />
+                {!isOwnerOrCreator && (
+                  <span
+                    className={`hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0 border ${
+                      canEditDocument
+                        ? 'bg-teal-500/15 text-teal-300 border-teal-500/30'
+                        : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                    }`}
+                  >
+                    {canEditDocument ? 'Can Edit' : 'Read Only'}
+                  </span>
+                )}
+              </div>
 
               {/* Exact Timestamps & Connectivity Indicator */}
               <div className="hidden sm:flex items-center gap-2 text-[10px] sm:text-[11px] text-slate-400 px-1 mt-0.5 select-none">
@@ -766,16 +823,11 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
         {/* Quick Top Right Action Buttons */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           <button
-            onClick={async () => {
-              if (!docId) return;
-              const path = `/documents/${docId}?shared=1`;
-              try { await copyShareUrl(path); } catch {}
-              shareHubMindItem(path, docMeta?.title || 'Document');
-            }}
-            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent border border-accent/20 transition-colors text-xs flex items-center gap-1.5 font-semibold"
-            title="Share this document"
+            onClick={() => setIsShareModalOpen(true)}
+            className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent border border-accent/20 transition-colors text-xs flex items-center gap-1.5 font-semibold cursor-pointer"
+            title="Share this document with colleagues"
           >
-            <span className="text-sm">↗</span><span className="hidden sm:inline">Share</span>
+            <Share2 className="w-3.5 h-3.5" /><span className="hidden sm:inline">Share</span>
           </button>
           {/* Offline / Online Sync Status Pill */}
           {!isOnline ? (
@@ -1088,6 +1140,17 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
           onSaveDocument={(content) => saveDocument(content, new Date().toISOString(), undefined, undefined, true)}
           isOpen={isCoWriterOpen}
           onToggleOpen={() => setIsCoWriterOpen(!isCoWriterOpen)}
+        />
+      )}
+
+      {/* Share Resource Modal */}
+      {docId && (
+        <ShareResourceModal
+          isOpen={isShareModalOpen}
+          onClose={() => setIsShareModalOpen(false)}
+          resourceType="document"
+          resourceId={docId}
+          resourceTitle={docMeta?.title || 'Untitled Document'}
         />
       )}
     </div>

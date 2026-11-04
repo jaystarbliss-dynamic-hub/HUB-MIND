@@ -9,7 +9,7 @@ import {
   limit, 
   onSnapshot 
 } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { db, auth } from '../firebaseConfig';
 import { Notification, ResourceType } from '../types';
 
 export async function createNotification(params: {
@@ -22,11 +22,15 @@ export async function createNotification(params: {
   actionUrl?: string;
 }): Promise<Notification> {
   const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const notif: Notification = {
+  const senderUid = auth.currentUser?.uid || params.userId;
+  const notif: Notification & { body?: string; createdBy?: string; senderId?: string } = {
     id,
     userId: params.userId,
+    createdBy: senderUid,
+    senderId: senderUid,
     type: params.type,
-    title: params.title,
+    title: params.title || 'Workspace Update',
+    body: params.message,
     message: params.message,
     resourceType: params.resourceType,
     resourceId: params.resourceId,

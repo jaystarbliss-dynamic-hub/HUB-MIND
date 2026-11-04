@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
-import { User, DocumentInfo, Task, Project } from '../types';
-import { sendDirectInformation } from '../services/sharingService';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { User, DocumentInfo, Task, Project, SharePermission } from '../types';
+import { sendDirectInformation, getResourceActionUrl } from '../services/sharingService';
+import { getVisibleWorkspaceDocs } from '../lib/visibleWorkspaceQueries';
 import { 
   Send, 
   FileText, 
@@ -16,7 +15,6 @@ import {
   AlertCircle, 
   Loader2, 
   X,
-  Share2,
   AtSign
 } from 'lucide-react';
 
@@ -36,12 +34,13 @@ export function SendDirectInfoModal({
   const { profile } = useAuth();
   const [activeType, setActiveType] = useState<InfoType>('document');
   
-  // Resources owned by user
+  // Resources visible/owned by user
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   
   const [selectedResourceId, setSelectedResourceId] = useState('');
+  const [permission, setPermission] = useState<SharePermission>('write');
   const [noteTitle, setNoteTitle] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [customMessage, setCustomMessage] = useState('');
@@ -57,6 +56,7 @@ export function SendDirectInfoModal({
     setError('');
     setSuccess('');
     setSelectedResourceId('');
+    setPermission('write');
     setNoteTitle('');
     setNoteContent('');
     setCustomMessage('');
@@ -64,25 +64,14 @@ export function SendDirectInfoModal({
     const fetchMyResources = async () => {
       setLoadingResources(true);
       try {
-        const [docsSnap, tasksSnap, projSnap] = await Promise.all([
-          getDocs(collection(db, 'documents')),
-          getDocs(collection(db, 'tasks')),
-          getDocs(collection(db, 'projects')),
+        const [myDocs, myTasks, myProjects] = await Promise.all([
+          getVisibleWorkspaceDocs<DocumentInfo>('documents', profile),
+          getVisibleWorkspaceDocs<Task>('tasks', profile, { includeAssignedTo: true }),
+          getVisibleWorkspaceDocs<Project>('projects', profile),
         ]);
 
-        const myDocs = docsSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as DocumentInfo))
-          .filter(d => !d.ownerId || d.ownerId === profile.id || profile.role === 'admin');
         setDocuments(myDocs);
-
-        const myTasks = tasksSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Task))
-          .filter(t => !t.createdBy || t.createdBy === profile.id || profile.role === 'admin');
         setTasks(myTasks);
-
-        const myProjects = projSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as Project))
-          .filter(p => !p.ownerId || p.ownerId === profile.id || profile.role === 'admin');
         setProjects(myProjects);
       } catch (err: any) {
         console.warn('Error fetching resources for sharing:', err);
@@ -91,7 +80,7 @@ export function SendDirectInfoModal({
       }
     };
 
-    fetchMyResources();
+    void fetchMyResources();
   }, [isOpen, profile]);
 
   if (!isOpen || !targetUser || !profile) return null;
@@ -150,20 +139,20 @@ export function SendDirectInfoModal({
     try {
       await sendDirectInformation({
         senderId: profile.id,
-        senderName: profile.displayName || profile.name || `@${profile.username}`,
+        senderName: profile.preferredName || profile.displayName || profile.name || `@${profile.username}`,
         recipientId: targetUser.id,
         recipientName: targetName,
         type: activeType,
         title,
         content,
         resourceId: resourceId || undefined,
-        permission: 'write',
+        permission,
       });
 
-      setSuccess(`Successfully sent ${activeType} "${title}" to ${targetName}!`);
+      setSuccess(`Sent ${activeType} "${title}" to ${targetName}'s Inbox (${permission === 'write' ? 'Can Edit' : 'Read Only'})!`);
       setTimeout(() => {
         onClose();
-      }, 1600);
+      }, 1400);
     } catch (err: any) {
       setError(err?.message || 'Failed to send information.');
     } finally {
@@ -173,14 +162,18 @@ export function SendDirectInfoModal({
 
   const handleShareToWhatsApp = () => {
     const { title, content, resourceId } = getPayloadDetails();
-    const link = resourceId ? `${window.location.origin}/${activeType}s/${resourceId}` : window.location.origin;
+    const link = resourceId
+      ? `${window.location.origin}${getResourceActionUrl(activeType, resourceId)}`
+      : window.location.origin;
     const text = `Hi ${targetName},\n\nHere is the *${activeType.toUpperCase()}* information from Hub-Mind:\n\n*${title}*\n${content ? `${content}\n\n` : ''}Access in Hub-Mind: ${link}\n\n— Sent by ${profile.displayName || profile.name || `@${profile.username}`}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleCopySummary = () => {
     const { title, content, resourceId } = getPayloadDetails();
-    const link = resourceId ? `${window.location.origin}/${activeType}s/${resourceId}` : window.location.origin;
+    const link = resourceId
+      ? `${window.location.origin}${getResourceActionUrl(activeType, resourceId)}`
+      : window.location.origin;
     const summary = `*${title}* (${activeType})\n${content ? `${content}\n` : ''}Link: ${link}`;
     navigator.clipboard.writeText(summary);
     setCopiedText(true);
@@ -378,6 +371,22 @@ export function SendDirectInfoModal({
                   </div>
                 )}
 
+                {activeType !== 'note' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Access Permission
+                    </label>
+                    <select
+                      value={permission}
+                      onChange={(e) => setPermission(e.target.value as SharePermission)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-teal-500/60 cursor-pointer font-semibold"
+                    >
+                      <option value="write">Can Edit (Full Read & Write Access)</option>
+                      <option value="read">Read Only (View Only)</option>
+                    </select>
+                  </div>
+                )}
+
                 {activeType === 'note' && (
                   <div className="space-y-3">
                     <div>
@@ -417,7 +426,7 @@ export function SendDirectInfoModal({
                       rows={2}
                       value={customMessage}
                       onChange={(e) => setCustomMessage(e.target.value)}
-                      placeholder="Add a message for your colleague..."
+                      placeholder="Add a message for your colleague's Inbox..."
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-teal-500/60 resize-none"
                     />
                   </div>
