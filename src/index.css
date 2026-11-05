@@ -552,6 +552,54 @@ ul[data-type="taskList"] li > div {
   @apply flex-1;
 }
 
+/* Multi-page table row flow & view-only intra-paragraph page spacers */
+.ProseMirror .tableWrapper {
+  width: 100%;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+.ProseMirror table[data-hm-multipage="true"],
+.ProseMirror table[data-hm-multipage="true"] > thead,
+.ProseMirror table[data-hm-multipage="true"] > tbody {
+  display: block;
+  width: 100%;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.ProseMirror table[data-hm-multipage="true"] > colgroup {
+  display: none !important;
+}
+
+.ProseMirror table[data-hm-multipage="true"] tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.ProseMirror table[data-hm-multipage="true"] tr + tr:not([data-hm-page-start]) {
+  margin-top: -1px;
+}
+
+.ProseMirror .hm-page-flow-spacer {
+  display: block;
+  width: 100%;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  line-height: 0 !important;
+  font-size: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
 /* Print Stylesheet for Letterheads and Clean Documents */
 @media print {
   @page {

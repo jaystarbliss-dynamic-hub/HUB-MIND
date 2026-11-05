@@ -57,7 +57,9 @@ import {
   MarginOption, 
   PaperThemeOption, 
   computePageLayout, 
-  calculateExactPageCount
+  calculateExactPageCount,
+  stripTransientPaginationArtifacts,
+  stripSoftPageBreaksFromJson,
 } from '../lib/paginationEngine';
 import {
   PageBreak,
@@ -108,20 +110,21 @@ function resolveInitialEditorContent(data: any): any {
   if (!data) return '<p></p>';
   const { html, json } = extractDocumentBody(data);
   if (json && !isContentEffectivelyEmpty(null, json)) {
-    return json;
+    return stripSoftPageBreaksFromJson(json);
   }
   if (html && !isContentEffectivelyEmpty(html, null)) {
     const decoded = parseStoredDocumentContent(html);
     if (typeof decoded === 'string') {
+      const stripped = stripTransientPaginationArtifacts(decoded);
       const cleanHtml = normalizeClipboardHtml(
-        sanitizeClipboardHtml(decoded),
+        sanitizeClipboardHtml(stripped),
         'stored-doc'
       );
-      return cleanHtml || decoded;
+      return cleanHtml || stripped;
     }
-    return decoded;
+    return stripSoftPageBreaksFromJson(decoded);
   }
-  if (json) return json;
+  if (json) return stripSoftPageBreaksFromJson(json);
   return '<p></p>';
 }
 
@@ -329,7 +332,7 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
         return;
       }
 
-      const htmlContent = editor.getHTML();
+      const htmlContent = stripTransientPaginationArtifacts(editor.getHTML());
       const textContent = editor.getText();
       const wordCount = editor.storage.characterCount?.words() ?? 0;
       const textLength = textContent.trim().length;
@@ -339,18 +342,14 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
         return;
       }
 
-      // Recalculate page count
-      const updatedPageCount = calculateExactPageCount(htmlContent, pageSize, orientation, marginOption);
-      if (updatedPageCount !== pageCount) {
-        setPageCount(updatedPageCount);
-      }
       setEditorHtml(htmlContent);
       setEditorText(textContent);
       latestContentRef.current = htmlContent;
 
       // 4. STRICT USER DIRECTIVE: Never save a blank page of 0 words automatically!
       // If current document has 0 words or is empty, DO NOT schedule autosave!
-      if (wordCount === 0 || textLength === 0 || isContentEffectivelyEmpty(htmlContent, editor.getJSON())) {
+      const jsonContent = stripSoftPageBreaksFromJson(editor.getJSON());
+      if (wordCount === 0 || textLength === 0 || isContentEffectivelyEmpty(htmlContent, jsonContent)) {
         console.log('[DocumentEditor] Autosave suppressed: blank document or 0 words.');
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
@@ -368,7 +367,6 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
       setLastEditedTime(editNow);
       setSaveStatus('saving');
       latestEditTimestampRef.current = editNow;
-      const jsonContent = editor.getJSON();
 
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -1018,11 +1016,13 @@ function DocumentEditorWorkspace({ initialDoc, docId }: { initialDoc: any; docId
         <div className="flex-1 overflow-y-auto p-2 sm:p-6 md:p-8 flex justify-center bg-slate-950 print:p-0 print:bg-white print:overflow-visible scrollbar-thin scrollbar-thumb-slate-800">
           <PaginatedPageContainer
             editor={editor}
+            docTitle={docMeta?.title || 'Untitled Document'}
             paperSize={pageSize}
             orientation={orientation}
             marginOption={marginOption}
             paperTheme={paperTheme}
             zoomLevel={zoomLevel}
+            onZoomChange={setZoomLevel}
             showPageBreaks={showPageBreaks}
             showMarginGuides={showMarginGuides}
             showDebugInfo={showDebugInfo}

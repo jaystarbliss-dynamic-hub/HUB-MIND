@@ -97,16 +97,10 @@ service cloud.firestore {
     }
     match /connections/{id} { allow get: if member() && (admin() || resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid); allow list: if admin() || (member() && (resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid)); allow create: if admin() || (member() && request.resource.data.requesterId == request.auth.uid && request.resource.data.recipientId is string && request.resource.data.recipientId != request.auth.uid); allow update, delete: if member() && (admin() || resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid); }
     match /shares/{id} {
-      allow get, list: if admin() || (member() && (
-        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
-        ('recipientUserId' in resource.data && resource.data.recipientUserId == request.auth.uid) ||
-        ('recipientId' in resource.data && resource.data.recipientId == request.auth.uid)
-      ));
+      allow get: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid || ('recipientId' in resource.data && resource.data.recipientId == request.auth.uid)));
+      allow list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid)) || (member() && ('recipientId' in resource.data && resource.data.recipientId == request.auth.uid));
       allow create: if admin() || (member() && request.resource.data.ownerId == request.auth.uid);
-      allow update, delete: if admin() || (member() && (
-        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
-        ('recipientUserId' in resource.data && resource.data.recipientUserId == request.auth.uid)
-      ));
+      allow update, delete: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid));
     }
     match /notifications/{id} {
       allow get, list: if admin() || (member() && resource.data.userId == request.auth.uid);

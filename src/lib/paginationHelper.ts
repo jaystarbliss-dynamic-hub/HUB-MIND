@@ -1,27 +1,29 @@
-import { Node, mergeAttributes } from '@tiptap/core';
-import type { Editor } from '@tiptap/react';
+/**
+ * Hub-Mind Document Editor Pagination Helper
+ *
+ * Delegates all geometry, usable height, and page-count calculations to the
+ * single authoritative engine in `src/lib/paginationEngine.ts`.
+ */
+
+import { Editor, Node, mergeAttributes } from '@tiptap/react';
 import {
+  PaperSizeOption,
+  OrientationOption,
+  MarginOption,
+  CustomMarginsPx,
   computePageLayout,
-  PAPER_SIZES,
-  MARGIN_PRESETS,
-  type PaperSizeOption,
-  type OrientationOption,
-  type MarginOption,
-  type ComputedPageLayout,
+  getPageStartInEditorPx,
+  getPageEndInEditorPx,
+  getPageNumberAtEditorOffsetPx,
+  getPageUsableHeightPx,
+  calculateExactPageCount,
+  stripTransientPaginationArtifacts,
 } from './paginationEngine';
 
-/**
- * TIPTAP EXTENSION: PAGE BREAK
- * Natively supports both hard (user-inserted) and soft (automatically generated)
- * page breaks with full schema support, undo/redo history, and Mod-Enter shortcut.
- */
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     pageBreak: {
-      /** Inserts an explicit page break (hard or soft) */
-      setPageBreak: (type?: 'hard' | 'soft') => ReturnType;
-      /** Removes any soft page breaks */
-      clearSoftPageBreaks: () => ReturnType;
+      setPageBreak: (breakType?: 'hard' | 'soft') => ReturnType;
     };
   }
 }
@@ -29,358 +31,323 @@ declare module '@tiptap/core' {
 export const PageBreak = Node.create({
   name: 'pageBreak',
   group: 'block',
-  selectable: true,
-  draggable: true,
   atom: true,
+  selectable: true,
+  draggable: false,
 
   addAttributes() {
     return {
-      'data-page-break': {
+      breakType: {
         default: 'hard',
-        parseHTML: (element: HTMLElement) =>
-          element.getAttribute('data-page-break') ||
-          (element.classList.contains('soft-page-break') ? 'soft' : 'hard'),
+        parseHTML: (element) => element.getAttribute('data-page-break') || 'hard',
         renderHTML: (attributes) => ({
-          'data-page-break': attributes['data-page-break'] || 'hard',
+          'data-page-break': attributes.breakType || 'hard',
+          class:
+            attributes.breakType === 'soft'
+              ? 'page-break soft-page-break'
+              : 'page-break hard-page-break',
         }),
-      },
-      class: {
-        default: 'page-break hard-page-break',
-        parseHTML: (element: HTMLElement) => element.className || 'page-break hard-page-break',
-        renderHTML: (attributes) => {
-          const breakType = attributes['data-page-break'] || 'hard';
-          const typeClass = breakType === 'soft' ? 'soft-page-break' : 'hard-page-break';
-          return {
-            class: `page-break ${typeClass}`,
-          };
-        },
       },
     };
   },
 
   parseHTML() {
     return [
-      { tag: 'hr.page-break' },
       { tag: 'hr[data-page-break]' },
+      { tag: 'hr.page-break' },
       { tag: 'div.page-break' },
-      { tag: 'div[data-page-break]' },
-      { tag: 'hr.soft-page-break' },
-      { tag: 'hr.hard-page-break' },
     ];
   },
 
   renderHTML({ HTMLAttributes }) {
-    const isSoft = HTMLAttributes['data-page-break'] === 'soft';
-    const className = `page-break ${isSoft ? 'soft-page-break' : 'hard-page-break'}`;
-    return ['hr', mergeAttributes(HTMLAttributes, { class: className })];
+    return ['hr', mergeAttributes(HTMLAttributes)];
   },
 
   addCommands() {
     return {
       setPageBreak:
-        (type: 'hard' | 'soft' = 'hard') =>
+        (breakType: 'hard' | 'soft' = 'hard') =>
         ({ chain }) => {
-          const isSoft = type === 'soft';
           return chain()
             .insertContent({
               type: this.name,
-              attrs: {
-                'data-page-break': type,
-                class: `page-break ${isSoft ? 'soft-page-break' : 'hard-page-break'}`,
-              },
+              attrs: { breakType },
             })
             .run();
         },
-
-      clearSoftPageBreaks:
-        () =>
-        ({ tr, dispatch }) => {
-          if (!dispatch) return false;
-          let changed = false;
-          tr.doc.descendants((node, pos) => {
-            if (node.type.name === 'pageBreak' && node.attrs['data-page-break'] === 'soft') {
-              tr.delete(pos, pos + node.nodeSize);
-              changed = true;
-              return false;
-            }
-            return true;
-          });
-          return changed;
-        },
-    };
-  },
-
-  addKeyboardShortcuts() {
-    return {
-      // Mod-Enter (Ctrl+Enter / Cmd+Enter) inserts standard Hard Page Break
-      'Mod-Enter': () => this.editor.commands.setPageBreak('hard'),
     };
   },
 });
 
-/**
- * Calculates current document rendered height in pixels.
- */
-export function calculateDocumentHeight(editorHost: HTMLElement | null): number {
-  if (!editorHost) return 0;
-  const editorProse = editorHost.querySelector('.tiptap.ProseMirror') as HTMLElement | null;
-  if (!editorProse) return 0;
-  return editorProse.offsetHeight || editorProse.scrollHeight || 0;
-}
-
-/**
- * Returns exact A4 page metrics and usable boundary heights for pagination.
- */
-export function getA4BoundaryMetrics(
-  pageSize: PaperSizeOption = 'a4',
-  orientation: OrientationOption = 'portrait',
-  marginOption: MarginOption = 'normal'
-): {
-  layout: ComputedPageLayout;
+export interface A4BoundaryMetrics {
+  pageWidthPx: number;
+  pageHeightPx: number;
+  marginTopPx: number;
+  marginBottomPx: number;
+  marginLeftPx: number;
+  marginRightPx: number;
+  page1HeaderHeightPx: number;
+  subsequentHeaderHeightPx: number;
+  safetyBufferPx: number;
   page1UsableHeightPx: number;
   subsequentUsableHeightPx: number;
-  safetyBufferPx: number;
-} {
-  const layout = computePageLayout({
-    paperSize: pageSize,
-    orientation,
-    marginOption,
-  });
-
-  const safetyBufferPx = 28; // Margin buffer preventing text from clipping boundary
-
-  return {
-    layout,
-    page1UsableHeightPx: Math.max(150, layout.page1UsableHeightPx - safetyBufferPx),
-    subsequentUsableHeightPx: Math.max(200, layout.subsequentUsableHeightPx - safetyBufferPx),
-    safetyBufferPx,
-  };
+  interPageGapPx: number;
 }
 
-export interface PaginationHelperStatus {
-  documentHeightPx: number;
+export interface PaginationBoundaryStatus {
+  totalDocumentHeightPx: number;
   pageCount: number;
-  isApproachingBoundary: boolean;
+  activePageIndex: number;
+  activePageUsedHeightPx: number;
+  activePageMaxHeightPx: number;
   activePageRemainingPx: number;
+  isApproachingBoundary: boolean;
+  isOverflowingBoundary: boolean;
   hasSoftBreaks: boolean;
 }
 
-/**
- * Inserts an explicit Hard Page Break at current cursor position
- */
-export function insertHardPageBreak(editor: Editor): boolean {
-  if (!editor || editor.isDestroyed) return false;
-  return editor.chain().focus().setPageBreak('hard').run();
+export function getA4BoundaryMetrics(
+  paperSize: PaperSizeOption = 'a4',
+  orientation: OrientationOption = 'portrait',
+  marginOption: MarginOption = 'normal',
+  customMarginsPx?: CustomMarginsPx
+): A4BoundaryMetrics {
+  const layout = computePageLayout({
+    paperSize,
+    orientation,
+    marginOption,
+    customMarginsPx,
+  });
+
+  return {
+    pageWidthPx: layout.pageWidthPx,
+    pageHeightPx: layout.pageHeightPx,
+    marginTopPx: layout.marginsPx.top,
+    marginBottomPx: layout.marginsPx.bottom,
+    marginLeftPx: layout.marginsPx.left,
+    marginRightPx: layout.marginsPx.right,
+    page1HeaderHeightPx: layout.page1HeaderHeightPx,
+    subsequentHeaderHeightPx: layout.subsequentHeaderHeightPx,
+    safetyBufferPx: layout.bottomMarginSafetyPx,
+    page1UsableHeightPx: layout.page1UsableHeightPx,
+    subsequentUsableHeightPx: layout.subsequentUsableHeightPx,
+    interPageGapPx: layout.interPageGapPx,
+  };
 }
 
-/**
- * Automatically inspects the document structure and inserts or adjusts soft page breaks
- * when text blocks approach or cross the defined A4-size boundary.
- */
-export function autoPaginateDocument(
-  editor: Editor,
-  editorHost: HTMLElement | null,
-  pageSize: PaperSizeOption = 'a4',
-  orientation: OrientationOption = 'portrait',
-  marginOption: MarginOption = 'normal'
-): PaginationHelperStatus {
-  const defaultStatus: PaginationHelperStatus = {
-    documentHeightPx: 0,
-    pageCount: 1,
-    isApproachingBoundary: false,
-    activePageRemainingPx: 0,
-    hasSoftBreaks: false,
-  };
+export function calculateDocumentHeight(editorElement: HTMLElement | null): number {
+  if (!editorElement) return 0;
 
-  if (!editor || editor.isDestroyed || !editorHost) {
-    return defaultStatus;
-  }
+  const proseMirrorRoot =
+    (editorElement.querySelector('.ProseMirror') as HTMLElement) || editorElement;
 
-  const editorProse = editorHost.querySelector('.tiptap.ProseMirror') as HTMLElement | null;
-  if (!editorProse) {
-    return defaultStatus;
-  }
+  const rect = proseMirrorRoot.getBoundingClientRect();
+  const activeScale =
+    proseMirrorRoot.offsetWidth > 0
+      ? rect.width / proseMirrorRoot.offsetWidth
+      : 1;
+  const safeScale = activeScale > 0.05 ? activeScale : 1;
 
-  const totalHeight = editorProse.offsetHeight || editorProse.scrollHeight || 0;
-  const { page1UsableHeightPx, subsequentUsableHeightPx } = getA4BoundaryMetrics(
-    pageSize,
-    orientation,
-    marginOption
-  );
-
-  const children = Array.from(editorProse.children) as HTMLElement[];
+  const children = Array.from(proseMirrorRoot.children) as HTMLElement[];
   if (children.length === 0) {
-    return {
-      ...defaultStatus,
-      documentHeightPx: totalHeight,
-      activePageRemainingPx: page1UsableHeightPx,
-    };
+    return Math.round(rect.height / safeScale);
   }
 
-  let currentPage = 1;
-  let accumulatedHeight = 0;
-  let currentCapacity = page1UsableHeightPx;
-  let hasSoftBreaks = false;
-  let isApproachingBoundary = false;
+  const firstRect = children[0].getBoundingClientRect();
+  const lastRect = children[children.length - 1].getBoundingClientRect();
+  const spanHeight = (lastRect.bottom - firstRect.top) / safeScale;
 
-  children.forEach((child, index) => {
-    const tagName = child.tagName.toLowerCase();
-    const isHardBreak =
-      tagName === 'hr' &&
-      (child.getAttribute('data-page-break') === 'hard' ||
-        child.classList.contains('hard-page-break') ||
-        !child.classList.contains('soft-page-break'));
-    const isSoftBreak =
-      child.getAttribute('data-page-break') === 'soft' ||
-      child.classList.contains('soft-page-break');
+  return Math.max(Math.round(spanHeight), Math.round(proseMirrorRoot.offsetHeight));
+}
 
-    if (isSoftBreak) {
-      hasSoftBreaks = true;
+export function insertHardPageBreak(editor: Editor | null): boolean {
+  if (!editor || editor.isDestroyed) return false;
+
+  try {
+    editor.chain().focus().setPageBreak('hard').run();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hubmind:reflow-pagination'));
     }
+    return true;
+  } catch {
+    return editor.chain().focus().setHorizontalRule().run();
+  }
+}
 
-    if (isHardBreak || isSoftBreak) {
-      currentPage++;
-      accumulatedHeight = 0;
-      currentCapacity = subsequentUsableHeightPx;
-      return;
-    }
+export function removeSoftPageBreaks(editor: Editor | null): number {
+  if (!editor || editor.isDestroyed) return 0;
 
-    const childStyle = window.getComputedStyle(child);
-    const marginTop = parseFloat(childStyle.marginTop) || 0;
-    const marginBottom = parseFloat(childStyle.marginBottom) || 0;
-    const childHeight = (child.offsetHeight || 28) + marginTop + marginBottom;
+  const { state, view } = editor;
+  const { tr } = state;
+  let removedCount = 0;
 
-    // Check if remaining space is tight (within 60px of boundary)
-    const remainingBefore = currentCapacity - accumulatedHeight;
-    if (remainingBefore < 60 && remainingBefore > 0) {
-      isApproachingBoundary = true;
-    }
+  const positionsToRemove: { from: number; to: number }[] = [];
 
-    if (accumulatedHeight + childHeight > currentCapacity && index > 0) {
-      // Content crosses the boundary into next page
-      currentPage++;
-      accumulatedHeight = childHeight;
-      currentCapacity = subsequentUsableHeightPx;
-    } else {
-      accumulatedHeight += childHeight;
+  state.doc.descendants((node, pos) => {
+    if (
+      (node.type.name === 'horizontalRule' || node.type.name === 'pageBreak') &&
+      (node.attrs?.['data-page-break'] === 'soft' ||
+        node.attrs?.breakType === 'soft' ||
+        (typeof node.attrs?.class === 'string' &&
+          node.attrs.class.includes('soft-page-break')))
+    ) {
+      positionsToRemove.push({ from: pos, to: pos + node.nodeSize });
     }
   });
 
-  const remaining = Math.max(0, currentCapacity - accumulatedHeight);
+  if (positionsToRemove.length === 0) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hubmind:reflow-pagination'));
+    }
+    return 0;
+  }
+
+  for (let i = positionsToRemove.length - 1; i >= 0; i--) {
+    const { from, to } = positionsToRemove[i];
+    tr.delete(from, to);
+    removedCount++;
+  }
+
+  if (tr.docChanged) {
+    tr.setMeta('addToHistory', false);
+    view.dispatch(tr);
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('hubmind:reflow-pagination'));
+  }
+
+  return removedCount;
+}
+
+export function autoPaginateDocument(
+  editor: Editor | null,
+  editorHostElement: HTMLElement | null,
+  paperSize: PaperSizeOption = 'a4',
+  orientation: OrientationOption = 'portrait',
+  marginOption: MarginOption = 'normal',
+  customMarginsPx?: CustomMarginsPx
+): PaginationBoundaryStatus {
+  const layout = computePageLayout({
+    paperSize,
+    orientation,
+    marginOption,
+    customMarginsPx,
+  });
+
+  if (!editor || editor.isDestroyed || !editorHostElement) {
+    return {
+      totalDocumentHeightPx: 0,
+      pageCount: 1,
+      activePageIndex: 1,
+      activePageUsedHeightPx: 0,
+      activePageMaxHeightPx: layout.page1UsableHeightPx,
+      activePageRemainingPx: layout.page1UsableHeightPx,
+      isApproachingBoundary: false,
+      isOverflowingBoundary: false,
+      hasSoftBreaks: false,
+    };
+  }
+
+  const proseMirrorRoot =
+    (editorHostElement.querySelector('.ProseMirror') as HTMLElement) ||
+    editorHostElement;
+
+  const legacySoftBreaks = proseMirrorRoot.querySelectorAll(
+    'hr[data-page-break="soft"], hr.soft-page-break'
+  );
+  if (legacySoftBreaks.length > 0) {
+    removeSoftPageBreaks(editor);
+  }
+
+  const proseRect = proseMirrorRoot.getBoundingClientRect();
+  const activeScale =
+    proseMirrorRoot.offsetWidth > 0
+      ? proseRect.width / proseMirrorRoot.offsetWidth
+      : 1;
+  const safeScale = activeScale > 0.05 ? activeScale : 1;
+
+  const children = Array.from(proseMirrorRoot.children) as HTMLElement[];
+  let maxBottomRelToEditor = 0;
+
+  for (const child of children) {
+    const cRect = child.getBoundingClientRect();
+    const bottomRel = (cRect.bottom - proseRect.top) / safeScale;
+    if (bottomRel > maxBottomRelToEditor) {
+      maxBottomRelToEditor = bottomRel;
+    }
+  }
+
+  const domPageCount = getPageNumberAtEditorOffsetPx(layout, Math.max(0, maxBottomRelToEditor - 2));
+  const cleanHtml = stripTransientPaginationArtifacts(editor.getHTML());
+  const enginePageCount = calculateExactPageCount(
+    cleanHtml,
+    paperSize,
+    orientation,
+    marginOption,
+    customMarginsPx
+  );
+  const pageCount = Math.max(1, domPageCount, enginePageCount);
+
+  const activePageIndex = pageCount;
+  const activePageStart = getPageStartInEditorPx(layout, activePageIndex);
+  const activePageEnd = getPageEndInEditorPx(layout, activePageIndex);
+  const activePageMaxHeightPx = getPageUsableHeightPx(layout, activePageIndex);
+
+  const activePageUsedHeightPx = Math.max(
+    0,
+    Math.min(activePageMaxHeightPx, Math.round(maxBottomRelToEditor - activePageStart))
+  );
+  const activePageRemainingPx = Math.max(
+    0,
+    Math.round(activePageEnd - maxBottomRelToEditor)
+  );
+
+  const hasFlowSpacers =
+    proseMirrorRoot.querySelectorAll('.hm-page-flow-spacer, [data-hm-paginated-margin]').length > 0;
 
   return {
-    documentHeightPx: totalHeight,
-    pageCount: currentPage,
-    isApproachingBoundary,
-    activePageRemainingPx: remaining,
-    hasSoftBreaks,
+    totalDocumentHeightPx: Math.max(0, Math.round(maxBottomRelToEditor)),
+    pageCount,
+    activePageIndex,
+    activePageUsedHeightPx,
+    activePageMaxHeightPx,
+    activePageRemainingPx,
+    isApproachingBoundary: activePageRemainingPx <= 85 && activePageRemainingPx > 0,
+    isOverflowingBoundary: maxBottomRelToEditor > activePageEnd,
+    hasSoftBreaks: hasFlowSpacers,
   };
 }
 
-/**
- * Removes all soft page breaks from the document.
- */
-export function removeSoftPageBreaks(editor: Editor): boolean {
-  if (!editor || editor.isDestroyed) return false;
-  return editor.commands.clearSoftPageBreaks();
-}
-
-/**
- * Automatically inspects content height against A4 printable boundaries,
- * and inserts soft page breaks at exact top-level block junctions before boundary overflows.
- */
 export function insertAutoSoftPageBreaks(
-  editor: Editor,
-  editorHost: HTMLElement | null,
-  pageSize: PaperSizeOption = 'a4',
+  editor: Editor | null,
+  editorHostElement: HTMLElement | null,
+  paperSize: PaperSizeOption = 'a4',
   orientation: OrientationOption = 'portrait',
-  marginOption: MarginOption = 'normal'
-): { insertedCount: number; newPageCount: number } {
-  if (!editor || editor.isDestroyed || !editorHost) {
-    return { insertedCount: 0, newPageCount: 1 };
+  marginOption: MarginOption = 'normal',
+  customMarginsPx?: CustomMarginsPx
+): { breaksInserted: number; pageCount: number } {
+  if (!editor || editor.isDestroyed || !editorHostElement) {
+    return { breaksInserted: 0, pageCount: 1 };
   }
 
-  const editorProse = editorHost.querySelector('.tiptap.ProseMirror') as HTMLElement | null;
-  if (!editorProse) {
-    return { insertedCount: 0, newPageCount: 1 };
+  removeSoftPageBreaks(editor);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('hubmind:reflow-pagination'));
   }
 
-  const { page1UsableHeightPx, subsequentUsableHeightPx } = getA4BoundaryMetrics(
-    pageSize,
+  const status = autoPaginateDocument(
+    editor,
+    editorHostElement,
+    paperSize,
     orientation,
-    marginOption
+    marginOption,
+    customMarginsPx
   );
 
-  // Clear existing soft page breaks first
-  editor.commands.clearSoftPageBreaks();
-
-  const children = Array.from(editorProse.children) as HTMLElement[];
-  if (children.length <= 1) {
-    return { insertedCount: 0, newPageCount: 1 };
-  }
-
-  const breakPositions: number[] = [];
-  let currentPage = 1;
-  let accumulatedHeight = 0;
-  let currentCapacity = page1UsableHeightPx;
-
-  for (let index = 0; index < children.length; index++) {
-    const child = children[index];
-    const tagName = child.tagName.toLowerCase();
-    const isHardBreak =
-      tagName === 'hr' &&
-      (child.getAttribute('data-page-break') === 'hard' ||
-        child.classList.contains('hard-page-break') ||
-        !child.classList.contains('soft-page-break'));
-
-    if (isHardBreak) {
-      currentPage++;
-      accumulatedHeight = 0;
-      currentCapacity = subsequentUsableHeightPx;
-      continue;
-    }
-
-    const childStyle = window.getComputedStyle(child);
-    const marginTop = parseFloat(childStyle.marginTop) || 0;
-    const marginBottom = parseFloat(childStyle.marginBottom) || 0;
-    const childHeight = (child.offsetHeight || 28) + marginTop + marginBottom;
-
-    // If adding this child overflows current page capacity
-    if (accumulatedHeight + childHeight > currentCapacity && index > 0) {
-      try {
-        const domPos = editor.view.posAtDOM(child, 0);
-        const resolved = editor.state.doc.resolve(domPos);
-        const insertPos = resolved.before(1);
-        if (insertPos >= 0 && !breakPositions.includes(insertPos)) {
-          breakPositions.push(insertPos);
-        }
-      } catch {
-        // Safe fallback if posAtDOM fails
-      }
-      currentPage++;
-      accumulatedHeight = childHeight;
-      currentCapacity = subsequentUsableHeightPx;
-    } else {
-      accumulatedHeight += childHeight;
-    }
-  }
-
-  if (breakPositions.length > 0 && editor.schema.nodes.pageBreak) {
-    const tr = editor.state.tr;
-    // Insert from highest position to lowest so earlier positions don't shift
-    breakPositions.sort((a, b) => b - a);
-
-    for (const pos of breakPositions) {
-      const pageBreakNode = editor.schema.nodes.pageBreak.create({
-        'data-page-break': 'soft',
-        class: 'page-break soft-page-break',
-      });
-      tr.insert(pos, pageBreakNode);
-    }
-
-    tr.setMeta('addToHistory', false);
-    editor.view.dispatch(tr);
-  }
-
-  return { insertedCount: breakPositions.length, newPageCount: currentPage };
+  return {
+    breaksInserted: Math.max(0, status.pageCount - 1),
+    pageCount: status.pageCount,
+  };
 }

@@ -1,546 +1,1215 @@
-import React, { useEffect, useLayoutEffect, useRef, useMemo, useState, useCallback } from 'react';
-import { EditorContent, Editor } from '@tiptap/react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { Editor, EditorContent } from '@tiptap/react';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { OfficialLetterhead } from './OfficialLetterhead';
-import { 
-  PaperSizeOption, 
-  OrientationOption, 
-  MarginOption, 
-  PaperThemeOption, 
-  computePageLayout, 
+import {
+  PaperSizeOption,
+  OrientationOption,
+  MarginOption,
+  PaperThemeOption,
+  computePageLayout,
+  getPageStartInEditorPx,
+  getPageEndInEditorPx,
+  getPageNumberAtEditorOffsetPx,
+  getPageUsableHeightPx,
   ComputedPageLayout,
-  paginateDocument,
-  PageDebugInfo,
-  pxToMm
 } from '../../lib/paginationEngine';
-import { Layers, Bug, SplitSquareVertical, FileText } from 'lucide-react';
+
+export interface PaginationDebugMetrics {
+  paperSize: string;
+  orientation: string;
+  marginOption: string;
+  pageWidthPx: number;
+  pageHeightPx: number;
+  usablePage1HeightPx: number;
+  usableSubsequentHeightPx: number;
+  measuredContentHeightPx: number;
+  computedPageCount: number;
+  renderedPageSheets: number;
+  activeBreakCount: number;
+}
 
 interface PaginatedPageContainerProps {
   editor: Editor | null;
+  docTitle?: string;
   paperSize: PaperSizeOption;
   orientation: OrientationOption;
   marginOption: MarginOption;
   paperTheme: PaperThemeOption;
   zoomLevel: number;
-  showPageBreaks: boolean;
-  showMarginGuides: boolean;
-  showDebugInfo: boolean;
-  pageCount: number;
-  activePage: number;
-  onPageCountChange: (count: number) => void;
-  onActivePageChange: (page: number) => void;
-  onDebugInfoChange?: (info: PageDebugInfo[]) => void;
+  onZoomChange?: (nextZoom: number) => void;
+  showPageNumbers?: boolean;
+  showPageBreaks?: boolean;
+  showRuler?: boolean;
+  showMarginGuides?: boolean;
+  debugMode?: boolean;
+  showDebugInfo?: boolean;
+  pageCount?: number;
+  activePage?: number;
+  onDebugInfoChange?: (info: PaginationDebugMetrics) => void;
+  onPageCountChange?: (pageCount: number) => void;
+  onActivePageChange?: (activePage: number) => void;
+}
+
+interface WidgetSpacerSpec {
+  pos: number;
+  heightPx: number;
+  toPage: number;
+}
+
+const HM_PAGINATION_PLUGIN_KEY = new PluginKey<DecorationSet>('hubmindPaginationSpacers');
+
+function createFlowSpacerWidgetDOM(spec: WidgetSpacerSpec): HTMLElement {
+  const span = document.createElement('span');
+  span.className = 'hm-page-flow-spacer';
+  span.setAttribute('data-hm-page-spacer', String(spec.toPage));
+  span.setAttribute('data-hm-spacer-height', String(spec.heightPx));
+  span.setAttribute('contenteditable', 'false');
+  span.setAttribute('aria-hidden', 'true');
+  span.style.display = 'block';
+  span.style.width = '100%';
+  span.style.height = `${spec.heightPx}px`;
+  span.style.margin = '0';
+  span.style.padding = '0';
+  span.style.border = '0';
+  span.style.lineHeight = '0';
+  span.style.fontSize = '0';
+  span.style.pointerEvents = 'none';
+  span.style.userSelect = 'none';
+  return span;
+}
+
+interface WordToken {
+  node: Text;
+  start: number;
+  end: number;
+}
+
+function collectBlockWordTokens(blockEl: HTMLElement): WordToken[] {
+  if (
+    blockEl.tagName.toLowerCase() === 'table' ||
+    blockEl.classList.contains('tableWrapper') ||
+    blockEl.querySelector('table') !== null
+  ) {
+    return [];
+  }
+
+  const tokens: WordToken[] = [];
+  const walker = document.createTreeWalker(
+    blockEl,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (
+          parent.classList.contains('hm-page-flow-spacer') ||
+          parent.closest('table, thead, tbody, tr, td, th, .tableWrapper, .hm-page-flow-spacer')
+        ) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    }
+  );
+
+  let current: Node | null = walker.nextNode();
+  while (current) {
+    const textNode = current as Text;
+    const text = textNode.nodeValue || '';
+    const regex = /\S+\s*/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+      tokens.push({
+        node: textNode,
+        start: match.index,
+        end: match.index + match[0].length,
+      });
+    }
+    current = walker.nextNode();
+  }
+  return tokens;
 }
 
 export function PaginatedPageContainer({
   editor,
+  docTitle = 'Official Hub-Mind Document',
   paperSize,
   orientation,
   marginOption,
   paperTheme,
   zoomLevel,
-  showPageBreaks,
-  showMarginGuides,
-  showDebugInfo,
-  pageCount,
-  activePage,
+  onZoomChange,
+  showPageNumbers = true,
+  showPageBreaks: _showPageBreaks = true,
+  showRuler = true,
+  showMarginGuides = false,
+  debugMode = false,
+  showDebugInfo = false,
+  pageCount: externalPageCount,
+  activePage: _externalActivePage,
+  onDebugInfoChange,
   onPageCountChange,
   onActivePageChange,
-  onDebugInfoChange,
 }: PaginatedPageContainerProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const editorHostRef = useRef<HTMLDivElement | null>(null);
+  const isDebugActive = debugMode || showDebugInfo;
+  const [pageCount, setPageCount] = useState<number>(externalPageCount || 1);
+  const [measuredHeightPx, setMeasuredHeightPx] = useState<number>(0);
+  const [activeBreakCount, setActiveBreakCount] = useState<number>(0);
+  const [mobileFitScale, setMobileFitScale] = useState<number>(1);
   const [isMobileScreen, setIsMobileScreen] = useState<boolean>(false);
-  const [debugData, setDebugData] = useState<PageDebugInfo[]>([]);
-  const [internalPageCount, setInternalPageCount] = useState<number>(Math.max(1, pageCount));
+
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const editorHostRef = useRef<HTMLDivElement | null>(null);
+  const activeWidgetSpecsRef = useRef<WidgetSpacerSpec[]>([]);
+  const isReflowingRef = useRef<boolean>(false);
+
+  const pinchStartDistanceRef = useRef<number | null>(null);
+  const pinchStartZoomRef = useRef<number>(zoomLevel);
 
   const deskGapPx = 48;
 
-  // Calculate physical layout from single source of truth
-  const layout = useMemo(() => {
+  const layout: ComputedPageLayout = useMemo(() => {
     return computePageLayout({
       paperSize,
       orientation,
       marginOption,
-      includeLetterheadOnPage1: true,
+      deskGapPx,
     });
-  }, [paperSize, orientation, marginOption]);
+  }, [paperSize, orientation, marginOption, deskGapPx]);
 
-  // Umo-style page view: keep physical paper geometry fixed and scale the
-  // complete page surface for the device viewport.
-  const [mobileZoomFactor, setMobileZoomFactor] = useState(1);
-  const mobileCanvasScale = useMemo(() => {
-    if (!isMobileScreen) return 1;
-    const viewportWidth = Math.max(280, containerRef.current?.clientWidth || window.innerWidth);
-    const fitScale = Math.min(1, Math.max(0.42, (viewportWidth - 24) / layout.pageWidthPx));
-    return Math.min(2.5, Math.max(0.42, fitScale * mobileZoomFactor));
-  }, [isMobileScreen, layout.pageWidthPx, mobileZoomFactor]);
-
-  // Check mobile viewport width
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobileScreen(window.innerWidth < 768);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+    if (!editor || editor.isDestroyed) return;
 
-  // Compute exact spacer needed to bridge from bottom of Sheet (N) to content top of Sheet (N+1)
-  const breakSpacerHeight = useMemo(() => {
-    return layout.marginsPx.bottom + deskGapPx + layout.marginsPx.top + layout.subsequentHeaderHeightPx + 20;
-  }, [layout.marginsPx.bottom, deskGapPx, layout.marginsPx.top, layout.subsequentHeaderHeightPx]);
-
-  const pinchStartDistanceRef = useRef<number | null>(null);
-  const pinchStartZoomRef = useRef(1);
-
-  const getTouchDistance = useCallback((touches: React.TouchList) => {
-    if (touches.length < 2) return 0;
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.sqrt(dx * dx + dy * dy);
-  }, []);
-
-  const handleTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    if (!isMobileScreen || event.touches.length !== 2) return;
-    pinchStartDistanceRef.current = getTouchDistance(event.touches);
-    pinchStartZoomRef.current = mobileZoomFactor;
-  }, [getTouchDistance, isMobileScreen, mobileZoomFactor]);
-
-  const handleTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    if (!isMobileScreen || event.touches.length !== 2 || !pinchStartDistanceRef.current) return;
-    event.preventDefault();
-    const distance = getTouchDistance(event.touches);
-    if (!distance) return;
-    setMobileZoomFactor(Math.min(2.5, Math.max(1, pinchStartZoomRef.current * (distance / pinchStartDistanceRef.current))));
-  }, [getTouchDistance, isMobileScreen]);
-
-  const handleTouchEnd = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
-    if (event.touches.length < 2) {
-      pinchStartDistanceRef.current = null;
-      setMobileZoomFactor((current) => Math.abs(current - 1) < 0.06 ? 1 : current);
-    }
-  }, []);
-
-  // Calculate page placement without permanently rewriting the user's paragraph margins.
-  // Page geometry remains controlled by the central pagination engine while the
-  // ProseMirror document retains its own typography and alignment.
-  const reflowEditorPages = useCallback(() => {
-    if (!editorHostRef.current) return 1;
-
-    const editorProse = editorHostRef.current.querySelector('.tiptap.ProseMirror') as HTMLElement | null;
-    if (!editorProse) return 1;
-
-    const children = Array.from(editorProse.children) as HTMLElement[];
-    if (children.length === 0) {
-      setInternalPageCount(1);
-      if (pageCount !== 1) onPageCountChange(1);
-      return 1;
-    }
-
-    // Clear only our previous temporary page-placement overrides before measuring.
-    children.forEach((child) => {
-      const original = child.dataset.hubmindOriginalMarginTop;
-      if (original !== undefined) child.style.marginTop = original;
-      delete child.dataset.hubmindOriginalMarginTop;
-      delete child.dataset.pageNumber;
+    const plugin = new Plugin<DecorationSet>({
+      key: HM_PAGINATION_PLUGIN_KEY,
+      state: {
+        init() {
+          return DecorationSet.empty;
+        },
+        apply(tr, oldSet) {
+          const nextSet = tr.getMeta(HM_PAGINATION_PLUGIN_KEY);
+          if (nextSet !== undefined) {
+            return nextSet;
+          }
+          if (tr.docChanged) {
+            return oldSet.map(tr.mapping, tr.doc);
+          }
+          return oldSet;
+        },
+      },
+      props: {
+        decorations(state) {
+          return HM_PAGINATION_PLUGIN_KEY.getState(state) || DecorationSet.empty;
+        },
+      },
     });
 
-    // Leave a small safety buffer so glyph descenders/anti-aliasing never appear
-    // inside the physical bottom margin.
-    const safetyPx = 12;
-    const firstPageCapacity = Math.max(
-      150,
-      layout.pageHeightPx -
-        layout.marginsPx.top -
-        layout.marginsPx.bottom -
-        layout.page1HeaderHeightPx -
-        safetyPx
-    );
-    const subsequentPageCapacity = Math.max(
-      200,
-      layout.pageHeightPx -
-        layout.marginsPx.top -
-        layout.marginsPx.bottom -
-        layout.subsequentHeaderHeightPx -
-        20 -
-        safetyPx
-    );
-
-    let currentPage = 1;
-    let usedHeight = 0;
-
-    children.forEach((child, index) => {
-      const tagName = child.tagName.toLowerCase();
-      const isExplicitBreak =
-        tagName === 'hr' ||
-        child.classList.contains('page-break') ||
-        child.classList.contains('soft-page-break') ||
-        child.classList.contains('hard-page-break') ||
-        child.getAttribute('data-page-break') === 'true' ||
-        child.getAttribute('data-page-break') === 'hard' ||
-        child.getAttribute('data-page-break') === 'soft';
-
-      const style = window.getComputedStyle(child);
-      const marginTop = parseFloat(style.marginTop || '0') || 0;
-      const marginBottom = parseFloat(style.marginBottom || '0') || 0;
-      const childHeight =
-        Math.max(1, child.getBoundingClientRect().height) +
-        marginTop +
-        marginBottom;
-
-      const capacity =
-        currentPage === 1 ? firstPageCapacity : subsequentPageCapacity;
-      const isHeading = /^h[1-6]$/.test(tagName);
-      const orphanBuffer = isHeading ? 48 : 0;
-
-      if (
-        isExplicitBreak ||
-        (index > 0 &&
-          usedHeight > 0 &&
-          usedHeight + childHeight + orphanBuffer > capacity)
-      ) {
-        currentPage += 1;
-        usedHeight = 0;
+    editor.registerPlugin(plugin);
+    return () => {
+      try {
+        if (!editor.isDestroyed) {
+          editor.unregisterPlugin(HM_PAGINATION_PLUGIN_KEY);
+        }
+      } catch {
+        // Ignore
       }
+    };
+  }, [editor]);
 
-      child.dataset.pageNumber = String(currentPage);
+  const updateResponsiveScale = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const viewportWidth = window.innerWidth;
+    const mobile = viewportWidth < 768;
+    setIsMobileScreen(mobile);
 
-      if (isExplicitBreak) {
-        usedHeight = 0;
+    if (mobile && scrollContainerRef.current) {
+      const containerWidth = Math.max(260, scrollContainerRef.current.clientWidth - 20);
+      const scale = Math.min(1, Math.max(0.32, containerWidth / layout.pageWidthPx));
+      setMobileFitScale(Math.round(scale * 1000) / 1000);
+    } else {
+      setMobileFitScale(1);
+    }
+  }, [layout.pageWidthPx]);
+
+  useEffect(() => {
+    updateResponsiveScale();
+    window.addEventListener('resize', updateResponsiveScale);
+    window.addEventListener('orientationchange', updateResponsiveScale);
+    return () => {
+      window.removeEventListener('resize', updateResponsiveScale);
+      window.removeEventListener('orientationchange', updateResponsiveScale);
+    };
+  }, [updateResponsiveScale]);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStartDistanceRef.current = Math.hypot(dx, dy);
+      pinchStartZoomRef.current = zoomLevel;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 2 && pinchStartDistanceRef.current !== null && onZoomChange) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const currentDistance = Math.hypot(dx, dy);
+      const ratio = currentDistance / Math.max(1, pinchStartDistanceRef.current);
+      const nextZoom = Math.min(2.0, Math.max(0.5, Math.round(pinchStartZoomRef.current * ratio * 100) / 100));
+      onZoomChange(nextZoom);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    pinchStartDistanceRef.current = null;
+  };
+
+  const mobileCanvasScale = useMemo(() => {
+    return Math.min(1.6, Math.max(0.28, mobileFitScale * zoomLevel));
+  }, [mobileFitScale, zoomLevel]);
+
+  const reflowEditorPages = useCallback(() => {
+    if (isReflowingRef.current) return;
+    const hostEl = editorHostRef.current;
+    if (!hostEl || !editor || editor.isDestroyed) return;
+
+    const editorProse = hostEl.querySelector('.tiptap.ProseMirror') as HTMLElement | null;
+    if (!editorProse) return;
+
+    isReflowingRef.current = true;
+
+    try {
+      const shiftedNodes = editorProse.querySelectorAll<HTMLElement>(
+        '[data-hm-paginated-margin], [data-paginated-shift="true"]'
+      );
+      shiftedNodes.forEach((el) => {
+        el.style.marginTop = '';
+        el.removeAttribute('data-hm-paginated-margin');
+        el.removeAttribute('data-hm-page-start');
+        delete el.dataset.paginatedShift;
+      });
+
+      const multipageTables = editorProse.querySelectorAll<HTMLElement>('table[data-hm-multipage]');
+      multipageTables.forEach((tbl) => {
+        tbl.removeAttribute('data-hm-multipage');
+      });
+
+      const lockedCells = editorProse.querySelectorAll<HTMLElement>('[data-hm-cell-width]');
+      lockedCells.forEach((cell) => {
+        cell.style.width = '';
+        cell.removeAttribute('data-hm-cell-width');
+      });
+
+      const existingSpacers = editorProse.querySelectorAll<HTMLElement>('.hm-page-flow-spacer');
+      existingSpacers.forEach((sp) => {
+        sp.style.display = 'none';
+        sp.style.height = '0px';
+      });
+
+      const legacySoftHrs = editorProse.querySelectorAll<HTMLElement>(
+        'hr[data-page-break="soft"], hr.soft-page-break'
+      );
+      legacySoftHrs.forEach((hr) => {
+        hr.style.display = 'none';
+        hr.style.height = '0px';
+        hr.style.margin = '0px';
+      });
+
+      const proseRect = editorProse.getBoundingClientRect();
+      const fallbackScale = (isMobileScreen ? mobileCanvasScale : zoomLevel) || 1;
+      const measuredScale =
+        editorProse.offsetWidth > 0 && proseRect.width > 0
+          ? proseRect.width / editorProse.offsetWidth
+          : fallbackScale;
+      const safeScale = measuredScale > 0.05 ? measuredScale : 1;
+
+      const children = Array.from(editorProse.children).filter(
+        (child) =>
+          !(
+            child.getAttribute('data-page-break') === 'soft' ||
+            child.classList.contains('soft-page-break')
+          )
+      ) as HTMLElement[];
+
+      if (children.length === 0) {
+        setPageCount(1);
+        setMeasuredHeightPx(0);
+        setActiveBreakCount(0);
+        onPageCountChange?.(1);
         return;
       }
 
-      // Position the first block of every subsequent sheet at that sheet's
-      // printable top. The original author-defined margin is retained and restored
-      // before every measurement, so alignment/spacing never becomes cumulative.
-      if (currentPage > 1 && usedHeight === 0) {
-        const originalMarginTop = child.style.marginTop;
-        child.dataset.hubmindOriginalMarginTop = originalMarginTop;
+      let currentPage = 1;
+      let breaksApplied = 0;
+      let forceNextPageStart = false;
+      let unappliedWidgetDeltaPx = 0;
+      const nextWidgetSpecs: WidgetSpacerSpec[] = [];
+      const sharedRange = document.createRange();
 
-        const editorTop = editorProse.getBoundingClientRect().top;
-        const pageTop =
-          editorTop +
-          (currentPage - 1) * (layout.pageHeightPx + deskGapPx) +
-          layout.marginsPx.top +
-          layout.subsequentHeaderHeightPx +
-          20;
+      const toEditorY = (viewportY: number): number =>
+        (viewportY - proseRect.top) / safeScale + unappliedWidgetDeltaPx;
 
-        const previous = children[index - 1];
-        const previousBottom = previous
-          ? previous.getBoundingClientRect().bottom
-          : editorTop;
+      const applyExactShiftToEditorTop = (
+        el: HTMLElement,
+        targetEditorTopPx: number,
+        pageNum: number
+      ): number => {
+        const beforeTop = toEditorY(el.getBoundingClientRect().top);
+        const rawDelta = targetEditorTopPx - beforeTop;
+        if (rawDelta <= 0.5) return 0;
 
-        const bridge = Math.max(0, Math.round(pageTop - previousBottom));
-        child.style.marginTop = `${Math.max(marginTop, bridge)}px`;
+        let marginPx = Math.round(rawDelta);
+        el.style.marginTop = `${marginPx}px`;
+        el.setAttribute('data-hm-paginated-margin', String(marginPx));
+        el.setAttribute('data-hm-page-start', String(pageNum));
+        el.dataset.paginatedShift = 'true';
+
+        const afterTop = toEditorY(el.getBoundingClientRect().top);
+        const residual = targetEditorTopPx - afterTop;
+        if (Math.abs(residual) >= 1) {
+          marginPx = Math.max(0, Math.round(marginPx + residual));
+          el.style.marginTop = `${marginPx}px`;
+          el.setAttribute('data-hm-paginated-margin', String(marginPx));
+        }
+
+        breaksApplied += 1;
+        return marginPx;
+      };
+
+      const paginateBlockLines = (blockEl: HTMLElement) => {
+        const tokens = collectBlockWordTokens(blockEl);
+        if (tokens.length < 2) {
+          const blockBottom = toEditorY(blockEl.getBoundingClientRect().bottom);
+          while (blockBottom > getPageEndInEditorPx(layout, currentPage, deskGapPx)) {
+            currentPage += 1;
+            breaksApplied += 1;
+          }
+          return;
+        }
+
+        let searchStartIdx = 0;
+        let safetyCounter = 0;
+
+        while (searchStartIdx < tokens.length && safetyCounter < 50) {
+          safetyCounter += 1;
+          const pageEnd = getPageEndInEditorPx(layout, currentPage, deskGapPx);
+          const blockBottom = toEditorY(blockEl.getBoundingClientRect().bottom);
+
+          if (blockBottom <= pageEnd + 1) {
+            break;
+          }
+
+          let low = searchStartIdx;
+          let high = tokens.length - 1;
+          let overflowIdx = -1;
+
+          while (low <= high) {
+            const mid = Math.floor((low + high) / 2);
+            const tok = tokens[mid];
+            sharedRange.setStart(tok.node, tok.start);
+            sharedRange.setEnd(tok.node, Math.min(tok.end, tok.start + 1));
+            const wRect = sharedRange.getBoundingClientRect();
+            const wBottom = toEditorY(wRect.bottom);
+
+            if (wBottom > pageEnd) {
+              overflowIdx = mid;
+              high = mid - 1;
+            } else {
+              low = mid + 1;
+            }
+          }
+
+          if (overflowIdx <= searchStartIdx) {
+            if (overflowIdx === -1) break;
+            currentPage += 1;
+            breaksApplied += 1;
+            searchStartIdx = overflowIdx + 1;
+            continue;
+          }
+
+          sharedRange.setStart(tokens[overflowIdx].node, tokens[overflowIdx].start);
+          sharedRange.setEnd(
+            tokens[overflowIdx].node,
+            Math.min(tokens[overflowIdx].end, tokens[overflowIdx].start + 1)
+          );
+          const overflowLineTop = toEditorY(sharedRange.getBoundingClientRect().top);
+
+          while (overflowIdx > searchStartIdx + 1) {
+            const prevTok = tokens[overflowIdx - 1];
+            sharedRange.setStart(prevTok.node, prevTok.start);
+            sharedRange.setEnd(prevTok.node, Math.min(prevTok.end, prevTok.start + 1));
+            const prevTop = toEditorY(sharedRange.getBoundingClientRect().top);
+            if (Math.abs(prevTop - overflowLineTop) <= 4) {
+              overflowIdx -= 1;
+            } else {
+              break;
+            }
+          }
+
+          const breakToken = tokens[overflowIdx];
+          sharedRange.setStart(breakToken.node, breakToken.start);
+          sharedRange.setEnd(breakToken.node, Math.min(breakToken.end, breakToken.start + 1));
+          const lineTopInEditor = toEditorY(sharedRange.getBoundingClientRect().top);
+
+          currentPage += 1;
+          const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+          const spacerHeightPx = Math.max(0, Math.round(targetStart - lineTopInEditor));
+
+          if (spacerHeightPx > 0) {
+            try {
+              const pmPos = editor.view.posAtDOM(breakToken.node, breakToken.start);
+              if (typeof pmPos === 'number' && pmPos >= 0) {
+                nextWidgetSpecs.push({
+                  pos: pmPos,
+                  heightPx: spacerHeightPx,
+                  toPage: currentPage,
+                });
+                unappliedWidgetDeltaPx += spacerHeightPx;
+                breaksApplied += 1;
+              }
+            } catch {
+              unappliedWidgetDeltaPx += spacerHeightPx;
+              breaksApplied += 1;
+            }
+          }
+
+          searchStartIdx = overflowIdx + 1;
+        }
+      };
+
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        const nextChild = i + 1 < children.length ? children[i + 1] : null;
+        const tag = child.tagName.toLowerCase();
+
+        const isHardBreak =
+          tag === 'hr' ||
+          child.classList.contains('page-break') ||
+          child.classList.contains('hard-page-break') ||
+          child.getAttribute('data-page-break') === 'true' ||
+          child.getAttribute('data-page-break') === 'hard';
+
+        if (isHardBreak) {
+          forceNextPageStart = true;
+          if (i === children.length - 1) {
+            currentPage += 1;
+            breaksApplied += 1;
+          }
+          continue;
+        }
+
+        if (forceNextPageStart) {
+          currentPage += 1;
+          const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+          applyExactShiftToEditorTop(child, targetStart, currentPage);
+          forceNextPageStart = false;
+        }
+
+        const childRect = child.getBoundingClientRect();
+        const childTop = toEditorY(childRect.top);
+        const childBottom = toEditorY(childRect.bottom);
+        const childHeight = Math.max(0, childBottom - childTop);
+
+        const pageStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+        const pageEnd = getPageEndInEditorPx(layout, currentPage, deskGapPx);
+        const isAtTopOfCurrentPage = childTop <= pageStart + 6;
+
+        if (/^h[1-6]$/.test(tag)) {
+          const hasNextContent =
+            nextChild &&
+            nextChild.tagName.toLowerCase() !== 'hr' &&
+            !nextChild.classList.contains('page-break');
+          const keepWithNext = hasNextContent ? layout.headingKeepWithNextPx : 0;
+
+          if (!isAtTopOfCurrentPage && childBottom + keepWithNext > pageEnd) {
+            currentPage += 1;
+            const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+            applyExactShiftToEditorTop(child, targetStart, currentPage);
+          }
+          continue;
+        }
+
+        const isImageBlock =
+          tag === 'img' ||
+          tag === 'figure' ||
+          (child.querySelector('img') !== null && (child.textContent || '').trim().length === 0);
+
+        if (isImageBlock) {
+          if (!isAtTopOfCurrentPage && childBottom > pageEnd) {
+            currentPage += 1;
+            const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+            applyExactShiftToEditorTop(child, targetStart, currentPage);
+          }
+          const updatedBottom = toEditorY(child.getBoundingClientRect().bottom);
+          while (updatedBottom > getPageEndInEditorPx(layout, currentPage, deskGapPx)) {
+            currentPage += 1;
+          }
+          continue;
+        }
+
+        if (tag === 'ul' || tag === 'ol') {
+          const items = Array.from(child.children).filter(
+            (el) => el.tagName.toLowerCase() === 'li'
+          ) as HTMLElement[];
+
+          if (items.length > 0) {
+            const firstLiRect = items[0].getBoundingClientRect();
+            const firstLiBottom = toEditorY(firstLiRect.bottom);
+            const firstLiHeight = firstLiRect.height / safeScale;
+
+            if (
+              !isAtTopOfCurrentPage &&
+              firstLiBottom > pageEnd &&
+              (firstLiHeight <= layout.orphanLineBufferPx * 2.5 ||
+                pageEnd - childTop < layout.orphanLineBufferPx * 1.5)
+            ) {
+              currentPage += 1;
+              const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+              applyExactShiftToEditorTop(child, targetStart, currentPage);
+            }
+
+            for (let k = 0; k < items.length; k++) {
+              const li = items[k];
+              const liRect = li.getBoundingClientRect();
+              const liTop = toEditorY(liRect.top);
+              const liBottom = toEditorY(liRect.bottom);
+              const liHeight = Math.max(0, liBottom - liTop);
+              const curPageStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+              const curPageEnd = getPageEndInEditorPx(layout, currentPage, deskGapPx);
+              const liAtPageTop = liTop <= curPageStart + 6;
+
+              if (liBottom > curPageEnd) {
+                const remainingOnPage = curPageEnd - liTop;
+                const shouldShiftWholeItem =
+                  !liAtPageTop &&
+                  (remainingOnPage < layout.orphanLineBufferPx * 1.5 ||
+                    liHeight <= getPageUsableHeightPx(layout, currentPage + 1) * 0.45);
+
+                if (shouldShiftWholeItem) {
+                  currentPage += 1;
+                  const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+                  applyExactShiftToEditorTop(li, targetStart, currentPage);
+                }
+
+                if (toEditorY(li.getBoundingClientRect().bottom) > getPageEndInEditorPx(layout, currentPage, deskGapPx)) {
+                  paginateBlockLines(li);
+                }
+              }
+            }
+          }
+          continue;
+        }
+
+        const tableEl = (
+          tag === 'table'
+            ? child
+            : child.classList.contains('tableWrapper') || child.querySelector('table') !== null
+            ? (child.querySelector('table') as HTMLElement | null)
+            : null
+        );
+
+        if (tableEl) {
+          const rows = Array.from(tableEl.querySelectorAll('tr')) as HTMLElement[];
+          if (rows.length > 0) {
+            const firstRowBottom = toEditorY(rows[0].getBoundingClientRect().bottom);
+            const secondRowBottom =
+              rows.length > 1 ? toEditorY(rows[1].getBoundingClientRect().bottom) : firstRowBottom;
+
+            if (!isAtTopOfCurrentPage && (firstRowBottom > pageEnd || secondRowBottom > pageEnd)) {
+              currentPage += 1;
+              const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+              applyExactShiftToEditorTop(child, targetStart, currentPage);
+            }
+
+            if (
+              toEditorY(child.getBoundingClientRect().bottom) >
+              getPageEndInEditorPx(layout, currentPage, deskGapPx)
+            ) {
+              const allCells = Array.from(tableEl.querySelectorAll('th, td')) as HTMLElement[];
+              const measuredCellWidths = allCells.map((cell) =>
+                Math.max(40, Math.round(cell.getBoundingClientRect().width / safeScale))
+              );
+              allCells.forEach((cell, idx) => {
+                cell.style.width = `${measuredCellWidths[idx]}px`;
+                cell.setAttribute('data-hm-cell-width', 'true');
+              });
+
+              tableEl.setAttribute('data-hm-multipage', 'true');
+
+              for (let r = 0; r < rows.length; r++) {
+                const row = rows[r];
+                const rRect = row.getBoundingClientRect();
+                const rTop = toEditorY(rRect.top);
+                const rBottom = toEditorY(rRect.bottom);
+                const curPageStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+                const curPageEnd = getPageEndInEditorPx(layout, currentPage, deskGapPx);
+
+                if (rBottom > curPageEnd) {
+                  if (r === 0 && rTop > curPageStart + 6) {
+                    currentPage += 1;
+                    const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+                    applyExactShiftToEditorTop(child, targetStart, currentPage);
+                  } else if (rTop > curPageStart + 6) {
+                    currentPage += 1;
+                    const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+                    applyExactShiftToEditorTop(row, targetStart, currentPage);
+                  } else {
+                    while (
+                      toEditorY(row.getBoundingClientRect().bottom) >
+                      getPageEndInEditorPx(layout, currentPage, deskGapPx)
+                    ) {
+                      currentPage += 1;
+                      breaksApplied += 1;
+                    }
+                  }
+                }
+              }
+            }
+          }
+          continue;
+        }
+
+        if (childBottom > pageEnd) {
+          const remainingOnPage = pageEnd - childTop;
+          const isShortBlock = childHeight <= layout.orphanLineBufferPx * 2.5;
+          const tooLittleRoomToSplit = remainingOnPage < layout.orphanLineBufferPx * 1.5;
+
+          if (!isAtTopOfCurrentPage && (isShortBlock || tooLittleRoomToSplit)) {
+            currentPage += 1;
+            const targetStart = getPageStartInEditorPx(layout, currentPage, deskGapPx);
+            applyExactShiftToEditorTop(child, targetStart, currentPage);
+          }
+
+          const updatedBottom = toEditorY(child.getBoundingClientRect().bottom);
+          if (updatedBottom > getPageEndInEditorPx(layout, currentPage, deskGapPx)) {
+            paginateBlockLines(child);
+          }
+        }
       }
 
-      usedHeight += childHeight;
-    });
+      const prevSpecs = activeWidgetSpecsRef.current;
+      const specsChanged =
+        prevSpecs.length !== nextWidgetSpecs.length ||
+        prevSpecs.some(
+          (s, idx) =>
+            s.pos !== nextWidgetSpecs[idx].pos ||
+            Math.abs(s.heightPx - nextWidgetSpecs[idx].heightPx) > 1 ||
+            s.toPage !== nextWidgetSpecs[idx].toPage
+        );
 
-    const totalPagesComputed = Math.max(1, currentPage);
-    setInternalPageCount(totalPagesComputed);
-    if (totalPagesComputed !== pageCount) {
-      onPageCountChange(totalPagesComputed);
+      if (specsChanged) {
+        activeWidgetSpecsRef.current = nextWidgetSpecs;
+        const decorations = nextWidgetSpecs.map((spec) =>
+          Decoration.widget(spec.pos, () => createFlowSpacerWidgetDOM(spec), {
+            side: -1,
+            key: `hm-spacer-${spec.pos}-${spec.toPage}-${spec.heightPx}`,
+          })
+        );
+        const decoSet =
+          decorations.length > 0
+            ? DecorationSet.create(editor.state.doc, decorations)
+            : DecorationSet.empty;
+
+        const tr = editor.state.tr
+          .setMeta(HM_PAGINATION_PLUGIN_KEY, decoSet)
+          .setMeta('addToHistory', false);
+        editor.view.dispatch(tr);
+      } else if (existingSpacers.length > 0) {
+        existingSpacers.forEach((sp, idx) => {
+          const spec = nextWidgetSpecs[idx];
+          const h = spec ? spec.heightPx : Number(sp.getAttribute('data-hm-spacer-height') || '0');
+          if (h > 0) {
+            sp.style.display = 'block';
+            sp.style.height = `${h}px`;
+          }
+        });
+      }
+
+      const lastChild = children[children.length - 1];
+      const finalProseRect = editorProse.getBoundingClientRect();
+      const finalLastBottom =
+        (lastChild.getBoundingClientRect().bottom - finalProseRect.top) / safeScale;
+      const pageFromLastBottom = getPageNumberAtEditorOffsetPx(
+        layout,
+        Math.max(0, finalLastBottom - 2),
+        deskGapPx
+      );
+
+      const finalTotalPages = Math.max(1, currentPage, pageFromLastBottom);
+      const totalSpanPx = Math.max(0, Math.round(finalLastBottom));
+
+      setMeasuredHeightPx(totalSpanPx);
+      setActiveBreakCount(breaksApplied);
+      setPageCount(finalTotalPages);
+      onPageCountChange?.(finalTotalPages);
+
+      if (onActivePageChange && editor.view) {
+        try {
+          const selFrom = editor.state.selection.from;
+          const coords = editor.view.coordsAtPos(selFrom);
+          const cursorYRel = (coords.top - finalProseRect.top) / safeScale;
+          const cursorPage = Math.min(
+            finalTotalPages,
+            Math.max(1, getPageNumberAtEditorOffsetPx(layout, cursorYRel, deskGapPx))
+          );
+          onActivePageChange(cursorPage);
+        } catch {
+          // Ignore
+        }
+      }
+
+      if (onDebugInfoChange) {
+        onDebugInfoChange({
+          paperSize: layout.paperDef.name,
+          orientation,
+          marginOption: layout.marginPreset.name,
+          pageWidthPx: layout.pageWidthPx,
+          pageHeightPx: layout.pageHeightPx,
+          usablePage1HeightPx: layout.page1UsableHeightPx,
+          usableSubsequentHeightPx: layout.subsequentUsableHeightPx,
+          measuredContentHeightPx: totalSpanPx,
+          computedPageCount: finalTotalPages,
+          renderedPageSheets: finalTotalPages,
+          activeBreakCount: breaksApplied,
+        });
+      }
+    } finally {
+      isReflowingRef.current = false;
     }
+  }, [
+    editor,
+    layout,
+    deskGapPx,
+    orientation,
+    zoomLevel,
+    isMobileScreen,
+    mobileCanvasScale,
+    onDebugInfoChange,
+    onPageCountChange,
+    onActivePageChange,
+  ]);
 
-    return totalPagesComputed;
-  }, [layout, deskGapPx, pageCount, onPageCountChange]);
-
-  // Synchronize layout & pagination engine debug stats whenever editor changes
   useEffect(() => {
     if (!editor) return;
 
-    const syncPagination = () => {
-      if (editor.isDestroyed || !(editor as any).view?.dom) return;
+    const handleUpdate = () => {
       reflowEditorPages();
+    };
 
-      const html = editor.getHTML();
-      const result = paginateDocument(html, {
-        paperSize,
-        orientation,
-        marginOption,
-        includeLetterheadOnPage1: true,
-      });
-
-      setDebugData(result.debugInfo);
-      if (onDebugInfoChange) {
-        onDebugInfoChange(result.debugInfo);
+    const handleSelectionUpdate = () => {
+      if (!onActivePageChange || !editorHostRef.current || !editor.view) return;
+      const editorProse = editorHostRef.current.querySelector('.tiptap.ProseMirror') as HTMLElement | null;
+      if (!editorProse) return;
+      try {
+        const proseRect = editorProse.getBoundingClientRect();
+        const fallbackScale = (isMobileScreen ? mobileCanvasScale : zoomLevel) || 1;
+        const measuredScale =
+          editorProse.offsetWidth > 0 && proseRect.width > 0
+            ? proseRect.width / editorProse.offsetWidth
+            : fallbackScale;
+        const safeScale = measuredScale > 0.05 ? measuredScale : 1;
+        const coords = editor.view.coordsAtPos(editor.state.selection.from);
+        const cursorYRel = (coords.top - proseRect.top) / safeScale;
+        const cursorPage = Math.min(
+          pageCount,
+          Math.max(1, getPageNumberAtEditorOffsetPx(layout, cursorYRel, deskGapPx))
+        );
+        onActivePageChange(cursorPage);
+      } catch {
+        // Ignore
       }
     };
 
-    syncPagination();
-    const timer = setTimeout(syncPagination, 60);
+    handleUpdate();
 
-    // TipTap transaction hook
-    editor.on('transaction', syncPagination);
+    editor.on('update', handleUpdate);
+    editor.on('selectionUpdate', handleSelectionUpdate);
+
+    const handleCustomReflow = () => {
+      reflowEditorPages();
+    };
+    window.addEventListener('hubmind:reflow-pagination', handleCustomReflow);
+
+    if (typeof document !== 'undefined' && (document as any).fonts?.ready) {
+      (document as any).fonts.ready.then(() => {
+        if (!editor.isDestroyed) {
+          reflowEditorPages();
+        }
+      });
+    }
+
+    const hostEl = editorHostRef.current;
+    const imgs = hostEl ? Array.from(hostEl.querySelectorAll('img')) : [];
+    const onImgLoad = () => reflowEditorPages();
+    imgs.forEach((img) => {
+      if (!img.complete) {
+        img.addEventListener('load', onImgLoad);
+      }
+    });
+
+    const timer1 = setTimeout(handleUpdate, 60);
+    const timer2 = setTimeout(handleUpdate, 220);
 
     return () => {
-      clearTimeout(timer);
-      editor.off('transaction', syncPagination);
+      editor.off('update', handleUpdate);
+      editor.off('selectionUpdate', handleSelectionUpdate);
+      window.removeEventListener('hubmind:reflow-pagination', handleCustomReflow);
+      imgs.forEach((img) => img.removeEventListener('load', onImgLoad));
+      clearTimeout(timer1);
+      clearTimeout(timer2);
     };
-  }, [editor, paperSize, orientation, marginOption, reflowEditorPages, onDebugInfoChange]);
+  }, [editor, paperSize, orientation, marginOption, reflowEditorPages, onActivePageChange, isMobileScreen, mobileCanvasScale, zoomLevel, pageCount, layout, deskGapPx]);
 
-  // Re-flow on layout changes or window resizing
-  useLayoutEffect(() => {
-    reflowEditorPages();
-  }, [layout, zoomLevel, paperSize, orientation, marginOption, reflowEditorPages]);
-
-  // Track active page based on scroll position in editor container
   useEffect(() => {
-    const handleScroll = () => {
-      const scrollParent = containerRef.current?.closest('.overflow-y-auto');
-      if (!scrollParent) return;
+    reflowEditorPages();
+  }, [layout, zoomLevel, mobileCanvasScale, paperSize, orientation, marginOption, reflowEditorPages]);
 
-      const scrollTop = scrollParent.scrollTop;
-      const targetHeight = (layout.pageHeightPx + deskGapPx) * (isMobileScreen ? mobileCanvasScale : zoomLevel);
-      const currentPage = Math.min(
-        effectivePageCount,
-        Math.max(1, Math.floor((scrollTop + 200) / targetHeight) + 1)
-      );
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const containerEl = scrollContainerRef.current;
+    if (!containerEl) return;
 
-      if (currentPage !== activePage) {
-        onActivePageChange(currentPage);
-      }
+    let rafId: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        updateResponsiveScale();
+        reflowEditorPages();
+      });
+    });
+
+    observer.observe(containerEl);
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      observer.disconnect();
     };
+  }, [updateResponsiveScale, reflowEditorPages]);
 
-    const scrollParent = containerRef.current?.closest('.overflow-y-auto');
-    if (scrollParent) {
-      scrollParent.addEventListener('scroll', handleScroll, { passive: true });
-      return () => scrollParent.removeEventListener('scroll', handleScroll);
-    }
-  }, [layout.pageHeightPx, deskGapPx, zoomLevel, mobileCanvasScale, internalPageCount, pageCount, activePage, onActivePageChange, isMobileScreen]);
-
-  const effectivePageCount = Math.max(1, Math.max(pageCount, internalPageCount));
   const pagesArray = useMemo(() => {
-    return Array.from({ length: effectivePageCount }, (_, idx) => idx + 1);
-  }, [effectivePageCount]);
+    return Array.from({ length: Math.max(1, pageCount) }, (_, idx) => idx + 1);
+  }, [pageCount]);
 
-  const isWhitePaper = paperTheme === 'white';
+  const totalStackHeightPx = useMemo(() => {
+    return pageCount * layout.pageHeightPx + Math.max(0, pageCount - 1) * deskGapPx;
+  }, [pageCount, layout.pageHeightPx, deskGapPx]);
+
+  const rulerTicks = useMemo(() => {
+    const totalCm = Math.floor(layout.pageWidthMm / 10);
+    return Array.from({ length: totalCm + 1 }, (_, i) => i);
+  }, [layout.pageWidthMm]);
+
+  const isPaperWhite = paperTheme === 'white';
 
   return (
     <div
-      ref={containerRef}
+      ref={scrollContainerRef}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      style={
-        isMobileScreen
-          ? {
-              width: `${layout.pageWidthPx}px`,
-              transform: `scale(${mobileCanvasScale})`,
-              transformOrigin: 'top center',
-              transition: 'transform 0.12s ease-out',
-              touchAction: 'pan-x pan-y',
-              marginBottom: `${-(layout.pageHeightPx * (1 - mobileCanvasScale))}px`,
-            }
-          : {
-              transform: `scale(${zoomLevel})`,
-              transformOrigin: 'top center',
-              transition: 'transform 0.12s cubic-bezier(0.16, 1, 0.3, 1)',
-            }
-      }
-      className="w-full flex flex-col items-center pb-24 print:transform-none print:pb-0"
+      className="flex-1 overflow-y-auto overflow-x-auto bg-slate-900/95 p-2 sm:p-6 md:p-10 flex flex-col items-center relative select-none print:p-0 print:bg-white print:overflow-visible scrollbar-thin scrollbar-thumb-slate-700"
     >
-      {/* Top Multi-Page & Orientation Status Badge */}
-      <div className="mb-4 print:hidden flex items-center gap-2 bg-slate-900/95 border border-slate-800 backdrop-blur-md px-4 py-1.5 rounded-full text-xs text-slate-300 shadow-xl select-none animate-in fade-in duration-200">
-        <Layers className="w-3.5 h-3.5 text-accent shrink-0" />
-        <span className="font-medium">
-          <strong className="text-white font-mono">{effectivePageCount} {paperSize.toUpperCase()} {effectivePageCount === 1 ? 'Page' : 'Pages'}</strong>
-        </span>
-        <span className="text-slate-600">•</span>
-        <span className="text-[11px] text-slate-400 capitalize font-mono">{orientation}</span>
-        <span className="text-slate-600">•</span>
-        <span className="text-[11px] text-slate-400 font-mono">Margins: {marginOption}</span>
-        <span className="text-slate-600">•</span>
-        <span className="text-[11px] text-teal-400 font-mono font-semibold">Page {activePage} of {effectivePageCount}</span>
-      </div>
-
-      {/* Multi-Page Stack Canvas: Container holding layered physical sheets + active content */}
-      <div 
-        className="relative flex flex-col items-center print:block print:w-full"
-        style={{
-          width: `${layout.pageWidthPx}px`,
-        }}
-      >
-        {/* Layer 1: Background Physical Paper Sheets (with desk gaps, running headers, footers) */}
-        <div className="flex flex-col items-center w-full select-none pointer-events-none print:hidden">
-          {pagesArray.map((pageNum, idx) => {
-            const isFirstPage = pageNum === 1;
-
-            return (
-              <React.Fragment key={pageNum}>
-                {/* Physical Sheet Card */}
+      {showRuler && (
+        <div
+          style={{
+            width: `${layout.pageWidthPx}px`,
+            transform: isMobileScreen ? `scale(${mobileCanvasScale})` : `scale(${zoomLevel})`,
+            transformOrigin: 'top center',
+          }}
+          className="h-6 bg-slate-950/90 border border-slate-800 rounded-t-sm mb-3 hidden sm:flex items-end relative overflow-hidden shrink-0 print:hidden shadow-md"
+        >
+          <div
+            style={{ width: `${layout.marginsPx.left}px` }}
+            className="h-full bg-slate-800/70 border-r border-teal-500/40 shrink-0"
+            title={`Left Margin: ${layout.marginsMm.left}mm`}
+          />
+          <div className="flex-1 h-full relative">
+            {rulerTicks.map((cm) => {
+              const leftPx = (cm * 10 * layout.pageWidthPx) / layout.pageWidthMm - layout.marginsPx.left;
+              if (leftPx < 0 || leftPx > layout.contentWidthPx) return null;
+              return (
                 <div
-                  id={`document-physical-sheet-${pageNum}`}
+                  key={cm}
+                  style={{ left: `${leftPx}px` }}
+                  className="absolute bottom-0 flex flex-col items-center"
+                >
+                  <span className="text-[8px] font-mono text-slate-400 mb-0.5 select-none">{cm}</span>
+                  <div className="w-px h-1.5 bg-slate-600" />
+                </div>
+              );
+            })}
+          </div>
+          <div
+            style={{ width: `${layout.marginsPx.right}px` }}
+            className="h-full bg-slate-800/70 border-l border-teal-500/40 shrink-0"
+            title={`Right Margin: ${layout.marginsMm.right}mm`}
+          />
+        </div>
+      )}
+
+      {isDebugActive && (
+        <div className="mb-4 px-3.5 py-2 rounded-xl bg-slate-950/95 border border-amber-500/40 text-[11px] font-mono text-amber-300 flex flex-wrap items-center gap-x-4 gap-y-1 shadow-lg max-w-4xl z-30 print:hidden">
+          <span className="font-bold text-amber-400 uppercase">Pagination Inspector:</span>
+          <span>Paper: {layout.paperDef.name} ({orientation})</span>
+          <span>Sheet: {layout.pageWidthPx}×{layout.pageHeightPx}px</span>
+          <span>Usable P1: {layout.page1UsableHeightPx}px</span>
+          <span>Usable P2+: {layout.subsequentUsableHeightPx}px</span>
+          <span>Content Span: {measuredHeightPx}px</span>
+          <span>Breaks: {activeBreakCount}</span>
+          <span className="text-emerald-400 font-bold">Total Sheets: {pageCount}</span>
+        </div>
+      )}
+
+      <div
+        style={{
+          width: isMobileScreen
+            ? `${Math.round(layout.pageWidthPx * mobileCanvasScale)}px`
+            : `${Math.round(layout.pageWidthPx * zoomLevel)}px`,
+          minHeight: isMobileScreen
+            ? `${Math.round(totalStackHeightPx * mobileCanvasScale + 40)}px`
+            : `${Math.round(totalStackHeightPx * zoomLevel + 60)}px`,
+        }}
+        className="relative flex justify-center transition-all duration-150 print:w-full print:min-h-0"
+      >
+        <div
+          style={{
+            width: `${layout.pageWidthPx}px`,
+            minHeight: `${totalStackHeightPx}px`,
+            transform: isMobileScreen
+              ? `scale(${mobileCanvasScale})`
+              : `scale(${zoomLevel})`,
+            transformOrigin: 'top center',
+          }}
+          className="relative flex flex-col items-center pb-16 print:pb-0 print:transform-none"
+        >
+          <div
+            aria-hidden="true"
+            className="w-full flex flex-col items-center pointer-events-none select-none z-0"
+          >
+            {pagesArray.map((pageNumber, index) => {
+              const isFirstPage = pageNumber === 1;
+
+              return (
+                <div
+                  key={pageNumber}
+                  data-page-sheet={pageNumber}
                   style={{
                     width: `${layout.pageWidthPx}px`,
                     height: `${layout.pageHeightPx}px`,
-                    paddingTop: `${layout.marginsPx.top}px`,
-                    paddingRight: `${layout.marginsPx.right}px`,
-                    paddingBottom: `${layout.marginsPx.bottom}px`,
-                    paddingLeft: `${layout.marginsPx.left}px`,
+                    marginBottom: index < pagesArray.length - 1 ? `${deskGapPx}px` : '0px',
                     boxSizing: 'border-box',
                   }}
-                  className={`relative transition-colors duration-150 ${
-                    isWhitePaper
-                      ? 'paper-white bg-white text-slate-950 border border-slate-300 shadow-2xl rounded-xs ring-1 ring-black/5'
-                      : 'paper-dark bg-slate-900 text-slate-100 border border-slate-800 shadow-2xl rounded-xs ring-1 ring-white/5'
+                  className={`relative transition-colors duration-200 flex flex-col justify-between rounded-[2px] ${
+                    isPaperWhite
+                      ? 'bg-white text-slate-950 shadow-[0_14px_38px_rgba(0,0,0,0.55)] border border-slate-300 ring-1 ring-black/5'
+                      : 'bg-slate-950 text-slate-100 shadow-[0_14px_38px_rgba(0,0,0,0.75)] border border-slate-800 ring-1 ring-white/10'
                   }`}
                 >
-                  {/* Optional Visual Margin Guides (Dashed Box) */}
-                  {showMarginGuides && !isMobileScreen && (
-                    <div 
-                      className="absolute inset-0 pointer-events-none border border-dashed border-cyan-400/40 z-20 print:hidden"
-                      style={{
-                        top: `${layout.marginsPx.top}px`,
-                        right: `${layout.marginsPx.right}px`,
-                        bottom: `${layout.marginsPx.bottom}px`,
-                        left: `${layout.marginsPx.left}px`,
-                      }}
-                    >
-                      <span className="absolute -top-3 left-2 bg-cyan-950/80 text-cyan-300 text-[9px] font-mono px-1 rounded border border-cyan-500/40">
-                        Print Area: {layout.contentWidthMm}mm × {layout.contentHeightMm}mm
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Left Gutter Floating Sheet Number */}
-                  {!isMobileScreen && (
-                    <div className="absolute -left-16 top-4 hidden xl:flex flex-col items-center gap-1 print:hidden select-none pointer-events-auto">
-                      <div className="px-2 py-1 bg-slate-900 border border-slate-800 text-slate-300 rounded text-[10px] font-mono font-bold shadow-xl flex items-center gap-1">
-                        <FileText className="w-3 h-3 text-accent" />
-                        <span>{pageNum}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Top of Sheet: Official Letterhead on Page 1, Running Header on Page 2+ */}
-                  {isFirstPage ? (
-                    <div className="pointer-events-auto">
-                      <OfficialLetterhead theme={paperTheme} />
-                    </div>
-                  ) : (
-                    <div 
-                      style={{ height: `${layout.subsequentHeaderHeightPx}px` }}
-                      className="running-header pb-2 mb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 font-sans select-none print:border-slate-300 pointer-events-auto"
-                    >
-                      <span className="font-semibold uppercase tracking-wider text-[11px] text-slate-700 dark:text-slate-300 print:text-black">
-                        Jaystarbliss Dynamic Institute
-                      </span>
-                      <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 print:text-black font-semibold">
-                        Sheet {pageNum} of {effectivePageCount}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Bottom of Sheet: Footer Page Indicator */}
-                  <div className="absolute bottom-3 right-6 text-[10px] font-mono text-slate-400 print:text-black select-none pointer-events-none font-semibold">
-                    Page {pageNum} of {effectivePageCount}
-                  </div>
-                </div>
-
-                {/* Desk Gap & Clean Visual Separation Between Consecutive Sheets */}
-                {idx < pagesArray.length - 1 && (
-                  <div 
-                    style={{ height: `${deskGapPx}px` }}
-                    className="w-full flex items-center justify-center select-none pointer-events-none print:hidden"
+                  <div
+                    style={{
+                      height: `${layout.marginsPx.top + (isFirstPage ? layout.page1HeaderHeightPx : layout.subsequentHeaderHeightPx)}px`,
+                      paddingTop: `${layout.marginsPx.top}px`,
+                      paddingLeft: `${layout.marginsPx.left}px`,
+                      paddingRight: `${layout.marginsPx.right}px`,
+                    }}
+                    className="shrink-0 select-none pointer-events-none flex flex-col justify-start overflow-hidden"
                   >
-                    {showPageBreaks && (
-                      <div className="flex items-center gap-2 px-3 py-1 bg-slate-900/90 border border-slate-800 backdrop-blur-xs rounded-full text-[10px] font-mono text-slate-400 shadow-md">
-                        <SplitSquareVertical className="w-3 h-3 text-accent" />
-                        <span>Page Break</span>
-                        <span className="text-slate-600">•</span>
-                        <span className="text-teal-400 font-bold">Sheet {pageNum + 1} of {effectivePageCount}</span>
+                    {isFirstPage ? (
+                      <OfficialLetterhead theme={paperTheme} className="mb-2" />
+                    ) : (
+                      <div
+                        className={`pb-2.5 border-b flex items-center justify-between text-xs font-mono ${
+                          isPaperWhite
+                            ? 'border-slate-200 text-slate-500'
+                            : 'border-slate-800 text-slate-400'
+                        }`}
+                      >
+                        <span className="truncate max-w-[340px] font-semibold">
+                          {docTitle || 'Untitled Document'}
+                        </span>
+                        <span>Jaystarbliss Dynamic Institute</span>
                       </div>
                     )}
                   </div>
-                )}
-              </React.Fragment>
-            );
-          })}
-        </div>
 
-        {/* Layer 2: Active TipTap Content Host Surface (positioned on top of the physical sheets) */}
-        <div
-          ref={editorHostRef}
-          id="hubmind-active-editor-content-host"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: `${layout.pageWidthPx}px`,
-            paddingTop: `${layout.marginsPx.top + layout.page1HeaderHeightPx}px`,
-            paddingRight: `${layout.marginsPx.right}px`,
-            paddingBottom: `${layout.marginsPx.bottom}px`,
-            paddingLeft: `${layout.marginsPx.left}px`,
-            boxSizing: 'border-box',
-            pointerEvents: 'auto',
-          }}
-          className={`z-10 print:static print:p-0 print:w-full ${
-            isWhitePaper ? 'paper-white text-slate-900' : 'paper-dark text-slate-100'
-          }`}
-        >
-          {editor && (
-            <div className={`document-paginated-editor-content min-h-[300px] ${
-              isWhitePaper ? 'paper-white text-slate-900' : 'paper-dark text-slate-100'
-            }`}>
-              <EditorContent editor={editor} />
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Pagination Debug Inspector Overlay */}
-      {showDebugInfo && debugData.length > 0 && (
-        <div className="fixed bottom-12 right-6 z-40 bg-slate-900/95 border border-cyan-500/40 rounded-xl p-4 shadow-2xl backdrop-blur-md max-w-sm w-full text-xs text-slate-200 print:hidden font-mono animate-in fade-in slide-in-from-bottom duration-200">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
-            <div className="flex items-center gap-1.5 text-cyan-400 font-bold">
-              <Bug className="w-4 h-4" />
-              <span>Pagination Engine Inspector</span>
-            </div>
-            <span className="bg-cyan-500/20 text-cyan-300 text-[10px] px-2 py-0.5 rounded-full font-bold">
-              {paperSize.toUpperCase()} • {orientation}
-            </span>
-          </div>
-
-          <div className="space-y-2 mb-3">
-            <div className="flex justify-between text-slate-400">
-              <span>Paper Size:</span>
-              <span className="text-white font-semibold">{layout.pageWidthMm}mm × {layout.pageHeightMm}mm ({layout.pageWidthPx}×{layout.pageHeightPx}px)</span>
-            </div>
-            <div className="flex justify-between text-slate-400">
-              <span>Margins (T/R/B/L):</span>
-              <span className="text-white font-semibold">{layout.marginsMm.topMm}mm / {layout.marginsMm.rightMm}mm / {layout.marginsMm.bottomMm}mm / {layout.marginsMm.leftMm}mm</span>
-            </div>
-            <div className="flex justify-between text-slate-400">
-              <span>Content Area:</span>
-              <span className="text-white font-semibold">{layout.contentWidthMm}mm × {layout.contentHeightMm}mm ({layout.contentWidthPx}×{layout.contentHeightPx}px)</span>
-            </div>
-            <div className="flex justify-between text-slate-400">
-              <span>Break Spacer:</span>
-              <span className="text-teal-300 font-semibold">{breakSpacerHeight}px</span>
-            </div>
-          </div>
-
-          <div className="border-t border-slate-800 pt-2">
-            <div className="text-[10px] uppercase text-slate-500 font-bold mb-1.5">Page Breakdown</div>
-            <div className="max-h-36 overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-slate-700 pr-1">
-              {debugData.map((info) => (
-                <div key={info.pageNumber} className="bg-slate-950 p-2 rounded border border-slate-800 flex items-center justify-between text-[11px]">
-                  <div>
-                    <span className="text-accent font-bold">Page {info.pageNumber}</span>
-                    <span className="text-slate-500 ml-1.5">({info.totalElements} nodes)</span>
+                  <div
+                    style={{
+                      marginLeft: `${layout.marginsPx.left}px`,
+                      marginRight: `${layout.marginsPx.right}px`,
+                    }}
+                    className={`flex-1 relative ${
+                      showMarginGuides || isDebugActive
+                        ? isPaperWhite
+                          ? 'border border-dashed border-sky-400/50 bg-sky-50/10'
+                          : 'border border-dashed border-teal-500/40 bg-teal-950/10'
+                        : ''
+                    }`}
+                  >
+                    {isDebugActive && (
+                      <div className="absolute bottom-1 right-2 text-[9px] font-mono text-rose-500/80 bg-rose-500/10 px-1.5 py-0.5 rounded">
+                        Page {pageNumber} Boundary ({isFirstPage ? layout.page1UsableHeightPx : layout.subsequentUsableHeightPx}px usable)
+                      </div>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <span className="text-slate-300 font-mono">{info.usedHeightPx}px / {info.maxHeightPx}px</span>
-                    <span className="text-slate-500 ml-1">({pxToMm(info.usedHeightPx)}mm)</span>
+
+                  <div
+                    style={{
+                      height: `${layout.marginsPx.bottom}px`,
+                      paddingLeft: `${layout.marginsPx.left}px`,
+                      paddingRight: `${layout.marginsPx.right}px`,
+                    }}
+                    className="shrink-0 flex items-center justify-between text-[11px] font-mono select-none"
+                  >
+                    <div
+                      className={`w-full pt-3 border-t flex items-center justify-between ${
+                        isPaperWhite
+                          ? 'border-slate-200 text-slate-500'
+                          : 'border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      <span className="truncate max-w-[260px]">
+                        {docTitle || 'Official Hub-Mind Document'}
+                      </span>
+                      {showPageNumbers && (
+                        <span className="font-semibold">
+                          Page {pageNumber} of {pageCount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="absolute -left-20 top-4 hidden xl:flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-950/90 border border-slate-800 text-[11px] font-mono text-slate-400 shadow-md">
+                    <span>P.{pageNumber}</span>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </div>
+
+          <div
+            ref={editorHostRef}
+            id="hubmind-active-editor-content-host"
+            onClick={(e) => {
+              if (editor && e.target === e.currentTarget) {
+                editor.commands.focus();
+              }
+            }}
+            style={{
+              width: `${layout.pageWidthPx}px`,
+              minHeight: `${totalStackHeightPx}px`,
+              paddingTop: `${layout.marginsPx.top + layout.page1HeaderHeightPx}px`,
+              paddingBottom: `${layout.marginsPx.bottom}px`,
+              paddingLeft: `${layout.marginsPx.left}px`,
+              paddingRight: `${layout.marginsPx.right}px`,
+              boxSizing: 'border-box',
+            }}
+            className={`absolute top-0 left-0 z-10 select-text cursor-text ${
+              isPaperWhite ? 'paper-white text-slate-950' : 'paper-dark text-slate-100'
+            }`}
+          >
+            <EditorContent editor={editor} />
+          </div>
+
+          <div
+            aria-hidden="true"
+            className="absolute top-0 left-0 w-full flex flex-col items-center pointer-events-none select-none z-20 print:hidden"
+          >
+            {pagesArray.map((pageNumber, index) => {
+              const isFirstPage = pageNumber === 1;
+              return (
+                <React.Fragment key={`mask-${pageNumber}`}>
+                  <div
+                    style={{
+                      width: `${layout.pageWidthPx}px`,
+                      height: `${layout.pageHeightPx}px`,
+                      boxSizing: 'border-box',
+                    }}
+                    className="relative flex flex-col justify-between"
+                  >
+                    <div
+                      style={{
+                        height: `${layout.marginsPx.top + (isFirstPage ? layout.page1HeaderHeightPx : layout.subsequentHeaderHeightPx)}px`,
+                        paddingTop: `${layout.marginsPx.top}px`,
+                        paddingLeft: `${layout.marginsPx.left}px`,
+                        paddingRight: `${layout.marginsPx.right}px`,
+                      }}
+                      className={`shrink-0 flex flex-col justify-start overflow-hidden rounded-t-[2px] border-t border-x ${
+                        isPaperWhite
+                          ? 'bg-white text-slate-950 border-slate-300'
+                          : 'bg-slate-950 text-slate-100 border-slate-800'
+                      }`}
+                    >
+                      {isFirstPage ? (
+                        <OfficialLetterhead theme={paperTheme} className="mb-2" />
+                      ) : (
+                        <div
+                          className={`pb-2.5 border-b flex items-center justify-between text-xs font-mono ${
+                            isPaperWhite
+                              ? 'border-slate-200 text-slate-500'
+                              : 'border-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <span className="truncate max-w-[340px] font-semibold">
+                            {docTitle || 'Untitled Document'}
+                          </span>
+                          <span>Jaystarbliss Dynamic Institute</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 bg-transparent" />
+
+                    <div
+                      style={{
+                        height: `${layout.marginsPx.bottom}px`,
+                        paddingLeft: `${layout.marginsPx.left}px`,
+                        paddingRight: `${layout.marginsPx.right}px`,
+                      }}
+                      className={`shrink-0 flex items-center justify-between text-[11px] font-mono rounded-b-[2px] border-b border-x ${
+                        isPaperWhite
+                          ? 'bg-white text-slate-950 border-slate-300'
+                          : 'bg-slate-950 text-slate-100 border-slate-800'
+                      }`}
+                    >
+                      <div
+                        className={`w-full pt-3 border-t flex items-center justify-between ${
+                          isPaperWhite
+                            ? 'border-slate-200 text-slate-500'
+                            : 'border-slate-800 text-slate-500'
+                        }`}
+                      >
+                        <span className="truncate max-w-[260px]">
+                          {docTitle || 'Official Hub-Mind Document'}
+                        </span>
+                        {showPageNumbers && (
+                          <span className="font-semibold">
+                            Page {pageNumber} of {pageCount}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {index < pagesArray.length - 1 && (
+                    <div
+                      data-page-gap-mask={pageNumber}
+                      style={{
+                        width: `${layout.pageWidthPx + 8}px`,
+                        height: `${deskGapPx}px`,
+                      }}
+                      className="shrink-0 bg-slate-900"
+                    />
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
