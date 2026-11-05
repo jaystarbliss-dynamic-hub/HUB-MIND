@@ -430,3 +430,26 @@
 .hm-public .hm-footer{background:rgba(7,9,14,.76)}
 .hm-public .hm-nav{background:rgba(8,11,18,.72)}
 @media(prefers-reduced-motion:reduce){.hm-public canvas{visibility:hidden}}
+
+/* Keep the public-site header above the page content stacking context.
+   The header, main and footer are siblings with their own z-index layers;
+   raising only the dropdown cannot escape the header's old z-index: 1 layer. */
+.hm-public > header {
+  position: relative;
+  z-index: 10030 !important;
+}
+
+.hm-public .hm-nav {
+  position: relative;
+  z-index: 10031 !important;
+}
+
+@media (max-width: 760px) {
+  .hm-public .hm-nav-links.is-open {
+    position: absolute;
+    z-index: 10032 !important;
+    top: calc(100% - 1px);
+    left: 0;
+    right: 0;
+  }
+}
