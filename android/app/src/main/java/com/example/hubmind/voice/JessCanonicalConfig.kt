@@ -14,7 +14,7 @@ object JessCanonicalConfig {
         devices: List<DeviceNode>,
         targetDevice: DeviceNode?,
         permissionMode: String = "allow-routine",
-        fullControlEnabled: Boolean = true
+        fullControlEnabled: Boolean = false
     ): String {
         val userName = user?.preferredName?.takeIf { it.isNotBlank() }
             ?: user?.displayName?.takeIf { it.isNotBlank() }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.lifecycle.ViewModel
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.viewModelScope
 import com.example.hubmind.agent.*
 import com.example.hubmind.data.model.User
@@ -179,9 +180,16 @@ class SettingsViewModel(
                     updateStatusMessage = "Update v${manifest.versionName} (build ${manifest.versionCode}) available: ${manifest.releaseNotes}"
                 )
             } else {
+                val installedPackage = runCatching {
+                    context.packageManager.getPackageInfo(context.packageName, 0)
+                }.getOrNull()
+                val installedVersionName = installedPackage?.versionName ?: "Unknown"
+                val installedVersionCode = installedPackage?.let {
+                    PackageInfoCompat.getLongVersionCode(it)
+                } ?: 0L
                 _uiState.value = _uiState.value.copy(
                     availableUpdate = null,
-                    updateStatusMessage = "No newer published Android release is available. Current installed build: 240."
+                    updateStatusMessage = "No newer published Android release is available. Installed version: v$installedVersionName (build $installedVersionCode)."
                 )
             }
         }

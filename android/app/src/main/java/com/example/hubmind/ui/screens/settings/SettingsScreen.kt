@@ -12,11 +12,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +34,11 @@ fun SettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val appPackageInfo = remember(context) {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
+    }
+    val installedVersionName = appPackageInfo?.versionName ?: "Unknown"
+    val installedVersionCode = appPackageInfo?.let { PackageInfoCompat.getLongVersionCode(it) } ?: 0L
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -325,7 +332,7 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Hub-Mind Android v2.4.0 (Build 240)", style = MaterialTheme.typography.titleSmall, color = Slate100, fontWeight = FontWeight.SemiBold)
+                            Text("Hub-Mind Android v$installedVersionName (Build $installedVersionCode)", style = MaterialTheme.typography.titleSmall, color = Slate100, fontWeight = FontWeight.SemiBold)
                             Text("Canonical Project: gen-lang-client-0197530608", style = MaterialTheme.typography.bodySmall, color = Slate400)
                         }
                         OutlinedButton(

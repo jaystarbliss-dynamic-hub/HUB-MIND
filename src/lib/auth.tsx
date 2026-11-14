@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, onIdTokenChanged, User as FirebaseUser, signOut } from 'firebase/auth';
+import { onAuthStateChanged, onIdTokenChanged, GoogleAuthProvider, signInWithCredential, User as FirebaseUser, signOut } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, limit, query, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { User } from '../types';
@@ -31,6 +31,34 @@ const AuthContext = createContext<AuthContextType>({
 const PENDING_INVITE_STORAGE_KEY = 'hubmind_pending_invite';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // The Android shell hands the same Google identity to the embedded Web
+  // workspace once. The bridge only returns a token on the trusted Hub-Mind
+  // origin and clears it immediately after consumption.
+  useEffect(() => {
+    const bridge = (window as any).HubMindAndroid;
+    if (typeof bridge?.consumeGoogleIdToken !== 'function') return;
+
+    let googleIdToken = '';
+    try {
+      googleIdToken = String(bridge.consumeGoogleIdToken() || '').trim();
+    } catch (error) {
+      console.warn('[Hub-Mind Android] Native sign-in handoff was unavailable:', error);
+    }
+    if (!googleIdToken) return;
+
+    void signInWithCredential(auth, GoogleAuthProvider.credential(googleIdToken))
+      .then(() => {
+        // A protected route may have redirected to /login before Firebase
+        // finished restoring this one-time native session.
+        if (window.location.pathname === '/login') {
+          window.location.replace('/workspace');
+        }
+      })
+      .catch((error) => {
+        console.error('[Hub-Mind Android] Workspace sign-in handoff failed:', error);
+      });
+  }, []);
+
   // Keep the Electron background command receiver aligned with Firebase auth.
   // The ID token is held in memory and refreshed automatically by Firebase.
   useEffect(() => {

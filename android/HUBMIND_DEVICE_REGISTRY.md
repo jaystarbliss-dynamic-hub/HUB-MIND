@@ -11,7 +11,7 @@ In Hub-Mind, the device registry tracks all authorized physical hardware endpoin
   "deviceName": "Hub-Mind Android Phone",
   "platform": "ANDROID",
   "model": "Pixel 8 Pro",
-  "agentVersion": "2.4.0-native",
+  "agentVersion": "2.5.0-native",
   "capabilities": [
     "ANDROID_ACCESSIBILITY",
     "MEDIA_STREAMING",

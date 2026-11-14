@@ -571,7 +571,7 @@ function ScreenInnerContent({
           </div>
           <div className="bg-slate-900 border border-slate-800 rounded-lg divide-y divide-slate-800">
             {[
-              { title: 'Verify Android Release Signing & APK v2.4.0', status: 'In Progress', priority: 'Urgent', tone: 'text-rose-300', owner: 'Daniel' },
+              { title: 'Verify Android Release Signing & APK v2.5.0', status: 'In Progress', priority: 'Urgent', tone: 'text-rose-300', owner: 'Daniel' },
               { title: 'Finalize November Financial Ledger (A4 PDF)', status: 'Assigned', priority: 'High', tone: 'text-amber-300', owner: 'Amara' },
               { title: 'Update Jess Memory Guardrails for Web Sync', status: 'Completed', priority: 'Medium', tone: 'text-emerald-300', owner: 'Studio Lead' },
               ...(!isMobile ? [{ title: 'Publish Cedar County Facility Briefing', status: 'Assigned', priority: 'Low', tone: 'text-slate-300', owner: 'Tolu' }] : []),

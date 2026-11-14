@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.hubmind.data.model.User
 import com.example.hubmind.data.repository.AuthRepository
+import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,6 +41,8 @@ class AuthViewModel(
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
             authRepository.signInWithGoogle(idToken).fold(
                 onSuccess = { user ->
+                    // Keep the Google ID token in memory for one-time Web workspace sign-in.
+                    NativeWebAuthTokenHolder.store(idToken)
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)
                 },
                 onFailure = { error ->

@@ -675,11 +675,14 @@ class JessRepositoryImpl(
         }
 
         val memories = (conversationRepository as? ConversationRepositoryImpl)?.userMemories?.value ?: emptyList()
+        val activeTarget = deviceRegistryRepository.currentTargetDevice.value
         val systemInstruction = JessCanonicalConfig.buildSystemInstruction(
             user = authRepository?.currentUser?.value,
             memories = memories,
             devices = deviceRegistryRepository.devices.value,
-            targetDevice = deviceRegistryRepository.currentTargetDevice.value
+            targetDevice = activeTarget,
+            permissionMode = activeTarget?.permissionMode ?: "ask",
+            fullControlEnabled = activeTarget?.fullControlActive == true
         )
         val toolDecls = JessCanonicalConfig.buildToolDeclarations()
 
@@ -1023,7 +1026,7 @@ class DeviceRegistryRepositoryImpl(
                 runCatching {
                     appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
                 }.getOrNull()
-            } ?: "2.4.0",
+            } ?: "2.5.0",
             status = DeviceStatus.ONLINE,
             isCurrentDevice = true,
             fullControlActive = accConnected,
@@ -1097,7 +1100,7 @@ class DeviceRegistryRepositoryImpl(
                             deviceId = devId,
                             deviceName = doc.getString("deviceName") ?: devId,
                             platform = platform,
-                            clientVersion = doc.getString("clientVersion") ?: "2.4.0",
+                            clientVersion = doc.getString("clientVersion") ?: "2.5.0",
                             status = status,
                             isCurrentDevice = devId == localDeviceId,
                             fullControlActive = doc.getBoolean("fullControlActive") ?: false,

@@ -17,11 +17,11 @@ const assertAndroidManifestPublicationState = (manifest) => {
   }
 };
 
-test('Android Gradle configuration enforces canonical applicationId, version 2.4.0 (240), and strict release signing', () => {
+test('Android Gradle configuration enforces canonical applicationId, version 2.5.0 (250), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
-  assert.match(buildGradle, /versionCode\s*=\s*240/);
-  assert.match(buildGradle, /versionName\s*=\s*"2\.4\.0"/);
+  assert.match(buildGradle, /versionCode\s*=\s*250/);
+  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.0"/);
   assert.match(buildGradle, /if\s*\(hasDedicatedReleaseKeystore\)\s*\{\s*signingConfig\s*=\s*signingConfigs\.getByName\("release"\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.auth\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.firestore\)/);
@@ -353,4 +353,49 @@ test('Checked-in google-services.json registers both debug and production signin
     item.client_type === 3 &&
     item.client_id === '691762959980-2jsohrd8s1elb4f84t3592vl728nhek7.apps.googleusercontent.com'
   ));
+});
+
+
+test('Android app opens the canonical workspace with a one-time native Google sign-in handoff', () => {
+  const mainActivity = read('android/app/src/main/java/com/example/hubmind/MainActivity.kt');
+  const nav = read('android/app/src/main/java/com/example/hubmind/ui/components/CommonComponents.kt');
+  const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const tokenHolder = read('android/app/src/main/java/com/example/hubmind/data/remote/NativeWebAuthTokenHolder.kt');
+  const authViewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
+  const webAuth = read('src/lib/auth.tsx');
+
+  assert.match(nav, /WORKSPACE\("Workspace"/);
+  assert.match(mainActivity, /HubMindNavDestination\.WORKSPACE ->/);
+  assert.match(mainActivity, /WorkspaceScreen\(/);
+  assert.match(workspace, /https:\/\/hub-mind\.netlify\.app\/workspace/);
+  assert.match(workspace, /isTrustedWorkspaceUrl/);
+  assert.match(workspace, /removeJavascriptInterface/);
+  assert.match(workspace, /handler\.cancel\(\)/);
+  assert.match(workspace, /consumeGoogleIdToken/);
+  assert.match(tokenHolder, /pendingGoogleIdToken = null/);
+  assert.match(tokenHolder, /MAX_TOKEN_AGE_MS/);
+  assert.match(authViewModel, /NativeWebAuthTokenHolder\.store\(idToken\)/);
+  assert.match(webAuth, /signInWithCredential\(auth, GoogleAuthProvider\.credential\(googleIdToken\)\)/);
+  const settingsScreen = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsScreen.kt');
+  const settingsViewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsViewModel.kt');
+  assert.match(settingsScreen, /PackageInfoCompat\.getLongVersionCode/);
+  assert.match(settingsScreen, /v\$installedVersionName \(Build \$installedVersionCode\)/);
+  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);
+});
+
+test('Android releases have human-readable version and channel labels on homepage and version history', () => {
+  const naming = read('src/lib/androidRelease.ts');
+  const home = read('src/pages/PublicHome.tsx');
+  const modal = read('src/components/DesktopUpdatesModal.tsx');
+  const gradle = read('android/app/build.gradle.kts');
+
+  assert.match(gradle, /versionCode\s*=\s*250/);
+  assert.match(gradle, /versionName\s*=\s*"2\.5\.0"/);
+  assert.match(naming, /OFFICIAL RELEASE/);
+  assert.match(naming, /TEST BUILD · DEBUG SIGNED/);
+  assert.match(naming, /compareAndroidReleaseVersions/);
+  assert.match(home, /apkDisplayName/);
+  assert.match(home, /formatAndroidReleaseLabel/);
+  assert.match(modal, /formatAndroidReleaseLabel/);
+  assert.match(modal, /compareAndroidReleaseVersions/);
 });
