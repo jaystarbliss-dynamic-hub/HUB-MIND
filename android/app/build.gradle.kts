@@ -37,7 +37,7 @@ val fetchOfficialHubMindLogo = tasks.register("fetchOfficialHubMindLogo") {
             val digest = MessageDigest.getInstance("SHA-1")
             digest.update(gitHeader)
             digest.update(bytes)
-            val actualBlobSha = digest.digest().joinToString("") { "%02x".format(it) }
+            val actualBlobSha = digest.digest().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
             require(actualBlobSha == hubMindLogoGitBlobSha) {
                 "Official Hub-Mind logo integrity check failed. Expected $hubMindLogoGitBlobSha, received $actualBlobSha."
             }
