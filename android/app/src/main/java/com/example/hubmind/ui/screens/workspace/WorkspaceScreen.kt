@@ -94,27 +94,32 @@ private class HubMindAndroidAuthBridge(
     private val webView: WebView
 ) {
     @JavascriptInterface
-    fun isAndroidApp(): Boolean = isTrustedWorkspaceContext()
+    fun isAndroidApp(): Boolean = isTrustedWorkspaceOrigin()
 
     @JavascriptInterface
     fun getGoogleIdToken(): String {
-        if (!isTrustedWorkspaceContext()) return ""
+        if (!isWorkspaceAuthRoute()) return ""
         return NativeWebAuthTokenHolder.peek()
     }
 
     @JavascriptInterface
     fun completeGoogleSignIn() {
-        if (isTrustedWorkspaceContext()) NativeWebAuthTokenHolder.clear()
+        if (isWorkspaceAuthRoute()) NativeWebAuthTokenHolder.clear()
     }
 
     // Compatibility for a previously installed v2.5.0 WebView bundle.
     @JavascriptInterface
     fun consumeGoogleIdToken(): String = getGoogleIdToken()
 
-    private fun isTrustedWorkspaceContext(): Boolean {
-        val currentUrl = runCatching { Uri.parse(webView.url.orEmpty()) }.getOrNull()
-            ?: return false
-        return isTrustedWorkspaceUrl(currentUrl) &&
-            currentUrl.path.orEmpty().let { it.startsWith("/workspace") || it == "/" || it == "/login" }
+    private fun currentTrustedUrl(): Uri? {
+        val currentUrl = runCatching { Uri.parse(webView.url.orEmpty()) }.getOrNull() ?: return null
+        return currentUrl.takeIf(::isTrustedWorkspaceUrl)
+    }
+
+    private fun isTrustedWorkspaceOrigin(): Boolean = currentTrustedUrl() != null
+
+    private fun isWorkspaceAuthRoute(): Boolean {
+        val path = currentTrustedUrl()?.path.orEmpty()
+        return path.startsWith("/workspace") || path == "/" || path == "/login"
     }
 }
