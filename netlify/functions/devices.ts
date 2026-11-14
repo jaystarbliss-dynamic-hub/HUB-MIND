@@ -165,7 +165,7 @@ export const handler = async (event: any) => {
         deviceId,
         deviceName,
         platform,
-        clientVersion: String(body.clientVersion || '2.4.0').slice(0, 50),
+        clientVersion: String(body.clientVersion || '2.5.0').slice(0, 50),
         status: ['ONLINE', 'BUSY', 'OFFLINE', 'UNAVAILABLE'].includes(String(body.status)) ? String(body.status) : 'ONLINE',
         lastSeen: Date.now(),
         capabilities: Array.isArray(body.capabilities) ? body.capabilities.map((c: any) => String(c)) : [],
