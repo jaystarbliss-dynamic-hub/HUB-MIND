@@ -1023,7 +1023,7 @@ class DeviceRegistryRepositoryImpl(
                 runCatching {
                     appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
                 }.getOrNull()
-            } ?: "2.4.0",
+            } ?: "2.5.0",
             status = DeviceStatus.ONLINE,
             isCurrentDevice = true,
             fullControlActive = accConnected,
@@ -1097,7 +1097,7 @@ class DeviceRegistryRepositoryImpl(
                             deviceId = devId,
                             deviceName = doc.getString("deviceName") ?: devId,
                             platform = platform,
-                            clientVersion = doc.getString("clientVersion") ?: "2.4.0",
+                            clientVersion = doc.getString("clientVersion") ?: "2.5.0",
                             status = status,
                             isCurrentDevice = devId == localDeviceId,
                             fullControlActive = doc.getBoolean("fullControlActive") ?: false,
