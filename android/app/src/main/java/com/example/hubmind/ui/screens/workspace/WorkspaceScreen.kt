@@ -77,6 +77,7 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
 
             addJavascriptInterface(HubMindAndroidAuthBridge(this), "HubMindAndroid")
             addJavascriptInterface(androidDeviceBridge, "HubMindNative")
+            androidDeviceBridge.attach(this)
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
@@ -172,17 +173,22 @@ private class HubMindAndroidAuthBridge(
  * unrelated WEB device and lets the web Jess UI keep native target selection
  * in sync with the Android agent.
  */
-private class HubMindNativeDeviceBridge : android.webkit.JavascriptInterface {
+private class HubMindNativeDeviceBridge {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var webView: WebView? = null
 
-    @android.webkit.JavascriptInterface
+    fun attach(view: WebView) {
+        webView = view
+    }
+
+    @JavascriptInterface
     fun getAndroidDeviceId(): String {
         if (!isTrustedWorkspaceOrigin()) return ""
         return runCatching { ServiceLocator.deviceRegistryRepository.localDeviceId }
             .getOrDefault("")
     }
 
-    @android.webkit.JavascriptInterface
+    @JavascriptInterface
     fun onTargetDeviceSelected(deviceId: String) {
         if (!isTrustedWorkspaceOrigin()) return
         val target = deviceId.trim().takeIf { it.isNotBlank() && it.length <= 128 } ?: return
@@ -192,12 +198,13 @@ private class HubMindNativeDeviceBridge : android.webkit.JavascriptInterface {
     }
 
     private fun isTrustedWorkspaceOrigin(): Boolean {
-        // The bridge only exists inside WorkspaceScreen, which pins the WebView
-        // to the canonical HTTPS host and blocks external navigation.
-        return true
+        val current = webView ?: return false
+        val uri = runCatching { Uri.parse(current.url.orEmpty()) }.getOrNull() ?: return false
+        return isTrustedWorkspaceUrl(uri)
     }
 
     fun dispose() {
+        webView = null
         scope.cancel()
     }
 }
