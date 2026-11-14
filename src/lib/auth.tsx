@@ -47,6 +47,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!googleIdToken) return;
 
     void signInWithCredential(auth, GoogleAuthProvider.credential(googleIdToken))
+      .then(() => {
+        // A protected route may have redirected to /login before Firebase
+        // finished restoring this one-time native session.
+        if (window.location.pathname === '/login') {
+          window.location.replace('/workspace');
+        }
+      })
       .catch((error) => {
         console.error('[Hub-Mind Android] Workspace sign-in handoff failed:', error);
       });
