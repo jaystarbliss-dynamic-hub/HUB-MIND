@@ -399,3 +399,22 @@ test('Android releases have human-readable version and channel labels on homepag
   assert.match(modal, /formatAndroidReleaseLabel/);
   assert.match(modal, /compareAndroidReleaseVersions/);
 });
+
+
+test('Android Workspace WebView grants Jess microphone only to the trusted Hub-Mind HTTPS origin', () => {
+  const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  const liveAudio = read('src/services/liveAudioClient.ts');
+
+  assert.match(workspace, /webChromeClient = object : WebChromeClient\(\)/);
+  assert.match(workspace, /request\.origin/);
+  assert.match(workspace, /HUB_MIND_WORKSPACE_HOST/);
+  assert.match(workspace, /PermissionRequest\.RESOURCE_AUDIO_CAPTURE/);
+  assert.match(workspace, /ContextCompat\.checkSelfPermission/);
+  assert.match(workspace, /Manifest\.permission\.RECORD_AUDIO/);
+  assert.match(workspace, /request\.deny\(\)/);
+  assert.doesNotMatch(workspace, /RESOURCE_VIDEO_CAPTURE/);
+  assert.match(manifest, /android\.permission\.RECORD_AUDIO/);
+  assert.match(liveAudio, /navigator\.mediaDevices\.getUserMedia/);
+  assert.match(liveAudio, /audioWorklet\.addModule/);
+});
