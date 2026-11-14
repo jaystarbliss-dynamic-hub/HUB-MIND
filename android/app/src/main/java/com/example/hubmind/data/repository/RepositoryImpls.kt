@@ -196,7 +196,10 @@ class AuthRepositoryImpl(
         }
 
         val client = backendClient
-            ?: return Result.failure(IllegalStateException("Backend client is not configured for Google Sign-In."))
+            ?: run {
+                _isSessionReady.value = true
+                return Result.failure(IllegalStateException("Backend client is not configured for Google Sign-In."))
+            }
 
         return runCatching {
             val auth = client.getFirebaseAuth().getOrThrow()
