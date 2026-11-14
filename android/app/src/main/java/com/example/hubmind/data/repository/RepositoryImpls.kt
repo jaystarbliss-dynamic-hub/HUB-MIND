@@ -11,6 +11,9 @@ import android.os.BatteryManager
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import com.example.hubmind.agent.AndroidScreenShareEvents
+import com.example.hubmind.agent.HubMindAgentForegroundService
+import com.example.hubmind.agent.JessTranscriptOverlayManager
 import com.example.hubmind.agent.AndroidActionType
 import com.example.hubmind.agent.AndroidAppLauncher
 import com.example.hubmind.agent.AndroidCommand
@@ -557,6 +560,18 @@ class JessRepositoryImpl(
 ) : JessRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val transcriptOverlay = context?.let { JessTranscriptOverlayManager(it) }
+    private val screenShareEventsJob = scope.launch {
+        AndroidScreenShareEvents.events.collect { event ->
+            if (event.type == "frame") {
+                val encodedFrame = event.dataUrl
+                    ?.substringAfter("base64,", "")
+                    ?.trim()
+                    .orEmpty()
+                if (encodedFrame.isNotBlank()) liveSession?.sendVideoFrame(encodedFrame)
+            }
+        }
+    }
 
     private val _liveState = MutableStateFlow(JessLiveState.IDLE)
     override val liveState: StateFlow<JessLiveState> = _liveState.asStateFlow()
@@ -629,6 +644,13 @@ class JessRepositoryImpl(
             return false
         }
 
+        if (
+            context != null &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        ) {
+            HubMindAgentForegroundService.setJessMicrophoneActive(context, true)
+        }
+
         // Claim the cross-device voice session lease in Firestore
         val uid = authRepository?.currentUser?.value?.id ?: ephemeral.userId
         if (uid.isNotBlank()) {
@@ -675,15 +697,19 @@ class JessRepositoryImpl(
                 }
 
                 override fun onUserTranscript(text: String) {
-                    synchronized(currentTurnUserBuffer) {
+                    val transcript = synchronized(currentTurnUserBuffer) {
                         currentTurnUserBuffer.append(text)
+                        currentTurnUserBuffer.toString()
                     }
+                    transcriptOverlay?.show("YOU", transcript)
                 }
 
                 override fun onJessTranscript(text: String) {
-                    synchronized(currentTurnJessBuffer) {
+                    val transcript = synchronized(currentTurnJessBuffer) {
                         currentTurnJessBuffer.append(text)
+                        currentTurnJessBuffer.toString()
                     }
+                    transcriptOverlay?.show("JESS", transcript)
                 }
 
                 override fun onTurnComplete() {
@@ -729,6 +755,8 @@ class JessRepositoryImpl(
 
                 override fun onError(message: String) {
                     _liveState.value = JessLiveState.ERROR
+                    transcriptOverlay?.hide()
+                    context?.let { HubMindAgentForegroundService.setJessMicrophoneActive(it, false) }
                 }
             }
         )
@@ -738,6 +766,8 @@ class JessRepositoryImpl(
     }
 
     override suspend fun endVoiceSession() {
+        transcriptOverlay?.hide()
+        context?.let { HubMindAgentForegroundService.setJessMicrophoneActive(it, false) }
         liveSession?.shutdown()
         liveSession = null
         _liveState.value = JessLiveState.IDLE

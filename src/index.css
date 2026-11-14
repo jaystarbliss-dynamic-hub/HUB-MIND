@@ -751,3 +751,15 @@ body:not(:has(.hm-public)) #root > .min-h-screen, body:not(:has(.hm-public)) #ro
 /* Hub-Mind desktop workspace is permanently dark, independent of Windows theme settings. */
 :root { color-scheme: dark !important; }
 html:not(:has(.jess-orb-window)), body:not(:has(.jess-orb-window)), #root:not(:has(.jess-orb-window)) { background-color:#020617 !important; color-scheme:dark !important; }
+
+
+/* Keep the transparent Electron transcript surface clear outside its caption. */
+html:root:has(.jess-transcript-overlay-page) {
+  background: transparent !important;
+}
+body:has(.jess-transcript-overlay-page),
+body:has(.jess-transcript-overlay-page) #root,
+#root:has(.jess-transcript-overlay-page) {
+  background: transparent !important;
+  color: #f8fafc !important;
+}

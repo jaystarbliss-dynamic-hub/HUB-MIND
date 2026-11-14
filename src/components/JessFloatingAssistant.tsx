@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { doc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, deleteDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
 import { LiveAudioClient, JessState } from '../services/liveAudioClient';
@@ -17,7 +17,7 @@ import { scanCurrentPageContext, ContextActionSuggestion } from '../services/con
 import { startJessWorkspaceCache } from '../services/jessWorkspaceCache';
 import { hydrateGoogleCalendarConnection, isGoogleCalendarConnected, refreshGoogleCalendarEvents } from '../lib/googleCalendar';
 import { JessPcWakeListener, isJessPcWakeSupported, isJessInstalledApp } from '../services/jessWakeListener';
-import { startCrossDeviceAgentLoop } from '../services/crossDeviceService';
+import { getLocalDeviceId, startCrossDeviceAgentLoop } from '../services/crossDeviceService';
 import { 
   Activity, 
   Lightbulb, 
@@ -38,6 +38,17 @@ import {
 
 const POSITION_KEY = 'hubmind.jess.position.v2';
 const DESKTOP_TRANSCRIPT_KEY = 'hubmind.jess.desktopTranscript.v1';
+const ACTIVE_DEVICE_TARGET_KEY = 'hubmind.jess.activeTargetDeviceId.v1';
+type JessDeviceTarget = {
+  id: string;
+  name: string;
+  platform: string;
+  status: string;
+  fullControlActive: boolean;
+  isCurrentDevice: boolean;
+  capabilities: string[];
+  lastSeenAt: number;
+};
 function publishJessTranscript(id: string, speaker: 'user' | 'jess', text: string) {
   try {
     const raw = localStorage.getItem(DESKTOP_TRANSCRIPT_KEY);
@@ -170,6 +181,26 @@ function highRiskJessConfirmation(toolName: string, args: any): string | null {
   if (name === 'control_windows_power' && ['shutdown','restart'].includes(action)) {
     return 'schedule Windows ' + action + ' in 15 seconds; the action can be cancelled with shutdown /a before it begins';
   }
+  if (name === 'dispatch_device_command') {
+    const deviceAction = String(args?.actionType || '');
+    const params = args?.parameters && typeof args.parameters === 'object' ? args.parameters : {};
+    const deviceActionParam = String(params.action || '').toLowerCase();
+    if (deviceAction === 'manage_windows_files' &&
+        ['delete','remove','recycle','write','move','rename','copy'].includes(deviceActionParam)) {
+      return 'make a file-system change on the selected Windows laptop: ' +
+        deviceActionParam + ' ' + String(params.path || '').slice(0, 180);
+    }
+    if (deviceAction === 'clean_windows_storage_candidates') {
+      return 'move selected Windows storage-cleanup candidates to the Recycle Bin';
+    }
+    if (deviceAction === 'control_windows_power' &&
+        ['shutdown','restart'].includes(deviceActionParam)) {
+      return 'schedule Windows ' + deviceActionParam + ' on the selected laptop';
+    }
+    if (deviceAction === 'manage_windows' && deviceActionParam === 'close_window') {
+      return 'close a Windows application window on the selected laptop';
+    }
+  }
   if (name === 'run_windows_command_native') {
     const command = String(args?.command || '').trim();
     if (/\b(remove-item|remove-itemproperty|clear-content|format(?:-volume|-disk)?|clear-disk|diskpart|bcdedit|shutdown|restart-computer|stop-computer|set-executionpolicy|reg\s+(?:add|delete|import)|cipher\s+\/w|move-item|copy-item|rename-item|invoke-expression|iex)\b/i.test(command) ||
@@ -204,6 +235,100 @@ interface JessPetVoiceActivationRequest {
 
 export function JessFloatingAssistant() {
   const { user, profile, updatePreferredName } = useAuth();
+  const [registeredDevices, setRegisteredDevices] = useState<JessDeviceTarget[]>([]);
+  const [activeTargetDeviceId, setActiveTargetDeviceId] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_DEVICE_TARGET_KEY) || ''; } catch { return ''; }
+  });
+  const activeTargetDeviceRef = useRef(activeTargetDeviceId);
+  useEffect(() => { activeTargetDeviceRef.current = activeTargetDeviceId; }, [activeTargetDeviceId]);
+
+  const persistActiveDeviceTarget = useCallback((deviceId: string) => {
+    const nextId = String(deviceId || '').trim();
+    setActiveTargetDeviceId(nextId);
+    activeTargetDeviceRef.current = nextId;
+    try {
+      if (nextId) localStorage.setItem(ACTIVE_DEVICE_TARGET_KEY, nextId);
+      else localStorage.removeItem(ACTIVE_DEVICE_TARGET_KEY);
+    } catch {}
+    try { (window as any).HubMindNative?.onTargetDeviceSelected?.(nextId); } catch {}
+    if (profile?.id) {
+      void setDoc(
+        doc(db, 'users', profile.id, 'private', 'jessSettings'),
+        { activeTargetDeviceId: nextId, activeTargetDeviceUpdatedAt: new Date().toISOString() },
+        { merge: true }
+      ).catch(error => console.warn('[Jess] Could not sync the active device target:', error));
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setRegisteredDevices([]);
+      return;
+    }
+    let active = true;
+    const unsubscribe = onSnapshot(collection(db, 'users', profile.id, 'devices'), snapshot => {
+      const nativeBridge = (window as any).HubMindNative;
+      const desktopBridge = (window as any).hubMindDesktop;
+      const nativeId = String(nativeBridge?.getAndroidDeviceId?.() || '');
+      const localDevicePromise = nativeId
+        ? Promise.resolve(nativeId)
+        : typeof desktopBridge?.getDeviceId === 'function'
+          ? Promise.resolve(desktopBridge.getDeviceId()).then((value: unknown) => String(value || getLocalDeviceId())).catch(() => getLocalDeviceId())
+          : Promise.resolve(getLocalDeviceId());
+      void localDevicePromise.then(localDeviceId => {
+        if (!active) return;
+        const now = Date.now();
+        const devices = snapshot.docs.map(entry => {
+          const data = entry.data() as any;
+          const rawLastSeen = data.lastSeen ?? data.lastSeenAt;
+          const lastSeenAt = typeof rawLastSeen === 'number'
+            ? rawLastSeen
+            : Date.parse(String(rawLastSeen || '')) || 0;
+          const fresh = lastSeenAt > 0 && now - lastSeenAt < 90_000;
+          return {
+            id: entry.id,
+            name: String(data.deviceName || entry.id),
+            platform: String(data.platform || 'WEB').toUpperCase(),
+            status: data.status === 'UNAVAILABLE' ? 'UNAVAILABLE' : (data.status === 'ONLINE' && fresh ? 'ONLINE' : 'OFFLINE'),
+            fullControlActive: data.fullControlActive === true,
+            isCurrentDevice: entry.id === localDeviceId,
+            capabilities: Array.isArray(data.capabilities) ? data.capabilities.map((item: any) => String(item)) : [],
+            lastSeenAt,
+          } as JessDeviceTarget;
+        }).sort((a, b) =>
+          Number(b.isCurrentDevice) - Number(a.isCurrentDevice) ||
+          Number(b.status === 'ONLINE') - Number(a.status === 'ONLINE') ||
+          a.name.localeCompare(b.name)
+        );
+        setRegisteredDevices(devices);
+        const selectedStillExists = devices.some(device => device.id === activeTargetDeviceRef.current);
+        if (!selectedStillExists) {
+          const next = devices.find(device => device.isCurrentDevice && device.status === 'ONLINE')
+            || devices.find(device => device.status === 'ONLINE');
+          if (next) persistActiveDeviceTarget(next.id);
+        }
+      });
+    }, error => console.warn('[Jess] Could not load the shared device registry:', error));
+    return () => { active = false; unsubscribe(); };
+  }, [profile?.id, persistActiveDeviceTarget]);
+
+  useEffect(() => {
+    const onNativeTargetChanged = () => {
+      let id = '';
+      try { id = localStorage.getItem(ACTIVE_DEVICE_TARGET_KEY) || ''; } catch {}
+      if (id && id !== activeTargetDeviceRef.current) persistActiveDeviceTarget(id);
+    };
+    window.addEventListener('hubmind-target-device-changed', onNativeTargetChanged);
+    return () => window.removeEventListener('hubmind-target-device-changed', onNativeTargetChanged);
+  }, [persistActiveDeviceTarget]);
+
+  const attachActiveDeviceTarget = useCallback((toolName: string, toolArgs: any) => {
+    const args = toolArgs && typeof toolArgs === 'object' && !Array.isArray(toolArgs) ? toolArgs : {};
+    if (toolName === 'dispatch_device_command' && !String(args.targetDeviceId || '').trim() && activeTargetDeviceRef.current) {
+      return { ...args, targetDeviceId: activeTargetDeviceRef.current };
+    }
+    return args;
+  }, []);
   const jessPreferencesRef = useRef({
     permissionMode: 'ask' as 'ask' | 'allow-routine' | 'allow-everything' | 'always-allow',
     fullControlEnabled: false,
@@ -218,12 +343,22 @@ export function JessFloatingAssistant() {
     allowShellCommands: true,
     moodAdaptiveTone: true,
     conversationStyle: 'adaptive' as 'adaptive' | 'friendly' | 'professional' | 'concise',
+    activeTargetDeviceId: '',
   });
   useEffect(() => {
     if (!profile?.id) return;
     return onSnapshot(doc(db, 'users', profile.id, 'private', 'jessSettings'), snapshot => {
       const prefs = { ...jessPreferencesRef.current, ...(snapshot.exists() ? snapshot.data() : {}) };
       jessPreferencesRef.current = prefs;
+      if (typeof prefs.activeTargetDeviceId === 'string' && prefs.activeTargetDeviceId !== activeTargetDeviceRef.current) {
+        activeTargetDeviceRef.current = prefs.activeTargetDeviceId;
+        setActiveTargetDeviceId(prefs.activeTargetDeviceId);
+        try {
+          if (prefs.activeTargetDeviceId) localStorage.setItem(ACTIVE_DEVICE_TARGET_KEY, prefs.activeTargetDeviceId);
+          else localStorage.removeItem(ACTIVE_DEVICE_TARGET_KEY);
+        } catch {}
+        try { (window as any).HubMindNative?.onTargetDeviceSelected?.(prefs.activeTargetDeviceId); } catch {}
+      }
       try { localStorage.setItem('hubmind.jess.preferences', JSON.stringify(prefs)); } catch {}
       void (window as any).hubMindDesktop?.setJessPreferences?.(prefs, profile.id).catch(() => {});
     }, error => console.warn('[Jess] Could not load user preferences:', error));
@@ -471,7 +606,7 @@ export function JessFloatingAssistant() {
   useEffect(() => {
     if (!profile) return;
     const stopCache = startJessWorkspaceCache(profile);
-    const stopCrossDevice = startCrossDeviceAgentLoop(profile, async (toolName, toolArgs) => {
+    const stopCrossDevice = isDesktopShell ? (() => {}) : startCrossDeviceAgentLoop(profile, async (toolName, toolArgs) => {
       const execution = await runJessToolExecution(
         {
           toolName,
@@ -509,7 +644,7 @@ export function JessFloatingAssistant() {
           args: step.args || {},
           userId: profile?.id,
           turnId: jessTranscriptTurnIdRef.current || undefined,
-        }, executionId => executeJessTool(String(step.tool), step.args || {}, profile, name => void updatePreferredName(name), (jessPreferencesRef.current.contextEnabled === false ? undefined : resolveJessContext(locationPathRef.current)), executionId));
+        }, executionId => executeJessTool(String(step.tool), attachActiveDeviceTarget(String(step.tool), step.args || {}), profile, name => void updatePreferredName(name), (jessPreferencesRef.current.contextEnabled === false ? undefined : resolveJessContext(locationPathRef.current)), executionId));
         const result = execution.value;
         if (!result.result?.success) throw new Error(result.result?.error || 'Background step failed.');
       });
@@ -725,7 +860,7 @@ export function JessFloatingAssistant() {
               args: toolArgs || {},
               userId: profile?.id,
               turnId: jessTranscriptTurnIdRef.current || undefined,
-            }, executionId => executeJessTool(fc.name, toolArgs || {}, profile, name => void updatePreferredName(name), context, executionId));
+            }, executionId => executeJessTool(fc.name, attachActiveDeviceTarget(fc.name, toolArgs || {}), profile, name => void updatePreferredName(name), context, executionId));
             result = execution.value;
             if (result?.result && typeof result.result === 'object') {
               result = {
@@ -1509,6 +1644,26 @@ export function JessFloatingAssistant() {
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          </div>
+
+          <div className="rounded-2xl border border-teal-500/20 bg-slate-900/70 p-2.5">
+            <label htmlFor="jess-device-target" className="mb-1.5 block text-[11px] font-semibold text-teal-300">Control target device</label>
+            <select
+              id="jess-device-target"
+              value={activeTargetDeviceId}
+              onChange={event => persistActiveDeviceTarget(event.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-100 outline-none focus:border-teal-400"
+            >
+              <option value="">Choose an available device</option>
+              {registeredDevices.map(device => (
+                <option key={device.id} value={device.id} disabled={device.status !== 'ONLINE'}>
+                  {device.name} · {device.platform} · {device.status === 'ONLINE' ? (device.fullControlActive ? 'Ready' : 'Online') : 'Offline'}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
+              Choose your Windows laptop or Android phone. Device actions are routed here when the request does not name a target.
+            </p>
           </div>
 
           <div className="rounded-2xl border border-teal-500/20 bg-slate-900/70 p-2.5">

@@ -79,7 +79,6 @@ export class LiveAudioClient {
   private readonly maxPendingWorkerFrames = 12;
 
   private preferredInputDeviceId: string | null = null;
-  private static cachedToken: { token: string; expiresAt: number } | null = null;
 
   constructor(callbacks: LiveAudioCallbacks, inputDeviceId?: string | null) {
     this.callbacks = callbacks;
@@ -87,36 +86,32 @@ export class LiveAudioClient {
   }
 
   private async getEphemeralToken(): Promise<string> {
-    if (LiveAudioClient.cachedToken && Date.now() < LiveAudioClient.cachedToken.expiresAt - 120_000) {
-      return LiveAudioClient.cachedToken.token;
-    }
-
     const user = auth.currentUser;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (user) {
-      try {
-        const idToken = await user.getIdToken(false);
-        headers['Authorization'] = `Bearer ${idToken}`;
-      } catch (e) {
-        console.warn('Could not refresh Firebase ID token:', e);
-      }
+    if (!user) {
+      throw new Error('Sign in to Hub-Mind before starting Jess Live.');
     }
 
+    // Gemini ephemeral tokens are single-use when starting a new session. Do
+    // not retain them between calls; mint a fresh token for each connection.
+    const idToken = await user.getIdToken();
     const response = await fetch('/api/live-token', {
       method: 'POST',
-      headers,
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Failed to mint ephemeral token: ${response.status} ${errorText}`);
+      throw new Error(`Failed to mint Gemini Live session token: ${response.status} ${errorText}`);
     }
 
     const data = await response.json();
-    LiveAudioClient.cachedToken = {
-      token: data.token,
-      expiresAt: Date.now() + 25 * 60 * 1000,
-    };
+    if (typeof data?.token !== 'string' || !data.token) {
+      throw new Error('Hub-Mind did not receive a valid Gemini Live session token.');
+    }
     return data.token;
   }
 

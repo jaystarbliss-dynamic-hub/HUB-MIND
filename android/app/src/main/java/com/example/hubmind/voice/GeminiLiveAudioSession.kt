@@ -318,6 +318,22 @@ class GeminiLiveAudioSession(
         }
     }
 
+    /**
+     * Sends one user-consented screen frame to the active Gemini Live session.
+     * The capture manager limits this to one JPEG frame per second.
+     */
+    fun sendVideoFrame(base64Jpeg: String) {
+        if (!isConnected.get() || !isSetupComplete.get()) return
+        val safeFrame = base64Jpeg.trim()
+        if (safeFrame.isEmpty() || safeFrame.length > 2_000_000) return
+        val video = JSONObject().apply {
+            put("mimeType", "image/jpeg")
+            put("data", safeFrame)
+        }
+        val frame = JSONObject().put("realtimeInput", JSONObject().put("video", video))
+        webSocket?.send(frame.toString())
+    }
+
     fun interruptPlayback() {
         flushAudioPlayback()
         if (isConnected.get()) {

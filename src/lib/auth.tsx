@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User as FirebaseUser, signOut } from 'firebase/auth';
+import { onAuthStateChanged, onIdTokenChanged, User as FirebaseUser, signOut } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, limit, query, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { User } from '../types';
 import { acceptInvitation } from './invitations';
 import { isAdminEmail, extractHandleFromEmail, generateAvailableUsername } from '../services/userService';
 import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
+import { getLocalDeviceId } from '../services/crossDeviceService';
 
 interface AuthContextType {
   user: FirebaseUser | null;
@@ -28,6 +29,32 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Keep the Electron background command receiver aligned with Firebase auth.
+  // The ID token is held in memory and refreshed automatically by Firebase.
+  useEffect(() => {
+    let disposed = false;
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
+      const bridge = (window as any).hubMindDesktop;
+      if (!firebaseUser) {
+        try { await bridge?.clearDeviceSession?.(); } catch {}
+        return;
+      }
+      if (!bridge?.setDeviceSession) return;
+      try {
+        const idToken = await firebaseUser.getIdToken();
+        if (disposed || auth.currentUser?.uid !== firebaseUser.uid) return;
+        await bridge.setDeviceSession(firebaseUser.uid, idToken, getLocalDeviceId());
+      } catch (error) {
+        console.warn('[Hub-Mind desktop] Could not update the background device session:', error);
+      }
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+      try { void (window as any).hubMindDesktop?.clearDeviceSession?.(); } catch {}
+    };
+  }, []);
+
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
