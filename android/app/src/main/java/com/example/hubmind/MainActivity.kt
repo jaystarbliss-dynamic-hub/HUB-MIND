@@ -27,6 +27,7 @@ import com.example.hubmind.ui.screens.home.JessHomeScreen
 import com.example.hubmind.ui.screens.home.JessHomeViewModel
 import com.example.hubmind.ui.screens.settings.SettingsScreen
 import com.example.hubmind.ui.screens.settings.SettingsViewModel
+import com.example.hubmind.ui.screens.workspace.WorkspaceScreen
 import com.example.hubmind.ui.theme.HubMindTheme
 import com.example.hubmind.ui.theme.Slate950
 
@@ -89,6 +90,9 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                     JessHomeScreen(viewModel = jessViewModel)
+                                }
+                                HubMindNavDestination.WORKSPACE -> {
+                                    WorkspaceScreen(modifier = Modifier.fillMaxSize())
                                 }
                                 HubMindNavDestination.DEVICES -> {
                                     val devicesViewModel = remember {
