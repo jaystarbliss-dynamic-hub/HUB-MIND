@@ -380,7 +380,7 @@ test('Android app opens the canonical workspace with a one-time native Google si
   const settingsViewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsViewModel.kt');
   assert.match(settingsScreen, /PackageInfoCompat\.getLongVersionCode/);
   assert.match(settingsScreen, /v\$installedVersionName \(Build \$installedVersionCode\)/);
-  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);
+  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);
 });
 
 test('Android releases have human-readable version and channel labels on homepage and version history', () => {
