@@ -10,19 +10,24 @@ package com.example.hubmind.data.remote
 object NativeWebAuthTokenHolder {
     private val lock = Any()
     private var pendingGoogleIdToken: String? = null
+    private var storedAtMillis: Long = 0L
+    private const val MAX_TOKEN_AGE_MS = 10 * 60 * 1000L
 
     fun store(token: String) {
         if (token.isBlank()) return
         synchronized(lock) {
             pendingGoogleIdToken = token
+            storedAtMillis = System.currentTimeMillis()
         }
     }
 
     fun consume(): String {
         return synchronized(lock) {
             val token = pendingGoogleIdToken.orEmpty()
+            val isFresh = System.currentTimeMillis() - storedAtMillis <= MAX_TOKEN_AGE_MS
             pendingGoogleIdToken = null
-            token
+            storedAtMillis = 0L
+            if (isFresh) token else ""
         }
     }
 }
