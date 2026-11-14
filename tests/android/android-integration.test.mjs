@@ -17,7 +17,7 @@ const assertAndroidManifestPublicationState = (manifest) => {
   }
 };
 
-test('Android Gradle configuration enforces canonical applicationId, version 2.5.0 (250), and strict release signing', () => {
+test('Android Gradle configuration enforces canonical applicationId, version 2.5.1 (251), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
   assert.match(buildGradle, /versionCode\s*=\s*250/);
@@ -169,8 +169,8 @@ test('Android updater only offers a published matching app with a valid SHA-256 
   assert.match(checker, /verifyApkChecksum/);
   assertAndroidManifestPublicationState(manifest);
   assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
-  assert.equal(manifest.versionCode, 240);
-  assert.equal(manifest.versionName, '2.4.0');
+  assert.equal(manifest.versionCode, 250);
+  assert.equal(manifest.versionName, '2.5.0');
 });
 
 test('Android CI fixes Metaspace and fingerprints the built APK instead of assuming a runner debug keystore', () => {
