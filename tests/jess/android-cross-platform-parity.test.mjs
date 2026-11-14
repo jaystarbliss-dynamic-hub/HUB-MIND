@@ -56,7 +56,8 @@ test('Windows desktop relay uses the main repo device API and local Full Control
   assert.match(main, /function pollDesktopDeviceCommands/);
   assert.match(main, /\/api\/devices\/commands\?targetDeviceId=/);
   assert.match(main, /action: 'ack'/);
-  assert.match(main, /lifecycleState: 'DISPATCHED'/);
+  assert.match(main, /command\?\.lifecycleState \|\| ''\)\.toUpperCase\(\) === 'DISPATCHED'/);
+  assert.match(main, /lifecycleState,\s*resultSuccess/);
   assert.match(main, /!fullControlActive \|\| !controlSessionSecret/);
   assert.match(main, /hubmind:set-device-session/);
   assert.doesNotMatch(main, /\/api\/devices\/poll|\/api\/devices\/result/);
