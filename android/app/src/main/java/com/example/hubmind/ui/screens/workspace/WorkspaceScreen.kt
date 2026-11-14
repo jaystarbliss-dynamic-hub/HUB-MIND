@@ -1,7 +1,11 @@
 package com.example.hubmind.ui.screens.workspace
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
+import android.webkit.WebChromeClient
 import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -13,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
 
 private const val HUB_MIND_WORKSPACE_URL = "https://hub-mind.netlify.app/workspace"
@@ -36,6 +41,32 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
             settings.setSupportMultipleWindows(false)
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.safeBrowsingEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+
+            // Jess Live in the normal Workspace uses navigator.mediaDevices.getUserMedia.
+            // WebView does not inherit the app's Android RECORD_AUDIO grant automatically:
+            // approve audio capture only for the canonical Hub-Mind HTTPS origin.
+            webChromeClient = object : WebChromeClient() {
+                override fun onPermissionRequest(request: PermissionRequest) {
+                    val requestOrigin = runCatching { Uri.parse(request.origin.toString()) }.getOrNull()
+                    val trustedOrigin = requestOrigin != null &&
+                        requestOrigin.scheme.equals("https", ignoreCase = true) &&
+                        requestOrigin.host.equals(HUB_MIND_WORKSPACE_HOST, ignoreCase = true)
+                    val requestedResources = request.resources.toSet()
+                    val audioOnly = requestedResources.isNotEmpty() &&
+                        requestedResources.all { it == PermissionRequest.RESOURCE_AUDIO_CAPTURE }
+                    val hasMicPermission = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (trustedOrigin && audioOnly && hasMicPermission) {
+                        request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+                    } else {
+                        request.deny()
+                    }
+                }
+            }
 
             addJavascriptInterface(HubMindAndroidAuthBridge(this), "HubMindAndroid")
 
