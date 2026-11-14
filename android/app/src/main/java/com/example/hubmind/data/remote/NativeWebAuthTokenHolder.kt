@@ -11,7 +11,7 @@ object NativeWebAuthTokenHolder {
     private val lock = Any()
     private var pendingGoogleIdToken: String? = null
     private var storedAtMillis: Long = 0L
-    private const val MAX_TOKEN_AGE_MS = 10 * 60 * 1000L
+    private const val MAX_TOKEN_AGE_MS = 55 * 60 * 1000L
 
     fun store(token: String) {
         if (token.isBlank()) return
@@ -21,13 +21,35 @@ object NativeWebAuthTokenHolder {
         }
     }
 
-    fun consume(): String {
+    /** Reads the token without destroying it; the web client acknowledges only after Firebase accepts it. */
+    fun peek(): String {
         return synchronized(lock) {
             val token = pendingGoogleIdToken.orEmpty()
-            val isFresh = System.currentTimeMillis() - storedAtMillis <= MAX_TOKEN_AGE_MS
+            val isFresh = token.isNotBlank() &&
+                storedAtMillis > 0L &&
+                System.currentTimeMillis() - storedAtMillis <= MAX_TOKEN_AGE_MS
+            if (!isFresh) {
+                pendingGoogleIdToken = null
+                storedAtMillis = 0L
+                ""
+            } else {
+                token
+            }
+        }
+    }
+
+    /** Acknowledge successful Firebase sign-in in the web workspace. */
+    fun clear() {
+        synchronized(lock) {
             pendingGoogleIdToken = null
             storedAtMillis = 0L
-            if (isFresh) token else ""
         }
+    }
+
+    /** Kept for older bundled web clients; new clients use peek + clear-on-success. */
+    fun consume(): String {
+        val token = peek()
+        if (token.isNotBlank()) clear()
+        return token
     }
 }
