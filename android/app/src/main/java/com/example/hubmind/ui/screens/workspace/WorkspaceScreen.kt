@@ -44,7 +44,16 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
                     view: WebView,
                     request: WebResourceRequest
                 ): Boolean {
-                    return !isTrustedWorkspaceUrl(request.url)
+                    val destination = request.url
+                    if (!isTrustedWorkspaceUrl(destination)) return true
+
+                    // The Android app is a workspace client, never a public-homepage browser.
+                    // Any root/home navigation returns to the authenticated workspace route.
+                    if (destination.path.isNullOrBlank() || destination.path == "/") {
+                        view.loadUrl(HUB_MIND_WORKSPACE_URL)
+                        return true
+                    }
+                    return false
                 }
 
                 override fun onReceivedSslError(
@@ -85,10 +94,27 @@ private class HubMindAndroidAuthBridge(
     private val webView: WebView
 ) {
     @JavascriptInterface
-    fun consumeGoogleIdToken(): String {
+    fun isAndroidApp(): Boolean = isTrustedWorkspaceContext()
+
+    @JavascriptInterface
+    fun getGoogleIdToken(): String {
+        if (!isTrustedWorkspaceContext()) return ""
+        return NativeWebAuthTokenHolder.peek()
+    }
+
+    @JavascriptInterface
+    fun completeGoogleSignIn() {
+        if (isTrustedWorkspaceContext()) NativeWebAuthTokenHolder.clear()
+    }
+
+    // Compatibility for a previously installed v2.5.0 WebView bundle.
+    @JavascriptInterface
+    fun consumeGoogleIdToken(): String = getGoogleIdToken()
+
+    private fun isTrustedWorkspaceContext(): Boolean {
         val currentUrl = runCatching { Uri.parse(webView.url.orEmpty()) }.getOrNull()
-            ?: return ""
-        if (!isTrustedWorkspaceUrl(currentUrl)) return ""
-        return NativeWebAuthTokenHolder.consume()
+            ?: return false
+        return isTrustedWorkspaceUrl(currentUrl) &&
+            currentUrl.path.orEmpty().let { it.startsWith("/workspace") || it == "/" || it == "/login" }
     }
 }
