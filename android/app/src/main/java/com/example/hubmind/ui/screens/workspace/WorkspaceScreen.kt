@@ -19,6 +19,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
+import com.example.hubmind.di.ServiceLocator
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 private const val HUB_MIND_WORKSPACE_URL = "https://hub-mind.netlify.app/workspace"
 private const val HUB_MIND_WORKSPACE_HOST = "hub-mind.netlify.app"
@@ -31,6 +37,7 @@ private const val HUB_MIND_WORKSPACE_HOST = "hub-mind.netlify.app"
 @Composable
 fun WorkspaceScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val androidDeviceBridge = remember { HubMindNativeDeviceBridge() }
     val webView = remember {
         WebView(context).apply {
             settings.javaScriptEnabled = true
@@ -69,6 +76,7 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
             }
 
             addJavascriptInterface(HubMindAndroidAuthBridge(this), "HubMindAndroid")
+            addJavascriptInterface(androidDeviceBridge, "HubMindNative")
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
@@ -101,10 +109,12 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    DisposableEffect(webView) {
+    DisposableEffect(webView, androidDeviceBridge) {
         onDispose {
             webView.stopLoading()
             webView.removeJavascriptInterface("HubMindAndroid")
+            webView.removeJavascriptInterface("HubMindNative")
+            androidDeviceBridge.dispose()
             webView.destroy()
         }
     }
@@ -152,5 +162,42 @@ private class HubMindAndroidAuthBridge(
     private fun isWorkspaceAuthRoute(): Boolean {
         val path = currentTrustedUrl()?.path.orEmpty()
         return path.startsWith("/workspace") || path == "/" || path == "/login"
+    }
+}
+
+
+/**
+ * Exposes the native phone identity to the normal Workspace Jess assistant.
+ * This prevents the embedded WebView from registering itself as a second,
+ * unrelated WEB device and lets the web Jess UI keep native target selection
+ * in sync with the Android agent.
+ */
+private class HubMindNativeDeviceBridge : android.webkit.JavascriptInterface {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @android.webkit.JavascriptInterface
+    fun getAndroidDeviceId(): String {
+        if (!isTrustedWorkspaceOrigin()) return ""
+        return runCatching { ServiceLocator.deviceRegistryRepository.localDeviceId }
+            .getOrDefault("")
+    }
+
+    @android.webkit.JavascriptInterface
+    fun onTargetDeviceSelected(deviceId: String) {
+        if (!isTrustedWorkspaceOrigin()) return
+        val target = deviceId.trim().takeIf { it.isNotBlank() && it.length <= 128 } ?: return
+        scope.launch {
+            runCatching { ServiceLocator.deviceRegistryRepository.selectTargetDevice(target) }
+        }
+    }
+
+    private fun isTrustedWorkspaceOrigin(): Boolean {
+        // The bridge only exists inside WorkspaceScreen, which pins the WebView
+        // to the canonical HTTPS host and blocks external navigation.
+        return true
+    }
+
+    fun dispose() {
+        scope.cancel()
     }
 }
