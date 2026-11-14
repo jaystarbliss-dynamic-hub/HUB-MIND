@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { compareAndroidReleaseVersions, formatAndroidReleaseLabel } from '../lib/androidRelease';
 import {
   Download,
   ExternalLink,
@@ -167,7 +168,11 @@ export function DesktopUpdatesModal({
           return {
             id: rel.id,
             tag: rel.tag_name || `release-${rel.id}`,
-            name: rel.name || rel.tag_name || 'Hub-Mind Android Release',
+            name: formatAndroidReleaseLabel({
+              tagName: rel.tag_name,
+              assetName: apk.name,
+              prerelease: Boolean(rel.prerelease),
+            }),
             publishedAt: rel.published_at || rel.created_at || new Date().toISOString(),
             htmlUrl: rel.html_url || `https://github.com/${repoSlug}/releases`,
             body: rel.body || 'No release notes provided for this Android version.',
@@ -181,7 +186,11 @@ export function DesktopUpdatesModal({
             },
           } as RepoRelease;
         })
-        .filter((release: RepoRelease | null): release is RepoRelease => Boolean(release));
+        .filter((release: RepoRelease | null): release is RepoRelease => Boolean(release))
+        .sort((a, b) => compareAndroidReleaseVersions(
+          { tagName: b.tag, assetName: b.apkAsset?.name, prerelease: b.isPrerelease },
+          { tagName: a.tag, assetName: a.apkAsset?.name, prerelease: a.isPrerelease }
+        ));
       const latestStableAndroidRelease = mappedAndroidReleases.find((release) => !release.isPrerelease);
       if (latestStableAndroidRelease) latestStableAndroidRelease.isLatest = true;
 
