@@ -92,3 +92,23 @@ test('Android publishes the native Google token before session validity can open
   assert.match(webAuth, /nativeAuthBootstrapPending\.current\) return/);
   assert.match(repository, /override val isSessionReady: StateFlow<Boolean>/);
 });
+
+
+test('Android Workspace shares the native device identity with Jess and avoids duplicate WEB agents', () => {
+  const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const crossDevice = read('../../src/services/crossDeviceService.ts');
+  const jess = read('../../src/components/JessFloatingAssistant.tsx');
+  const nativeRepo = read('../../android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
+
+  assert.match(workspace, /addJavascriptInterface\(androidDeviceBridge, "HubMindNative"\)/);
+  assert.match(workspace, /fun getAndroidDeviceId\(\): String/);
+  assert.match(workspace, /fun onTargetDeviceSelected\(deviceId: String\)/);
+  assert.match(workspace, /ServiceLocator\.deviceRegistryRepository\.localDeviceId/);
+  assert.match(workspace, /selectTargetDevice\(target\)/);
+  assert.match(crossDevice, /HubMindNative\?\.getAndroidDeviceId\?\.\(\)/);
+  assert.match(crossDevice, /nativeAndroidId/);
+  assert.match(crossDevice, /second renderer-side command consumer/);
+  assert.match(jess, /activeIsOldEmbeddedWebDevice/);
+  assert.match(jess, /persistActiveDeviceTarget\(nativeId\)/);
+  assert.match(nativeRepo, /val localDeviceId: String by lazy/);
+});
