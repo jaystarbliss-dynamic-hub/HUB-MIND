@@ -39,13 +39,18 @@ class AuthViewModel(
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+
+            // Publish the WebView handoff token before AuthRepository marks the
+            // native session valid. MainActivity can open Workspace immediately
+            // after that state change, so storing it only in onSuccess is too late.
+            NativeWebAuthTokenHolder.store(idToken)
+
             authRepository.signInWithGoogle(idToken).fold(
                 onSuccess = { user ->
-                    // Keep the Google ID token in memory for one-time Web workspace sign-in.
-                    NativeWebAuthTokenHolder.store(idToken)
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)
                 },
                 onFailure = { error ->
+                    NativeWebAuthTokenHolder.clear()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         errorMessage = error.message ?: "Google sign-in failed."

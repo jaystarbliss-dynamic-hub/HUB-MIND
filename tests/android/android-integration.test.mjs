@@ -17,11 +17,11 @@ const assertAndroidManifestPublicationState = (manifest) => {
   }
 };
 
-test('Android Gradle configuration enforces canonical applicationId, version 2.5.0 (250), and strict release signing', () => {
+test('Android Gradle configuration enforces canonical applicationId, version 2.5.1 (251), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
-  assert.match(buildGradle, /versionCode\s*=\s*250/);
-  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.0"/);
+  assert.match(buildGradle, /versionCode\s*=\s*251/);
+  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.1"/);
   assert.match(buildGradle, /if\s*\(hasDedicatedReleaseKeystore\)\s*\{\s*signingConfig\s*=\s*signingConfigs\.getByName\("release"\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.auth\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.firestore\)/);
@@ -169,8 +169,8 @@ test('Android updater only offers a published matching app with a valid SHA-256 
   assert.match(checker, /verifyApkChecksum/);
   assertAndroidManifestPublicationState(manifest);
   assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
-  assert.equal(manifest.versionCode, 240);
-  assert.equal(manifest.versionName, '2.4.0');
+  assert.equal(manifest.versionCode, 250);
+  assert.equal(manifest.versionName, '2.5.0');
 });
 
 test('Android CI fixes Metaspace and fingerprints the built APK instead of assuming a runner debug keystore', () => {
@@ -380,7 +380,7 @@ test('Android app opens the canonical workspace with a one-time native Google si
   const settingsViewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsViewModel.kt');
   assert.match(settingsScreen, /PackageInfoCompat\.getLongVersionCode/);
   assert.match(settingsScreen, /v\$installedVersionName \(Build \$installedVersionCode\)/);
-  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);
+  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);
 });
 
 test('Android releases have human-readable version and channel labels on homepage and version history', () => {
@@ -389,8 +389,8 @@ test('Android releases have human-readable version and channel labels on homepag
   const modal = read('src/components/DesktopUpdatesModal.tsx');
   const gradle = read('android/app/build.gradle.kts');
 
-  assert.match(gradle, /versionCode\s*=\s*250/);
-  assert.match(gradle, /versionName\s*=\s*"2\.5\.0"/);
+  assert.match(gradle, /versionCode\s*=\s*251/);
+  assert.match(gradle, /versionName\s*=\s*"2\.5\.1"/);
   assert.match(naming, /OFFICIAL RELEASE/);
   assert.match(naming, /TEST BUILD · DEBUG SIGNED/);
   assert.match(naming, /compareAndroidReleaseVersions/);
@@ -398,4 +398,23 @@ test('Android releases have human-readable version and channel labels on homepag
   assert.match(home, /formatAndroidReleaseLabel/);
   assert.match(modal, /formatAndroidReleaseLabel/);
   assert.match(modal, /compareAndroidReleaseVersions/);
+});
+
+
+test('Android Workspace WebView grants Jess microphone only to the trusted Hub-Mind HTTPS origin', () => {
+  const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  const liveAudio = read('src/services/liveAudioClient.ts');
+
+  assert.match(workspace, /webChromeClient = object : WebChromeClient\(\)/);
+  assert.match(workspace, /request\.origin/);
+  assert.match(workspace, /HUB_MIND_WORKSPACE_HOST/);
+  assert.match(workspace, /PermissionRequest\.RESOURCE_AUDIO_CAPTURE/);
+  assert.match(workspace, /ContextCompat\.checkSelfPermission/);
+  assert.match(workspace, /Manifest\.permission\.RECORD_AUDIO/);
+  assert.match(workspace, /request\.deny\(\)/);
+  assert.doesNotMatch(workspace, /RESOURCE_VIDEO_CAPTURE/);
+  assert.match(manifest, /android\.permission\.RECORD_AUDIO/);
+  assert.match(liveAudio, /navigator\.mediaDevices\.getUserMedia/);
+  assert.match(liveAudio, /audioWorklet\.addModule/);
 });

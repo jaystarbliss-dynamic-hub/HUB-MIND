@@ -301,6 +301,19 @@ export function JessFloatingAssistant() {
           a.name.localeCompare(b.name)
         );
         setRegisteredDevices(devices);
+
+        // Older Android WebView builds registered their embedded Workspace as
+        // a separate WEB device. Migrate that stale selection back to the real
+        // native phone instead of sending phone actions to an inactive browser ID.
+        const selectedDevice = devices.find(device => device.id === activeTargetDeviceRef.current);
+        const activeIsOldEmbeddedWebDevice = Boolean(nativeId) &&
+          activeTargetDeviceRef.current.startsWith('web-workspace-') &&
+          selectedDevice?.platform === 'WEB';
+        if (activeIsOldEmbeddedWebDevice && devices.some(device => device.id === nativeId)) {
+          persistActiveDeviceTarget(nativeId);
+          return;
+        }
+
         const selectedStillExists = devices.some(device => device.id === activeTargetDeviceRef.current);
         if (!selectedStillExists) {
           const next = devices.find(device => device.isCurrentDevice && device.status === 'ONLINE')

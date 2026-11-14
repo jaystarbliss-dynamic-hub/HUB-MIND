@@ -68,10 +68,15 @@ class AuthRepositoryImpl(
     private val _isSessionValid = MutableStateFlow(false)
     override val isSessionValid: StateFlow<Boolean> = _isSessionValid.asStateFlow()
 
+    private val _isSessionReady = MutableStateFlow(false)
+    override val isSessionReady: StateFlow<Boolean> = _isSessionReady.asStateFlow()
+
     init {
-        if (backendClient != null) {
-            scope.launch {
-                restoreExistingSession()
+        scope.launch {
+            try {
+                if (backendClient != null) restoreExistingSession()
+            } finally {
+                _isSessionReady.value = true
             }
         }
     }
@@ -191,7 +196,10 @@ class AuthRepositoryImpl(
         }
 
         val client = backendClient
-            ?: return Result.failure(IllegalStateException("Backend client is not configured for Google Sign-In."))
+            ?: run {
+                _isSessionReady.value = true
+                return Result.failure(IllegalStateException("Backend client is not configured for Google Sign-In."))
+            }
 
         return runCatching {
             val auth = client.getFirebaseAuth().getOrThrow()
@@ -209,8 +217,11 @@ class AuthRepositoryImpl(
             }
             _currentUser.value = profile
             _isSessionValid.value = true
+            _isSessionReady.value = true
             onUserAuthenticated?.invoke(profile)
             profile
+        }.also {
+            _isSessionReady.value = true
         }
     }
 
@@ -220,6 +231,7 @@ class AuthRepositoryImpl(
         }
         _currentUser.value = null
         _isSessionValid.value = false
+        _isSessionReady.value = true
     }
 
     override suspend fun checkHealth(): Boolean {
@@ -1100,7 +1112,7 @@ class DeviceRegistryRepositoryImpl(
                             deviceId = devId,
                             deviceName = doc.getString("deviceName") ?: devId,
                             platform = platform,
-                            clientVersion = doc.getString("clientVersion") ?: "2.5.0",
+                            clientVersion = doc.getString("clientVersion") ?: "2.5.1",
                             status = status,
                             isCurrentDevice = devId == localDeviceId,
                             fullControlActive = doc.getBoolean("fullControlActive") ?: false,

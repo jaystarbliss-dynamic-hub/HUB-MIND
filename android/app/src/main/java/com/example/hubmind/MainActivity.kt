@@ -11,8 +11,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.Image
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import com.example.R
 import androidx.compose.ui.Modifier
 import com.example.hubmind.di.ServiceLocator
 import com.example.hubmind.ui.components.HubMindBottomBar
@@ -48,9 +57,29 @@ class MainActivity : ComponentActivity() {
         setContent {
             HubMindTheme {
                 val isSessionValid by ServiceLocator.authRepository.isSessionValid.collectAsState()
-                var currentTab by remember { mutableStateOf(HubMindNavDestination.JESS) }
+                val isSessionReady by ServiceLocator.authRepository.isSessionReady.collectAsState()
+                var currentTab by remember { mutableStateOf(HubMindNavDestination.WORKSPACE) }
 
-                if (!isSessionValid) {
+                if (!isSessionReady) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.foundation.layout.Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(18.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.hub_mind_logo),
+                                contentDescription = "Official Hub-Mind Logo",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.size(112.dp)
+                            )
+                            CircularProgressIndicator(color = com.example.hubmind.ui.theme.Teal400)
+                            Text("Restoring your Hub-Mind session", color = com.example.hubmind.ui.theme.Slate400)
+                        }
+                    }
+                } else if (!isSessionValid) {
                     val authViewModel = remember {
                         AuthViewModel(ServiceLocator.authRepository)
                     }
@@ -59,8 +88,8 @@ class MainActivity : ComponentActivity() {
                         onAuthSuccess = { }
                     )
                 } else {
-                    BackHandler(enabled = currentTab != HubMindNavDestination.JESS) {
-                        currentTab = HubMindNavDestination.JESS
+                    BackHandler(enabled = currentTab != HubMindNavDestination.WORKSPACE) {
+                        currentTab = HubMindNavDestination.WORKSPACE
                     }
 
                     Scaffold(

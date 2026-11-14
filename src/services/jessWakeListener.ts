@@ -43,13 +43,16 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
 
 export function isJessInstalledApp(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const androidBridge = (window as any).HubMindAndroid;
+  const android = androidBridge?.isAndroidApp?.() === true
+    || typeof androidBridge?.getGoogleIdToken === 'function';
   const native = (window as any).Capacitor?.isNativePlatform?.() === true;
   const desktop = (window as any).hubMindDesktop?.isDesktopApp === true
     || (window as any).electronAPI !== undefined
     || /Electron/i.test(navigator.userAgent);
   const standalone = window.matchMedia?.('(display-mode: standalone)').matches === true
     || (navigator as any).standalone === true;
-  return native || standalone || desktop;
+  return android || native || standalone || desktop;
 }
 
 export function isJessPcWakeSupported(): boolean {

@@ -50,6 +50,14 @@ export interface CrossDeviceCommandEnvelope {
 const LOCAL_DEVICE_STORAGE_KEY = 'hubmind_cross_device_node_id';
 
 export function getLocalDeviceId(): string {
+  // The Android WebView is the native phone, not a second browser device.
+  // Reuse the exact Firestore device ID registered by the Android agent.
+  if (typeof window !== 'undefined') {
+    try {
+      const nativeAndroidId = String((window as any).HubMindNative?.getAndroidDeviceId?.() || '').trim();
+      if (/^android-[A-Za-z0-9._-]{1,120}$/.test(nativeAndroidId)) return nativeAndroidId;
+    } catch {}
+  }
   const isDesktop = typeof window !== 'undefined' && Boolean((window as any).hubMindDesktop);
   const prefix = isDesktop ? 'win-workstation' : 'web-workspace';
   try {
@@ -232,6 +240,13 @@ export function startCrossDeviceAgentLoop(
   user: User,
   toolExecutor: (toolName: string, args: Record<string, any>) => Promise<{ result: any }>
 ): () => void {
+  // The native Android control-plane transport already owns this device's
+  // heartbeat and incoming command listener. Do not register a duplicate WEB
+  // node or run a second renderer-side command consumer inside its WebView.
+  if (typeof window !== 'undefined' &&
+      typeof (window as any).HubMindNative?.getAndroidDeviceId === 'function') {
+    return () => {};
+  }
   const deviceId = getLocalDeviceId();
   const processedCommands = new Set<string>();
 
