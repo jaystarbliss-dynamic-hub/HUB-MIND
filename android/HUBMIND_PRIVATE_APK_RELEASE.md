@@ -5,7 +5,8 @@
 - **Distribution**: Direct APK download from the Hub-Mind website (not Google Play).
 - **Website**: https://hub-mind.netlify.app
 - **Application ID**: `com.aistudio.hubmind.wzyqkp` (must remain unchanged).
-- **Current integration version**: `2.4.0` / version code `240`.
+- **Current integration version candidate**: `2.5.0` / version code `250`.
+- **Last verified production release**: `2.4.0` / version code `240`; it remains the public update target until the 2.5.0 signed release is published.
 - **In-app update manifest**: https://hub-mind.netlify.app/api/app-version.json.
 
 The website's Updates panel reads Android APK assets from the public GitHub Releases API. The Android app's update checker reads the static manifest above and verifies the APK SHA-256 before offering installation.
@@ -99,7 +100,7 @@ The workflow will:
 - build and unit-test the Android app;
 - assemble the release APK using the dedicated production keystore;
 - verify the package ID, version code/name, APK signature, and certificate fingerprint;
-- publish the signed APK as the stable GitHub Release asset `Hub-Mind-Android-v2.4.0.apk` under tag `android-v2.4.0`;
+- publish the signed APK as the stable, version-named GitHub Release asset `Hub-Mind-Android-v$VERSION_NAME.apk` under tag `android-v$VERSION_NAME`;
 - calculate the APK SHA-256;
 - update `public/api/app-version.json` to `PUBLISHED` with the exact release URL and checksum.
 
