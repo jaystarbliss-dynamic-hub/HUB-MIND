@@ -456,6 +456,35 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
   { name: 'desktop_launch_app', description: 'On the installed Windows Hub-Mind desktop app, request permission to launch an approved built-in application. Always shows a confirmation dialog.', parameters: object({ appName: { type: 'string', enum: ['calculator', 'notepad', 'paint', 'explorer', 'taskManager', 'edge', 'chrome', 'word', 'excel', 'powerpoint', 'teams', 'vscode'] } }, ['appName']) },
   { name: 'desktop_run_readonly_command', description: 'On the installed Windows app, request permission to run an approved read-only Windows diagnostic command. Always shows a confirmation dialog and cannot execute arbitrary shell commands.', parameters: object({ commandName: { type: 'string', enum: ['ipconfig', 'systemInfo', 'runningProcesses'] } }, ['commandName']) },
   { name: 'desktop_open_website', description: 'Ask the installed Windows app to open an HTTP or HTTPS URL in the default browser after user confirmation.', parameters: object({ url: { type: 'string' } }, ['url']) },
+  {
+    name: 'dispatch_device_command',
+    description: 'Send one discrete, explicit user-requested action to the selected online Hub-Mind device (Android phone or Windows workstation). Use only when the user directly asked for the action in the current turn. Windows control requires Jess Full Control to be active on that laptop. Never repeat a command after a timeout or sent_unverified result; first check its status.',
+    parameters: object({
+      actionType: { type: 'string', enum: [
+        'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS',
+        'list_windows','manage_windows','control_mouse','drag_windows_mouse','type_windows_text','press_windows_keys','control_system_volume','control_screen_brightness','take_windows_screenshot','find_windows_ui_element','list_windows_ui_elements','invoke_windows_ui_element','set_windows_ui_value','read_windows_screen','open_local_windows_path','launch_windows_application','get_windows_time','get_windows_system_info','chrome_bridge_status','chrome_list_tabs','chrome_open_tab','chrome_close_tab','chrome_activate_tab','chrome_navigate_tab','chrome_reload_tab','chrome_read_page','chrome_find_element','chrome_click_element','chrome_fill_field','chrome_scroll','chrome_capture_screenshot','manage_windows_files','manage_windows_clipboard','control_windows_power','scan_windows_storage','clean_windows_storage_candidates','start_windows_auto_scroll','stop_windows_auto_scroll','show_hub_mind_workspace','jess_stop','desktop_run_readonly_command','desktop_open_website'
+      ]},
+      targetDeviceId: { type: 'string', description: 'Optional explicit registered device ID. Defaults to the device selected in Jess settings.' },
+      parameters: { type: 'object', description: 'Parameters required by the selected action.', properties: {
+        x: { type: 'number' }, y: { type: 'number' },
+        startX: { type: 'number' }, startY: { type: 'number' }, endX: { type: 'number' }, endY: { type: 'number' },
+        text: { type: 'string' }, appName: { type: 'string' }, packageName: { type: 'string' },
+        action: { type: 'string' }, value: { type: 'string' }, durationMs: { type: 'number' },
+        title: { type: 'string' }, handle: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' },
+        position: { type: 'string' }, monitorId: { type: 'string' }, delta: { type: 'number' },
+        keys: { type: 'string' }, name: { type: 'string' }, index: { type: 'number' }, expectedName: { type: 'string' },
+        path: { type: 'string' }, destination: { type: 'string' }, content: { type: 'string' }, pattern: { type: 'string' },
+        offset: { type: 'number' }, limit: { type: 'number' }, root: { type: 'string' },
+        largeThresholdMB: { type: 'number' }, inactiveDays: { type: 'number' }, maxSeconds: { type: 'number' },
+        maxFiles: { type: 'number' }, detectDuplicates: { type: 'boolean' }, scanId: { type: 'string' },
+        candidateIds: { type: 'array', items: { type: 'string' } }, monitorName: { type: 'string' }, detail: { type: 'string' },
+        url: { type: 'string' }, selector: { type: 'string' }, deltaY: { type: 'number' }, deltaX: { type: 'number' },
+        direction: { type: 'string', enum: ['up','down'] }, speed: { type: 'number' },
+        commandName: { type: 'string', enum: ['ipconfig','systemInfo','runningProcesses'] }
+      } },
+      userExplicitlyRequested: { type: 'boolean', description: 'Must be true only when the user directly requested this exact device action in the current turn.' }
+    }, ['actionType','userExplicitlyRequested'])
+  },
   { name: 'end_session', description: 'Put the AI assistant to sleep or end the current live voice session when the user says "end this session", "go to sleep", "sleep", "deactivate", or wants to conclude.', parameters: object({ reason: { type: 'string' } }) },
 ];
 
@@ -3253,6 +3282,95 @@ export async function executeJessTool(
             targetDeviceId: target.deviceId,
             targetDeviceName: target.deviceName,
             summary: dispatchOut.summary,
+            error: dispatchOut.error,
+          },
+        };
+      }
+
+      case 'dispatch_device_command': {
+        if (args?.userExplicitlyRequested !== true) {
+          return { result: { success: false, error: 'A direct user request is required before operating a connected device.' } };
+        }
+        const actionType = String(args?.actionType || '').trim();
+        const androidActions = new Set([
+          'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP',
+          'GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD',
+          'NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'
+        ]);
+        const windowsActions = new Set([
+          'list_windows','manage_windows','control_mouse','drag_windows_mouse','type_windows_text',
+          'press_windows_keys','control_system_volume','control_screen_brightness','take_windows_screenshot',
+          'find_windows_ui_element','list_windows_ui_elements','invoke_windows_ui_element','set_windows_ui_value',
+          'read_windows_screen','open_local_windows_path','launch_windows_application','get_windows_time',
+          'get_windows_system_info','chrome_bridge_status','chrome_list_tabs','chrome_open_tab','chrome_close_tab',
+          'chrome_activate_tab','chrome_navigate_tab','chrome_reload_tab','chrome_read_page','chrome_find_element',
+          'chrome_click_element','chrome_fill_field','chrome_scroll','chrome_capture_screenshot',
+          'manage_windows_files','manage_windows_clipboard','control_windows_power','scan_windows_storage',
+          'clean_windows_storage_candidates','start_windows_auto_scroll','stop_windows_auto_scroll',
+          'show_hub_mind_workspace','jess_stop','desktop_run_readonly_command','desktop_open_website'
+        ]);
+        if (!androidActions.has(actionType) && !windowsActions.has(actionType)) {
+          return { result: { success: false, error: 'Unsupported device action.' } };
+        }
+
+        const rawParameters = args?.parameters && typeof args.parameters === 'object' && !Array.isArray(args.parameters)
+          ? args.parameters : {};
+        const parameters: Record<string, string | number | boolean | string[]> = {};
+        for (const [key, value] of Object.entries(rawParameters)) {
+          if (Array.isArray(value) && key === 'candidateIds') {
+            parameters[key] = value.map(item => String(item).slice(0, 160)).slice(0, 100);
+          } else if (typeof value === 'string') {
+            if (value.length > 5000) return { result: { success: false, error: 'A device command text field exceeds 5,000 characters.' } };
+            parameters[key] = value;
+          } else if (typeof value === 'boolean') {
+            parameters[key] = value;
+          } else if (typeof value === 'number' && Number.isFinite(value)) {
+            parameters[key] = value;
+          }
+        }
+        if (JSON.stringify(parameters).length > 20000) {
+          return { result: { success: false, error: 'Device command parameters are too large.' } };
+        }
+
+        const devices = await listUserDevices(user.id);
+        const selectedId = String(args?.targetDeviceId || '').trim();
+        let target = selectedId ? devices.find(device => device.deviceId === selectedId) : null;
+        if (!selectedId) {
+          const online = devices.filter(device => device.status === 'ONLINE');
+          target = online.length === 1 ? online[0] : null;
+          if (!target && online.length > 1) {
+            return { result: { success: false, error: 'More than one device is online. Choose the Control target device in Jess settings first.' } };
+          }
+        }
+        if (!target) {
+          return { result: { success: false, error: 'No registered target device was found. Open Jess settings and select an online phone or laptop.' } };
+        }
+
+        const platform = String(target.platform || '').toUpperCase();
+        const compatible = platform === 'ANDROID'
+          ? androidActions.has(actionType)
+          : platform === 'WINDOWS' ? windowsActions.has(actionType) : false;
+        if (!compatible) {
+          return { result: { success: false, error: 'The selected ' + platform + ' device does not support this action.' } };
+        }
+        if (target.status !== 'ONLINE') {
+          return { result: { success: false, error: 'The selected device is offline or has not checked in recently.' } };
+        }
+        if (platform === 'WINDOWS' && target.fullControlActive !== true) {
+          return { result: { success: false, error: 'Jess Full Control is not active on the selected Windows laptop. Enable it on that laptop first.' } };
+        }
+
+        const dispatchOut = await dispatchCrossDeviceCommand(user.id, target.deviceId, actionType, parameters, 20_000);
+        return {
+          result: {
+            success: dispatchOut.success,
+            verified: dispatchOut.verified,
+            status: dispatchOut.success && dispatchOut.verified ? 'done_verified' : dispatchOut.success ? 'sent_unverified' : 'failed',
+            commandId: dispatchOut.commandId,
+            targetDeviceId: target.deviceId,
+            targetDeviceName: target.deviceName,
+            platform,
+            message: dispatchOut.summary || (dispatchOut.success ? 'The selected device acknowledged the command.' : ''),
             error: dispatchOut.error,
           },
         };

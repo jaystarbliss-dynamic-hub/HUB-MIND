@@ -3,6 +3,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { execFile, spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
+const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const nativeAgent = require('./agentBridge.cjs');
 const chromeBridge = require('./chromeBridge.cjs');
@@ -52,6 +53,432 @@ let offlineWakeConsentLoaded = false;
 let jessPreferences = { permissionMode: 'ask', fullControlEnabled: false, startInFullControl: false, confirmHighRiskOutLoud: true, memoryEnabled: true, contextEnabled: true, personalization: '', webResearchEnabled: true, screenVerificationEnabled: true, allowSystemWideFileScan: true, allowAutomatedFileManagement: true, allowShellCommands: true, moodAdaptiveTone: true, conversationStyle: 'adaptive' };
 let jessPreferencesUserId = null;
 let mcpBridge = null;
+let desktopDeviceSession = null;
+let desktopDevicePollTimer = null;
+let desktopDevicePollBusy = false;
+let desktopDeviceRegisteredAt = 0;
+let desktopDeviceIdCache = null;
+
+function getDesktopDeviceId(preferredDeviceId) {
+  const file = path.join(app.getPath('userData'), 'hubmind-device-id.json');
+  if (typeof preferredDeviceId === 'string' &&
+      /^win-workstation-[a-z0-9-]{1,40}$/i.test(preferredDeviceId)) {
+    desktopDeviceIdCache = preferredDeviceId;
+    try {
+      fs.writeFileSync(file, JSON.stringify({ deviceId: desktopDeviceIdCache, updatedAt: new Date().toISOString() }), {
+        encoding: 'utf8', mode: 0o600,
+      });
+    } catch {}
+    return desktopDeviceIdCache;
+  }
+  if (desktopDeviceIdCache) return desktopDeviceIdCache;
+  try {
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (typeof saved?.deviceId === 'string' && /^win-[a-f0-9-]{36}$/i.test(saved.deviceId)) {
+      desktopDeviceIdCache = saved.deviceId;
+      return desktopDeviceIdCache;
+    }
+  } catch {}
+  desktopDeviceIdCache = 'win-' + randomUUID();
+  try {
+    fs.writeFileSync(file, JSON.stringify({ deviceId: desktopDeviceIdCache, createdAt: new Date().toISOString() }), {
+      encoding: 'utf8', mode: 0o600, flag: 'wx',
+    });
+  } catch {
+    try { fs.writeFileSync(file, JSON.stringify({ deviceId: desktopDeviceIdCache, createdAt: new Date().toISOString() }), { encoding: 'utf8', mode: 0o600 }); } catch {}
+  }
+  return desktopDeviceIdCache;
+}
+async function postDesktopDeviceApi(route, session, payload) {
+  const base = String(APP_URL || '').replace(/\/$/, '');
+  if (!base) throw new Error('Hub-Mind API URL is not configured.');
+  const response = await fetch(base + route, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + session.idToken,
+    },
+    body: JSON.stringify(payload || {}),
+    signal: AbortSignal.timeout(12000),
+  });
+  const text = await response.text().catch(() => '');
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch {}
+  if (!response.ok) throw new Error(String(data?.error || 'Hub-Mind device API returned HTTP ' + response.status).slice(0, 500));
+  return data;
+}
+
+async function registerDesktopDevice(session) {
+  if (process.platform !== 'win32' || !session?.userId || !session?.idToken) return false;
+  const fullControl = fullControlActive === true && !!controlSessionSecret && controlSessionUserId === session.userId;
+  await postDesktopDeviceApi('/api/devices/register', session, {
+    deviceId: getDesktopDeviceId(),
+    deviceName: (os.hostname() || 'Windows laptop').slice(0, 120),
+    platform: 'WINDOWS',
+    model: os.type() + ' ' + os.release(),
+    clientVersion: app.getVersion(),
+    capabilities: [
+      'WINDOW_MANAGEMENT', 'MOUSE_KEYBOARD_INPUT', 'SCREEN_READING',
+      'APP_LAUNCH', 'CHROME_AUTOMATION', 'STORAGE_MANAGEMENT', 'SCREEN_SHARING',
+    ],
+    fullControlActive: fullControl,
+    permissionMode: jessPreferences.permissionMode,
+  });
+  desktopDeviceRegisteredAt = Date.now();
+  return true;
+}
+async function getDesktopDeviceApi(route, session) {
+  const base = String(APP_URL || '').replace(/\/$/, '');
+  if (!base) throw new Error('Hub-Mind API URL is not configured.');
+  const response = await fetch(base + route, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+      'Authorization': 'Bearer ' + session.idToken,
+    },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(12000),
+  });
+  const text = await response.text().catch(() => '');
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch {}
+  if (!response.ok) throw new Error(String(data?.error || 'Hub-Mind device API returned HTTP ' + response.status).slice(0, 500));
+  return data;
+}
+
+function summarizeRemoteNativeResult(result) {
+  const evidence = result?.evidence && typeof result.evidence === 'object' ? { ...result.evidence } : {};
+  const monitors = Array.isArray(evidence.monitors) ? evidence.monitors : [];
+  const primary = monitors.find(item => item?.primary && typeof item.imageBase64 === 'string')
+    || monitors.find(item => typeof item?.imageBase64 === 'string');
+  let imageDataUrl = null;
+  if (primary?.imageBase64 && primary.imageBase64.length <= 900000) {
+    const mime = String(primary.mimeType || 'image/jpeg').toLowerCase().startsWith('image/png') ? 'image/png' : 'image/jpeg';
+    imageDataUrl = 'data:' + mime + ';base64,' + primary.imageBase64;
+  }
+  if (Array.isArray(evidence.monitors)) {
+    evidence.monitors = evidence.monitors.map(item => ({
+      name: item?.name, primary: item?.primary, width: item?.width, height: item?.height,
+    }));
+  }
+  const safe = JSON.stringify(evidence);
+  return {
+    success: result?.ok === true,
+    verified: result?.verified === true,
+    outputText: String(result?.evidence?.text || result?.evidence?.message || safe || result?.error || '').slice(0, 3900),
+    error: String(result?.error || '').slice(0, 900),
+    imageDataUrl,
+  };
+}
+
+async function confirmRemoteDesktopAction(actionType, args = {}) {
+  const warningActions = new Set([
+    'close_window', 'control_windows_power',
+    'clean_windows_storage_candidates', 'run_windows_command_native', 'desktop_open_website',
+  ]);
+  const fileAction = String(args?.action || '').toLowerCase();
+  const needsFileConfirmation = actionType === 'manage_windows_files'
+    && ['delete', 'remove', 'recycle', 'write', 'move', 'rename', 'copy'].includes(fileAction);
+  const needsWindowCloseConfirmation = actionType === 'manage_windows'
+    && String(args?.action || '').toLowerCase() === 'close_window';
+  if (!warningActions.has(actionType) && !needsFileConfirmation && !needsWindowCloseConfirmation) return true;
+
+  const details = actionType === 'control_windows_power'
+    ? 'This can lock, sleep, restart or shut down the Windows laptop.'
+    : actionType === 'clean_windows_storage_candidates'
+      ? 'Selected files may be moved to the Windows Recycle Bin.'
+      : actionType === 'run_windows_command_native'
+        ? 'This requests a command on the Windows laptop.'
+        : needsWindowCloseConfirmation
+          ? 'This closes a Windows application window on the laptop. Unsaved work in that app may be lost.'
+          : 'This operation can change or close content on the Windows laptop.';
+  const choice = await dialog.showMessageBox(getDialogParent(), {
+    type: 'warning',
+    buttons: ['Cancel', 'Allow once'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Confirm remote Windows action',
+    message: 'Allow Jess to perform ' + actionType.replace(/_/g, ' ') + ' on this laptop?',
+    detail: details + '\n\nThis confirmation applies to this one command only.',
+  });
+  return choice.response === 1;
+}
+
+async function executeRemoteWindowsCommand(command, userId) {
+  if (process.platform !== 'win32') throw new Error('This endpoint is not a Windows desktop.');
+  if (!desktopDeviceSession || desktopDeviceSession.userId !== userId) throw new Error('The signed-in Hub-Mind account changed before this command ran.');
+  if (!fullControlActive || !controlSessionSecret || controlSessionUserId !== userId) {
+    throw new Error('Jess Full Control is not active on this laptop. No remote action was executed.');
+  }
+  const toolName = String(command?.actionType || '');
+  const args = command?.parameters && typeof command.parameters === 'object' ? command.parameters : {};
+  if (toolName === 'manage_windows_files' &&
+      ['delete','remove','recycle','write','move','rename','copy'].includes(String(args.action || '').toLowerCase()) &&
+      jessPreferences.allowAutomatedFileManagement !== true) {
+    throw new Error('Automated file management is disabled in Jess settings on this laptop. No file changes were made.');
+  }
+  if (toolName === 'clean_windows_storage_candidates' && jessPreferences.allowAutomatedFileManagement !== true) {
+    throw new Error('Automated file management is disabled in Jess settings on this laptop. No cleanup was performed.');
+  }
+  const approved = await confirmRemoteDesktopAction(toolName, args);
+  if (!approved) throw new Error('The Windows user cancelled this remote action.');
+
+  const native = async (method, payload = {}, timeout = 15000) => {
+    requireFullControl(method, { userId, source: 'cross-device', commandId: command.commandId });
+    return nativeAgent.call(method, payload, timeout);
+  };
+  let result;
+  switch (toolName) {
+    case 'list_windows':
+      result = await native('list_windows', {});
+      break;
+    case 'manage_windows': {
+      const method = String(args.action || '');
+      const allowed = new Set(['focus_window','close_window','minimize_window','maximize_window','restore_window','move_window','resize_window','snap_window','show_desktop','minimize_all','start_menu','switch_window']);
+      if (!allowed.has(method)) throw new Error('Unsupported Windows window operation.');
+      const payload = {};
+      for (const key of ['title','handle','x','y','width','height','position','monitorId']) {
+        if (args[key] !== undefined) payload[key] = args[key];
+      }
+      result = await native(method, payload);
+      break;
+    }
+    case 'control_mouse': {
+      const method = String(args.action || '');
+      if (!new Set(['mouse_move','click','double_click','right_click','scroll']).has(method)) throw new Error('Unsupported Windows mouse operation.');
+      result = await native(method, { x: args.x, y: args.y, delta: args.delta ?? -120 });
+      break;
+    }
+    case 'drag_windows_mouse':
+      result = await native('drag', {
+        fromX: args.fromX ?? args.startX,
+        fromY: args.fromY ?? args.startY,
+        toX: args.toX ?? args.endX,
+        toY: args.toY ?? args.endY,
+      });
+      break;
+    case 'type_windows_text':
+      if (typeof args.text !== 'string' || args.text.length > 3000) throw new Error('Remote text must be under 3,000 characters.');
+      result = await native('type_text', { text: args.text });
+      break;
+    case 'press_windows_keys':
+      result = await native('press_keys', { keys: String(args.keys || ''), holdMs: args.holdMs });
+      break;
+    case 'control_system_volume':
+    case 'control_screen_brightness':
+      result = await native('media_key', { action: String(args.action || '') });
+      break;
+    case 'take_windows_screenshot':
+      result = await native('screenshot', { monitorName: String(args.monitorName || 'primary'), detail: String(args.detail || 'standard') }, 30000);
+      break;
+    case 'read_windows_screen':
+      result = await native('read_screen_text', {});
+      break;
+    case 'find_windows_ui_element':
+      result = await native('find_ui_element', { name: String(args.name || '') });
+      break;
+    case 'list_windows_ui_elements':
+      result = await native('list_ui_elements', {});
+      break;
+    case 'invoke_windows_ui_element':
+      result = await native('invoke_ui_element', { name: String(args.name || ''), index: args.index, expectedName: String(args.expectedName || '') });
+      break;
+    case 'set_windows_ui_value':
+      result = await native('set_ui_value', { name: String(args.name || ''), value: String(args.value ?? '') });
+      break;
+    case 'launch_windows_application':
+      result = await native('launch_app', { name: String(args.appName || args.name || '') });
+      break;
+    case 'open_local_windows_path':
+      result = await native('open_path', { path: String(args.path || '') });
+      break;
+    case 'manage_windows_files':
+      result = await native('file_action', {
+        action: String(args.action || ''), path: String(args.path || ''),
+        destination: String(args.destination || ''), content: String(args.content || ''),
+        pattern: String(args.pattern || ''), offset: args.offset, limit: args.limit,
+      }, 30000);
+      break;
+    case 'manage_windows_clipboard':
+      result = await native('clipboard_action', { action: String(args.action || ''), text: String(args.text || '') });
+      break;
+    case 'control_windows_power':
+      result = await native('system_power_action', { action: String(args.action || '') });
+      break;
+    case 'scan_windows_storage':
+      result = await native('filesystem_scan', { ...args }, Math.min(630000, Math.max(45000, (Number(args.maxSeconds) || 300) * 1000 + 15000)));
+      break;
+    case 'clean_windows_storage_candidates':
+      result = await native('filesystem_clean', { scanId: String(args.scanId || ''), candidateIds: Array.isArray(args.candidateIds) ? args.candidateIds.map(String) : [] }, 120000);
+      break;
+    case 'get_windows_time':
+      result = await native('get_time', {});
+      break;
+    case 'get_windows_system_info':
+      result = await native('system_info', {});
+      break;
+    case 'start_windows_auto_scroll': {
+      const direction = args.direction === 'up' ? 'up' : 'down';
+      const speed = Number(args.speed ?? 4);
+      if (!Number.isFinite(speed) || speed < 1 || speed > 15) throw new Error('Auto-scroll speed must be from 1 to 15.');
+      const started = await startAutoScroll({ direction, speed });
+      result = { ok: started?.ok === true, verified: false, evidence: { message: started?.active ? 'Windows system-wide auto-scroll is active.' : 'Windows auto-scroll did not start.' } };
+      break;
+    }
+    case 'stop_windows_auto_scroll': {
+      const stopped = stopAutoScroll('remote-user-stop');
+      result = { ok: stopped?.ok === true, verified: true, evidence: { message: 'Windows auto-scroll stopped.' } };
+      break;
+    }
+    case 'show_hub_mind_workspace': {
+      const shown = await showWorkspaceVerified();
+      result = { ok: shown === true, verified: shown === true, evidence: { message: shown ? 'Hub-Mind workspace is visible on the Windows laptop.' : 'Hub-Mind workspace could not be brought into view.' } };
+      break;
+    }
+    case 'jess_stop': {
+      const stopped = stopFullControl('remote-device-stop');
+      result = { ok: stopped?.ok === true, verified: stopped?.active === false, evidence: { message: 'Jess Full Control stopped on the Windows laptop.' } };
+      break;
+    }
+    case 'desktop_run_readonly_command': {
+      const commandName = String(args.commandName || '');
+      const command = READ_ONLY_COMMANDS[commandName];
+      if (!command) throw new Error('That Windows diagnostic is not on the approved read-only list.');
+      const output = await new Promise((resolve, reject) => {
+        execFile(command[0], command[1], {
+          windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024, shell: false,
+        }, (error, stdout, stderr) => {
+          if (error && !stdout) return reject(new Error(String(stderr || error.message).slice(0, 1000)));
+          resolve(String(stdout || stderr || '').slice(0, 12000));
+        });
+      });
+      result = { ok: true, verified: false, evidence: { text: String(output) } };
+      break;
+    }
+    case 'desktop_open_website': {
+      const url = new URL(String(args.url || ''));
+      if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Only HTTP and HTTPS websites can be opened.');
+      await shell.openExternal(url.toString());
+      result = { ok: true, verified: false, evidence: { message: 'Asked Windows to open ' + url.origin + ' in the default browser.' } };
+      break;
+    }
+    case 'chrome_bridge_status':
+      return { success: true, verified: true, outputText: JSON.stringify(chromeBridge.status()), error: '' };
+    default:
+      if (toolName.startsWith('chrome_')) {
+        result = await chromeBridge.request(toolName, args, toolName === 'chrome_read_page' ? 20000 : 12000);
+      } else {
+        throw new Error('This Windows tool is not available through cross-device control.');
+      }
+  }
+  return summarizeRemoteNativeResult(result);
+}
+
+async function reportDesktopCommand(session, commandId, lifecycleState, result) {
+  return postDesktopDeviceApi('/api/devices', session, {
+    action: 'ack',
+    deviceId: getDesktopDeviceId(),
+    commandId,
+    lifecycleState,
+    resultSuccess: result?.success === true,
+    resultVerified: result?.verified === true,
+    resultSummary: String(result?.outputText || '').slice(0, 3900),
+    resultError: String(result?.error || '').slice(0, 900),
+  });
+}
+
+async function processDesktopDeviceCommand(session, command) {
+  const commandId = String(command?.commandId || command?.id || '');
+  const started = Date.now();
+  let result;
+  let lifecycleState = 'FAILED';
+  try {
+    if (!/^cmd-[a-z0-9-]{8,120}$/i.test(commandId)) throw new Error('Invalid remote command identifier.');
+    if (String(command.issuingUserId || '') !== session.userId) throw new Error('The command issuer does not match the signed-in desktop account.');
+    if (String(command.targetDeviceId || '') !== getDesktopDeviceId()) throw new Error('The command was not addressed to this laptop.');
+    if (String(command.lifecycleState || '').toUpperCase() !== 'DISPATCHED') throw new Error('This command is no longer awaiting execution.');
+    if (Number(command.expirationTime || 0) <= Date.now()) throw new Error('This remote command expired before execution.');
+    if (!String(command.replayToken || '').trim()) throw new Error('The remote command has no replay token.');
+    if (desktopDeviceSession?.userId !== session.userId || !fullControlActive || !controlSessionSecret || controlSessionUserId !== session.userId) {
+      throw new Error('Jess Full Control is not active on this laptop. No remote action was executed.');
+    }
+    let parameters = command?.parameters && typeof command.parameters === 'object' ? command.parameters : {};
+    if ((!parameters || !Object.keys(parameters).length) && typeof command.parametersJson === 'string') {
+      try { parameters = JSON.parse(command.parametersJson); } catch { throw new Error('The remote command parameters are invalid.'); }
+    }
+    const normalizedCommand = { ...command, commandId, parameters };
+    result = await executeRemoteWindowsCommand(normalizedCommand, session.userId);
+    lifecycleState = result.success ? 'COMPLETED' : 'FAILED';
+  } catch (error) {
+    result = { success: false, verified: false, error: String(error?.message || error).slice(0, 900), outputText: '' };
+    lifecycleState = 'FAILED';
+  }
+  result.durationMs = Date.now() - started;
+  try {
+    await reportDesktopCommand(session, commandId, lifecycleState, result);
+  } catch (error) {
+    console.error('[Hub-Mind device relay] Could not report a Windows command result:', error?.message || error);
+  }
+}
+
+async function pollDesktopDeviceCommands() {
+  const session = desktopDeviceSession;
+  if (process.platform !== 'win32' || !session || desktopDevicePollBusy) return;
+  desktopDevicePollBusy = true;
+  try {
+    if (Date.now() - desktopDeviceRegisteredAt > 45000) await registerDesktopDevice(session);
+    if (desktopDeviceSession?.userId !== session.userId) return;
+    const deviceId = getDesktopDeviceId();
+    const data = await getDesktopDeviceApi('/api/devices/commands?targetDeviceId=' + encodeURIComponent(deviceId), session);
+    const commands = Array.isArray(data.commands)
+      ? data.commands.filter(command => String(command?.lifecycleState || '').toUpperCase() === 'DISPATCHED').slice(0, 3)
+      : [];
+    for (const command of commands) {
+      if (desktopDeviceSession?.userId !== session.userId) break;
+      await processDesktopDeviceCommand(session, command);
+    }
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (!/401|403|session is invalid|account is not active/i.test(message)) {
+      console.warn('[Hub-Mind device relay] Heartbeat or poll failed:', message.slice(0, 350));
+    }
+  } finally {
+    desktopDevicePollBusy = false;
+  }
+}
+
+function startDesktopDeviceRelay() {
+  if (desktopDevicePollTimer) clearInterval(desktopDevicePollTimer);
+  desktopDevicePollTimer = setInterval(() => void pollDesktopDeviceCommands(), 3500);
+  desktopDevicePollTimer.unref?.();
+  void pollDesktopDeviceCommands();
+}
+
+function clearDesktopDeviceSession() {
+  desktopDeviceSession = null;
+  desktopDeviceRegisteredAt = 0;
+  if (desktopDevicePollTimer) clearInterval(desktopDevicePollTimer);
+  desktopDevicePollTimer = null;
+  return { ok: true, connected: false };
+}
+
+async function setDesktopDeviceSession(userId, idToken, deviceId) {
+  if (process.platform !== 'win32') return { ok: false, error: 'Windows device relay is only available on Windows.' };
+  if (typeof userId !== 'string' || !/^[A-Za-z0-9_-]{10,128}$/.test(userId)) throw new Error('Invalid signed-in Hub-Mind user ID.');
+  if (typeof idToken !== 'string' || idToken.length < 50 || idToken.length > 10000) throw new Error('Invalid Firebase ID token.');
+  if (typeof deviceId !== 'string' || !/^win-workstation-[a-z0-9-]{1,40}$/i.test(deviceId)) {
+    throw new Error('Invalid local Windows device identity.');
+  }
+  getDesktopDeviceId(deviceId);
+  if (desktopDeviceSession?.userId !== userId || desktopDeviceSession?.idToken !== idToken) {
+    desktopDeviceSession = { userId, idToken };
+    startDesktopDeviceRelay();
+  }
+  return { ok: true, connected: true, deviceId: getDesktopDeviceId() };
+}
+
+
 function persistJessPreferences(prefs, userId) {
   const allowedModes = new Set(['ask', 'allow-routine', 'allow-everything']);
   if (!prefs || typeof prefs !== 'object' || !allowedModes.has(prefs.permissionMode)) throw new Error('Invalid Jess permission preferences.');
@@ -323,10 +750,8 @@ function createTranscriptOverlayWindow() {
   }));
   guardNavigation(transcriptOverlayWindow);
   transcriptOverlayWindow.setAlwaysOnTop(true, 'screen-saver');
-  // Use native Acrylic where supported; CSS glass remains the fallback.
-  if (process.platform === 'win32' && typeof transcriptOverlayWindow.setBackgroundMaterial === 'function') {
-    try { transcriptOverlayWindow.setBackgroundMaterial('acrylic'); } catch {}
-  }
+  // Keep the native surface fully transparent so the caption never blocks the view.
+  transcriptOverlayWindow.setOpacity(1);
   transcriptOverlayWindow.setIgnoreMouseEvents(true, { forward: true });
   positionTranscriptOverlayWindow();
   transcriptOverlayWindow.on('closed', () => { transcriptOverlayWindow = null; });
@@ -569,6 +994,11 @@ function activateFullControl(reason = 'settings') {
   controlSessionUserId = jessPreferencesUserId || 'local-session';
   controlSessionStartedAt = new Date().toISOString();
   auditNativeAction({ event: 'full-control-started', reason, startedAt: controlSessionStartedAt, userId: controlSessionUserId });
+  if (desktopDeviceSession?.userId === controlSessionUserId) {
+    void registerDesktopDevice(desktopDeviceSession).catch(error =>
+      console.warn('[Hub-Mind device relay] Could not publish Full Control activation:', error?.message || error)
+    );
+  }
   return { ok: true, active: true, startedAt: controlSessionStartedAt, stopHotkey: 'Ctrl+Alt+Shift+J' };
 }
 function hideUiNumberOverlay(reason = 'user-hide') {
@@ -694,6 +1124,11 @@ function stopFullControl(reason = 'user-stop') {
   try { nativeAgent.stop(); } catch {}
   try { chromeBridge.cancelPending('Full Control Session stopped.'); } catch {}
   auditNativeAction({ event: 'full-control-stopped', reason, userId: previousUserId });
+  if (desktopDeviceSession?.userId === previousUserId) {
+    void registerDesktopDevice(desktopDeviceSession).catch(error =>
+      console.warn('[Hub-Mind device relay] Could not publish Full Control stop:', error?.message || error)
+    );
+  }
   return { ok: true, active: false, reason };
 }
 function requireFullControl(method, metadata = {}) {
@@ -882,7 +1317,23 @@ app.whenReady().then(() => {
     assertTrustedSender(event);
     return { preferences: { ...jessPreferences }, fullControlConsentGranted, fullControlActive, startedAt: controlSessionStartedAt };
   });
-  ipcMain.handle('hubmind:full-control-start', async (event) => {
+  ipcMain.handle('hubmind:get-device-id', (event) => {
+  assertTrustedSender(event);
+  // The renderer's local registry ID is authoritative. Before Firebase auth
+  // synchronizes it into the main process, return null so the renderer can
+  // fall back to its own stored ID instead of creating a second identity.
+  return desktopDeviceSession ? getDesktopDeviceId() : null;
+});
+ipcMain.handle('hubmind:set-device-session', async (event, userId, idToken, deviceId) => {
+  assertTrustedSender(event);
+  return setDesktopDeviceSession(userId, idToken, deviceId);
+});
+ipcMain.handle('hubmind:clear-device-session', (event) => {
+  assertTrustedSender(event);
+  return clearDesktopDeviceSession();
+});
+
+ipcMain.handle('hubmind:full-control-start', async (event) => {
     assertTrustedSender(event);
     if (process.platform !== 'win32') throw new Error('Jess Full Control is available only in the Windows desktop application.');
     if (!jessPreferences.fullControlEnabled) return { ok: false, active: false, error: 'Enable Full Control in Jess settings first.' };
@@ -1422,5 +1873,5 @@ app.whenReady().then(() => {
   app.on('activate', showMain);
 });
 
-app.on('before-quit', () => { finishDisplaySourceChoice(null); stopFullControl('app-quit'); stopOfflineWake(); chromeBridge.stop(); try { void mcpBridge?.shutdown(); } catch {} globalShortcut.unregisterAll(); quitting = true; });
+app.on('before-quit', () => { clearDesktopDeviceSession(); finishDisplaySourceChoice(null); stopFullControl('app-quit'); stopOfflineWake(); chromeBridge.stop(); try { void mcpBridge?.shutdown(); } catch {} globalShortcut.unregisterAll(); quitting = true; });
 app.on('window-all-closed', () => { /* Keep tray and companion available until explicit Quit. */ });

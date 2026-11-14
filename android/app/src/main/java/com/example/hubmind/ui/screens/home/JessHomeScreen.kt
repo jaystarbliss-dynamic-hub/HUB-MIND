@@ -1,5 +1,10 @@
 package com.example.hubmind.ui.screens.home
 
+import android.app.Activity
+import android.content.Context
+import android.media.projection.MediaProjectionManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,10 +26,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.hubmind.agent.AndroidScreenShareEvents
+import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.data.model.ChatMessage
 import com.example.hubmind.data.model.JessLiveState
 import com.example.hubmind.data.model.MessageSender
@@ -41,6 +49,26 @@ fun JessHomeScreen(
     val state by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var screenSharing by remember { mutableStateOf(false) }
+    val screenShareLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val resultData = result.data
+        if (result.resultCode == Activity.RESULT_OK && resultData != null) {
+            HubMindAgentForegroundService.startScreenCapture(context, result.resultCode, resultData)
+            screenSharing = true
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        AndroidScreenShareEvents.events.collect { event ->
+            when (event.type) {
+                "started" -> screenSharing = true
+                "stopped", "error" -> screenSharing = false
+            }
+        }
+    }
 
     // Auto-scroll when new messages arrive
     LaunchedEffect(state.messages.size) {
@@ -284,6 +312,29 @@ fun JessHomeScreen(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                         )
                     }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
+                    onClick = {
+                        if (screenSharing) {
+                            HubMindAgentForegroundService.stopScreenCapture(context)
+                            screenSharing = false
+                        } else {
+                            val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+                            manager?.createScreenCaptureIntent()?.let(screenShareLauncher::launch)
+                        }
+                    }
+                ) {
+                    Text(
+                        text = if (screenSharing) "Stop screen sharing" else "Share screen with Jess",
+                        color = if (screenSharing) Amber400 else Teal400,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
 
