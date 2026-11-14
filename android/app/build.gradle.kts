@@ -1,4 +1,6 @@
 import java.util.Properties
+import java.net.URL
+import java.security.MessageDigest
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -6,6 +8,46 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.services)
+}
+
+// Fetch the exact production logo already used by the Hub-Mind workspace.
+ // Pin the source commit and Git blob hash so native branding cannot drift to
+ // a similarly named icon or silently accept a changed remote asset.
+val hubMindLogoSourceCommit = "9add2ea8003355972deb20065ce0d2aba2b863a1"
+val hubMindLogoGitBlobSha = "da03d94848e34f177ba0aa55869a487c994a3dc8"
+val hubMindLogoGeneratedRes = layout.buildDirectory.dir("generated/hubmind-official-branding/res")
+val fetchOfficialHubMindLogo = tasks.register("fetchOfficialHubMindLogo") {
+    val logoOutput = hubMindLogoGeneratedRes.map { it.file("drawable-nodpi/hub_mind_logo.png") }
+    outputs.file(logoOutput)
+    doLast {
+        val output = logoOutput.get().asFile
+        if (!output.isFile || output.length() == 0L) {
+            val sourceUrl = URL(
+                "https://raw.githubusercontent.com/jaystarbliss-dynamic-hub/HUB-MIND/$hubMindLogoSourceCommit/public/hub-mind%20logo.png"
+            )
+            val connection = sourceUrl.openConnection().apply {
+                connectTimeout = 20_000
+                readTimeout = 30_000
+            }
+            val bytes = connection.getInputStream().use { it.readBytes() }
+            require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) {
+                "The official Hub-Mind logo download was empty or unexpectedly large."
+            }
+            val gitHeader = "blob ${bytes.size}\u0000".toByteArray(Charsets.UTF_8)
+            val digest = MessageDigest.getInstance("SHA-1")
+            digest.update(gitHeader)
+            digest.update(bytes)
+            val actualBlobSha = digest.digest().joinToString("") { "%02x".format(it) }
+            require(actualBlobSha == hubMindLogoGitBlobSha) {
+                "Official Hub-Mind logo integrity check failed. Expected $hubMindLogoGitBlobSha, received $actualBlobSha."
+            }
+            output.parentFile.mkdirs()
+            output.writeBytes(bytes)
+        }
+        require(output.isFile && output.length() > 0L) {
+            "The official Hub-Mind logo resource is missing."
+        }
+    }
 }
 
 val keystorePropsFile = rootProject.file("keystore.properties")
@@ -37,8 +79,8 @@ android {
         applicationId = "com.aistudio.hubmind.wzyqkp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 250
-        versionName = "2.5.0"
+        versionCode = 251
+        versionName = "2.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -83,6 +125,8 @@ android {
         }
     }
 
+    sourceSets.getByName("main").res.srcDir(hubMindLogoGeneratedRes)
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -96,6 +140,10 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(fetchOfficialHubMindLogo)
 }
 
 kotlin {
