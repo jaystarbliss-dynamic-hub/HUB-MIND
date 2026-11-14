@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { formatAndroidReleaseLabel } from '../lib/androidRelease';
 import {
   ArrowRight,
   ArrowUpRight,
@@ -60,6 +61,11 @@ const LAST_KNOWN_PUBLIC_RELEASES = {
     'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.4.0/Hub-Mind-Android-v2.4.0.apk',
   apkName: 'Hub-Mind-Android-v2.4.0.apk',
   apkVersion: '2.4.0',
+  apkDisplayName: formatAndroidReleaseLabel({
+    tagName: 'android-v2.4.0',
+    assetName: 'Hub-Mind-Android-v2.4.0.apk',
+    prerelease: false,
+  }),
 };
 
 export function PublicHome() {
@@ -148,6 +154,11 @@ export function PublicHome() {
             apkVersion: String(
               androidRelease?.tag_name || LAST_KNOWN_PUBLIC_RELEASES.apkVersion
             ).replace(/^android-v/i, ''),
+            apkDisplayName: formatAndroidReleaseLabel({
+              tagName: androidRelease?.tag_name || `android-v${LAST_KNOWN_PUBLIC_RELEASES.apkVersion}`,
+              assetName: androidAsset?.name || LAST_KNOWN_PUBLIC_RELEASES.apkName,
+              prerelease: Boolean(androidRelease?.prerelease),
+            }),
           });
         }
       })
@@ -504,7 +515,12 @@ export function PublicHome() {
                 Get Jess Chrome extension <ArrowUpRight size={15} />
               </a>
             </div>
-            {release?.name && <small className="hm-release-name">{release.name}</small>}
+            {release?.name && <small className="hm-release-name">Windows: {release.name}</small>}
+            {release?.apkDisplayName && (
+              <small className="hm-release-name">
+                Android: {release.apkDisplayName} · {release.apkName}
+              </small>
+            )}
           </div>
 
           <div
