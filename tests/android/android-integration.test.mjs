@@ -376,6 +376,12 @@ test('Android app opens the canonical workspace with a one-time native Google si
   assert.match(tokenHolder, /MAX_TOKEN_AGE_MS/);
   assert.match(authViewModel, /NativeWebAuthTokenHolder\.store\(idToken\)/);
   assert.match(webAuth, /signInWithCredential\(auth, GoogleAuthProvider\.credential\(googleIdToken\)\)/);
+  const settingsScreen = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsScreen.kt');
+  const settingsViewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsViewModel.kt');
+  assert.match(settingsScreen, /PackageInfoCompat\.getLongVersionCode/);
+  assert.match(settingsScreen, /v\$installedVersionName \(Build \$installedVersionCode\)/);
+  assert.match(settingsViewModel, /Current installed build: 240/);
+  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);
 });
 
 test('Android releases have human-readable version and channel labels on homepage and version history', () => {
