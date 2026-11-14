@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('desktop transcript is a separate fixed and click-through window', async () => {
+test('desktop transcript is a separate fixed and click-through transparent window', async () => {
   const [main, preload, page, css] = await Promise.all([
     read('../../electron/main.cjs'),
     read('../../electron/preload.cjs'),
@@ -19,13 +19,13 @@ test('desktop transcript is a separate fixed and click-through window', async ()
   assert.match(main, /function positionTranscriptOverlayWindow\(\)/);
   assert.match(main, /area\.x \+ \(area\.width - width\) \/ 2/);
   assert.match(main, /hubmind:set-transcript-overlay-visible/);
-  assert.ok(main.includes("setBackgroundMaterial('acrylic')"));
-  assert.ok(main.includes("setBackgroundMaterial('acrylic')"));
+  assert.match(main, /backgroundColor: '#00000000'/);
+  assert.match(main, /transcriptOverlayWindow\.setOpacity\(1\)/);
   assert.match(preload, /setTranscriptOverlayVisible: .*hubmind:set-transcript-overlay-visible/);
   assert.match(page, /hubmind\.jess\.desktopTranscript\.v1/);
   assert.match(page, /setTranscriptOverlayVisible/);
   assert.match(css, /pointer-events: none/);
-  assert.match(css, /backdrop-filter: blur/);
+  assert.match(css, /backdrop-filter: none/);
   assert.match(css, /justify-content: center/);
 });
 
@@ -57,7 +57,6 @@ test('movable Jess character keeps its own size when transcript appears', async 
   assert.match(main, /createTranscriptOverlayWindow/);
 });
 
-
 test('Jess exposes google_search as the canonical external research tool while preserving search_web compatibility', async () => {
   const tools = await read('../../src/lib/jessTools.ts');
   assert.match(tools, /name: 'google_search'/);
@@ -65,20 +64,19 @@ test('Jess exposes google_search as the canonical external research tool while p
   assert.match(tools, /\['search_web', 'google_search', 'desktop_open_website'\]/);
 });
 
-test('transcript and screen-share chooser use stronger transparent glass surfaces and stay above other apps', async () => {
+test('transcript surface stays transparent and the separate screen-share chooser stays on top', async () => {
   const [css, main, picker] = await Promise.all([
     read('../../src/pages/jess-transcript-overlay.css'),
     read('../../electron/main.cjs'),
     read('../../electron/screen-share-picker.html'),
   ]);
-  assert.ok(css.includes('rgba(15, 23, 42, .46)'));
-  assert.ok(css.includes('blur(26px) saturate(165%)'));
+  assert.ok(css.includes('rgba(2, 6, 23, .10)'));
+  assert.ok(css.includes('backdrop-filter: none'));
   assert.match(main, /picker\.setVisibleOnAllWorkspaces\(true, \{ visibleOnFullScreen: true \}\)/);
   assert.ok(main.includes("title: 'Choose what to share · Jess'"));
   assert.ok(main.includes("backgroundColor: '#00000000'"));
   assert.ok(picker.includes('backdrop-filter:blur(34px) saturate(180%)'));
 });
-
 
 test('GitHub repository service supports authenticated release, commit and metadata requests', async () => {
   const service = await read('../../src/server/githubService.ts');
