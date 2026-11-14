@@ -31,6 +31,7 @@ enum class HubMindNavDestination(
     val testTag: String
 ) {
     JESS("Jess", Icons.Filled.SmartToy, Icons.Outlined.SmartToy, "nav_jess_tab"),
+    WORKSPACE("Workspace", Icons.Filled.Web, Icons.Outlined.Web, "nav_workspace_tab"),
     DEVICES("Devices", Icons.Filled.Devices, Icons.Outlined.Devices, "nav_devices_tab"),
     ACTIVITY("Activity", Icons.Filled.History, Icons.Outlined.History, "nav_activity_tab"),
     SETTINGS("Settings", Icons.Filled.Settings, Icons.Outlined.Settings, "nav_settings_tab")
