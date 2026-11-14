@@ -68,3 +68,26 @@ test('Android opens the authenticated workspace first and never routes home to t
   assert.match(auth, /if \(!firebaseUser && nativeAuthBootstrapPending\.current\) return/);
   assert.match(repository, /isSessionReady/);
 });
+
+
+test('Android publishes the native Google token before session validity can open Workspace', () => {
+  const viewModel = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
+  const nativeHolder = read('../../android/app/src/main/java/com/example/hubmind/data/remote/NativeWebAuthTokenHolder.kt');
+  const webAuth = read('../../src/lib/auth.tsx');
+  const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const repository = read('../../android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
+
+  const tokenStoreIndex = viewModel.indexOf('NativeWebAuthTokenHolder.store(idToken)');
+  const nativeSignInIndex = viewModel.indexOf('authRepository.signInWithGoogle(idToken)');
+  assert.ok(tokenStoreIndex >= 0 && nativeSignInIndex > tokenStoreIndex,
+    'the WebView token must be available before native sign-in can open Workspace');
+  assert.match(viewModel, /NativeWebAuthTokenHolder\\.clear\\(\\)/);
+  assert.match(nativeHolder, /fun peek\\(\\): String/);
+  assert.match(nativeHolder, /fun clear\\(\\)/);
+  assert.match(workspace, /fun getGoogleIdToken\\(\\)/);
+  assert.match(workspace, /fun completeGoogleSignIn\\(\\)/);
+  assert.match(webAuth, /bridge\\.getGoogleIdToken\\(\\)/);
+  assert.match(webAuth, /bridge\\.completeGoogleSignIn/);
+  assert.match(webAuth, /nativeAuthBootstrapPending\\.current\\) return/);
+  assert.match(repository, /override val isSessionReady: StateFlow<Boolean>/);
+});
