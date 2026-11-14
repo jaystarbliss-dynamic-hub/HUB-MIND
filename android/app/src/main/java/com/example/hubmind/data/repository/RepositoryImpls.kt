@@ -675,11 +675,14 @@ class JessRepositoryImpl(
         }
 
         val memories = (conversationRepository as? ConversationRepositoryImpl)?.userMemories?.value ?: emptyList()
+        val activeTarget = deviceRegistryRepository.currentTargetDevice.value
         val systemInstruction = JessCanonicalConfig.buildSystemInstruction(
             user = authRepository?.currentUser?.value,
             memories = memories,
             devices = deviceRegistryRepository.devices.value,
-            targetDevice = deviceRegistryRepository.currentTargetDevice.value
+            targetDevice = activeTarget,
+            permissionMode = activeTarget?.permissionMode ?: "ask",
+            fullControlEnabled = activeTarget?.fullControlActive == true
         )
         val toolDecls = JessCanonicalConfig.buildToolDeclarations()
 
