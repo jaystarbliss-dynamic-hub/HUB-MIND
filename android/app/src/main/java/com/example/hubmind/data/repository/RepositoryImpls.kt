@@ -1109,7 +1109,7 @@ class DeviceRegistryRepositoryImpl(
                             deviceId = devId,
                             deviceName = doc.getString("deviceName") ?: devId,
                             platform = platform,
-                            clientVersion = doc.getString("clientVersion") ?: "2.5.0",
+                            clientVersion = doc.getString("clientVersion") ?: "2.5.1",
                             status = status,
                             isCurrentDevice = devId == localDeviceId,
                             fullControlActive = doc.getBoolean("fullControlActive") ?: false,
