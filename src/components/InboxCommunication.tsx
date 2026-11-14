@@ -101,7 +101,8 @@ const tabs: { id: InboxTab; label: string; icon: React.ElementType }[] = [
 ];
 
 export function InboxCommunication() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const activeUserId = user?.uid || profile?.id || '';
   const navigate = useNavigate();
   const [tab, setTab] = useState<InboxTab>('received');
   const [users, setUsers] = useState<WorkspaceUser[]>([]);
@@ -110,7 +111,16 @@ export function InboxCommunication() {
   const [sharesWithMe, setSharesWithMe] = useState<ResourceShare[]>([]);
   const [drafts, setDrafts] = useState<MessageDraft[]>([]);
   const [notifications, setNotifications] = useState<InboxNotification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingReceived, setLoadingReceived] = useState(true);
+  const [loadingSent, setLoadingSent] = useState(false);
+  const [loadingDrafts, setLoadingDrafts] = useState(false);
+  const [loadingShares, setLoadingShares] = useState(true);
+  const [loadingNotifications, setLoadingNotifications] = useState(true);
+  const [receivedError, setReceivedError] = useState('');
+  const [sentError, setSentError] = useState('');
+  const [draftsError, setDraftsError] = useState('');
+  const [sharesError, setSharesError] = useState('');
+  const [notificationsError, setNotificationsError] = useState('');
   const [composeOpen, setComposeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -122,110 +132,148 @@ export function InboxCommunication() {
   const [text, setText] = useState('');
 
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!activeUserId) return;
     return onSnapshot(
       collection(db, 'users'),
       snapshot => {
         setUsers(
           snapshot.docs
-            .map(item => ({ id: item.id, ...(item.data() as any) } as WorkspaceUser))
-            .filter(item => item.id !== profile.id && item.status === 'active')
+            .map(item => ({ ...(item.data() as any), id: item.id } as WorkspaceUser))
+            .filter(item => item.id !== activeUserId && item.status === 'active')
         );
       },
       err => console.warn('[Inbox] Workspace contacts unavailable:', err?.message || err)
     );
-  }, [profile?.id]);
+  }, [activeUserId]);
 
   // Real-time subscription to notifications
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!activeUserId) return;
+    setLoadingNotifications(true);
+    setNotificationsError('');
     return onSnapshot(
-      query(collection(db, 'notifications'), where('userId', '==', profile.id)),
+      query(collection(db, 'notifications'), where('userId', '==', activeUserId)),
       snapshot => {
         const list = snapshot.docs.map(
-          item => ({ id: item.id, ...(item.data() as any) } as InboxNotification)
+          item => ({ ...(item.data() as any), id: item.id } as InboxNotification)
         );
         list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
         setNotifications(list);
+        setNotificationsError('');
+        setLoadingNotifications(false);
       },
-      err => console.warn('[Inbox] Notification badge could not update:', err?.message || err)
+      err => {
+        console.warn('[Inbox] Notification badge could not update:', err?.message || err);
+        setNotificationsError(
+          err?.code === 'permission-denied'
+            ? 'Your account does not currently have permission to read notifications. Please sign out and sign back in.'
+            : 'Could not load notifications right now.'
+        );
+        setLoadingNotifications(false);
+      }
     );
-  }, [profile?.id]);
+  }, [activeUserId]);
 
   // Real-time subscription to active resource shares for this user
   useEffect(() => {
-    if (!profile?.id) return;
-    return subscribeToSharesForUser(profile.id, list => {
-      setSharesWithMe(list);
-    });
-  }, [profile?.id]);
+    if (!activeUserId) return;
+    setLoadingShares(true);
+    setSharesError('');
+    return subscribeToSharesForUser(
+      activeUserId,
+      list => {
+        setSharesWithMe(list);
+        setSharesError('');
+        setLoadingShares(false);
+      },
+      err => {
+        setSharesError(
+          (err as any)?.code === 'permission-denied'
+            ? 'Your account does not currently have permission to read shared items.'
+            : 'Could not load shared items right now.'
+        );
+        setLoadingShares(false);
+      }
+    );
+  }, [activeUserId]);
 
   // Real-time subscription to received messages (so Received and Shared With Me always stay live)
   useEffect(() => {
-    if (!profile?.id) return;
-    setLoading(true);
+    if (!activeUserId) return;
+    setLoadingReceived(true);
+    setReceivedError('');
     const stopReceived = onSnapshot(
-      query(collection(db, 'messages'), where('recipientId', '==', profile.id)),
+      query(collection(db, 'messages'), where('recipientId', '==', activeUserId)),
       snapshot => {
         const list = snapshot.docs.map(
-          item => ({ id: item.id, ...(item.data() as any) } as WorkspaceMessage)
+          item => ({ ...(item.data() as any), id: item.id } as WorkspaceMessage)
         );
         list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
         setReceivedMessages(list);
-        setLoading(false);
+        setReceivedError('');
+        setLoadingReceived(false);
       },
       err => {
         console.error('[Inbox] Received messages unavailable:', err);
-        setLoading(false);
+        setReceivedError(
+          err?.code === 'permission-denied'
+            ? 'Your messages could not be loaded due to workspace permissions. Please sign out and sign in again, or ask your admin to verify your account status.'
+            : 'Could not load your received messages. Check your connection and try again.'
+        );
+        setLoadingReceived(false);
       }
     );
     return () => stopReceived();
-  }, [profile?.id]);
+  }, [activeUserId]);
 
   // Sent & Drafts subscriptions when their tabs are active
   useEffect(() => {
-    if (!profile?.id) return;
+    if (!activeUserId) return;
     if (tab === 'sent') {
-      setLoading(true);
+      setLoadingSent(true);
+      setSentError('');
       const stopSent = onSnapshot(
-        query(collection(db, 'messages'), where('senderId', '==', profile.id)),
+        query(collection(db, 'messages'), where('senderId', '==', activeUserId)),
         snapshot => {
           const list = snapshot.docs.map(
-            item => ({ id: item.id, ...(item.data() as any) } as WorkspaceMessage)
+            item => ({ ...(item.data() as any), id: item.id } as WorkspaceMessage)
           );
           list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
           setSentMessages(list);
-          setLoading(false);
+          setSentError('');
+          setLoadingSent(false);
         },
         err => {
           console.error('[Inbox] Sent messages unavailable:', err);
-          setError('Could not load sent messages.');
-          setLoading(false);
+          setSentError('Could not load sent messages.');
+          setLoadingSent(false);
         }
       );
       return () => stopSent();
     }
     if (tab === 'drafts') {
-      setLoading(true);
+      setLoadingDrafts(true);
+      setDraftsError('');
       const stopDrafts = onSnapshot(
-        query(collection(db, 'messageDrafts'), where('userId', '==', profile.id)),
+        query(collection(db, 'messageDrafts'), where('userId', '==', activeUserId)),
         snapshot => {
           const list = snapshot.docs.map(
-            item => ({ id: item.id, ...(item.data() as any) } as MessageDraft)
+            item => ({ ...(item.data() as any), id: item.id } as MessageDraft)
           );
           list.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
           setDrafts(list);
-          setLoading(false);
+          setDraftsError('');
+          setLoadingDrafts(false);
         },
         err => {
           console.error('[Inbox] Drafts unavailable:', err);
-          setError('Could not load drafts.');
-          setLoading(false);
+          setDraftsError('Could not load drafts.');
+          setLoadingDrafts(false);
         }
       );
       return () => stopDrafts();
     }
-  }, [profile?.id, tab]);
+  }, [activeUserId, tab]);
 
   // Synthesize received items: include both received messages AND any active shares that didn't have a message yet
   const combinedReceivedItems = useMemo(() => {
@@ -318,14 +366,14 @@ export function InboxCommunication() {
   };
 
   const saveDraft = async () => {
-    if (!profile?.id) return;
+    if (!activeUserId) return;
     setSaving(true);
     setError('');
     setNotice('');
     const recipient = users.find(item => item.id === recipientId);
     const now = new Date().toISOString();
     const payload = {
-      userId: profile.id,
+      userId: activeUserId,
       recipientId: recipientId || '',
       recipientName:
         recipient?.name || recipient?.displayName || recipient?.username || '',
@@ -351,7 +399,7 @@ export function InboxCommunication() {
   };
 
   const send = async () => {
-    if (!profile?.id || !recipientId || !text.trim()) {
+    if (!activeUserId || !recipientId || !text.trim()) {
       setError('Choose a recipient and write a message before sending.');
       return;
     }
@@ -360,11 +408,13 @@ export function InboxCommunication() {
     setNotice('');
     const recipient = users.find(item => item.id === recipientId);
     const senderName =
-      profile.preferredName ||
-      profile.displayName ||
-      profile.name ||
-      profile.username ||
-      profile.email;
+      profile?.preferredName ||
+      profile?.displayName ||
+      profile?.name ||
+      profile?.username ||
+      profile?.email ||
+      user?.email ||
+      'Workspace member';
     const recipientName =
       recipient?.name ||
       recipient?.displayName ||
@@ -374,7 +424,7 @@ export function InboxCommunication() {
     const now = new Date().toISOString();
     try {
       const messageRef = await addDoc(collection(db, 'messages'), {
-        senderId: profile.id,
+        senderId: activeUserId,
         recipientId,
         senderName,
         recipientName,
@@ -387,8 +437,8 @@ export function InboxCommunication() {
       try {
         await addDoc(collection(db, 'notifications'), {
           userId: recipientId,
-          createdBy: profile.id,
-          senderId: profile.id,
+          createdBy: activeUserId,
+          senderId: activeUserId,
           senderName,
           messageId: messageRef.id,
           type: 'message',
@@ -421,7 +471,7 @@ export function InboxCommunication() {
     if (
       tab === 'received' &&
       !message.read &&
-      profile?.id &&
+      activeUserId &&
       !message.id.startsWith('synthetic_')
     ) {
       await updateDoc(doc(db, 'messages', message.id), {
@@ -452,8 +502,8 @@ export function InboxCommunication() {
         const snapshot = await getDoc(doc(db, 'messages', item.messageId));
         if (snapshot.exists()) {
           const message = {
-            id: snapshot.id,
             ...(snapshot.data() as any),
+            id: snapshot.id,
           } as WorkspaceMessage;
           setSelectedMessage(message);
           if (!message.read) {
@@ -471,6 +521,27 @@ export function InboxCommunication() {
   };
 
   const activeMessagesList = tab === 'received' ? combinedReceivedItems : sentMessages;
+  const activeLoading =
+    tab === 'received'
+      ? loadingReceived
+      : tab === 'shared'
+        ? loadingShares
+        : tab === 'sent'
+          ? loadingSent
+          : tab === 'drafts'
+            ? loadingDrafts
+            : loadingNotifications;
+  const activeTabError =
+    tab === 'received'
+      ? receivedError
+      : tab === 'shared'
+        ? sharesError
+        : tab === 'sent'
+          ? sentError
+          : tab === 'drafts'
+            ? draftsError
+            : notificationsError;
+  const visibleError = error || activeTabError;
 
   return (
     <section className="hm-inbox-communications">
@@ -522,14 +593,14 @@ export function InboxCommunication() {
           {notice}
         </div>
       )}
-      {error && (
+      {visibleError && (
         <div role="alert" className="hm-inbox-error">
-          {error}
+          {visibleError}
         </div>
       )}
 
       <div className="hm-inbox-list">
-        {loading ? (
+        {activeLoading ? (
           <div className="hm-inbox-empty">
             <Loader2 size={20} className="animate-spin" /> Loading your {tab}…
           </div>

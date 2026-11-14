@@ -28,3 +28,12 @@ test('documents and document versions allow shared editors via sharedWriteData a
   assert.match(rules,/sharedWriteData\(get\(\/databases\/\$\(database\)\/documents\/documents\/\$\(documentId\)\)\.data\)/);
   assert.match(rules,/hasShareDocWrite\('document', documentId\)/);
 });
+test('invitations rule allows invited users to look up their own invitations cleanly and case-insensitively',()=>{
+  assert.match(rules,/function sameEmail\(a, b\)/);
+  assert.match(rules,/match \/invitations\/\{id\}[\s\S]*allow list: if admin\(\) \|\| \(signedIn\(\) && request\.auth\.token\.email is string/);
+  assert.match(rules,/match \/invitations\/\{id\}[\s\S]*resource\.data\.acceptedUid == request\.auth\.uid/);
+});
+test('messages rule splits get and list so non-admin recipient and sender queries pass Firestore query validation',()=>{
+  assert.match(rules,/match \/messages\/\{messageId\}[\s\S]*allow get: if admin\(\) \|\| \(member\(\) && \(resource\.data\.senderId == request\.auth\.uid \|\| resource\.data\.recipientId == request\.auth\.uid\)\);/);
+  assert.match(rules,/match \/messages\/\{messageId\}[\s\S]*allow list: if admin\(\) \|\| \(member\(\) && resource\.data\.senderId == request\.auth\.uid\) \|\| \(member\(\) && resource\.data\.recipientId == request\.auth\.uid\);/);
+});

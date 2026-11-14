@@ -7,3 +7,5 @@ test('invitation accepts the invited email while active',()=>{ assert.doesNotThr
 test('wrong email is rejected',()=>{ assert.throws(()=>validateInvitationAcceptance(base,'uid','other@example.com',Date.parse('2026-10-02T00:00:00.000Z')),/invited/); });
 test('expired invitation is rejected',()=>{ assert.throws(()=>validateInvitationAcceptance(base,'uid','john@example.com',Date.parse('2026-10-11T00:00:00.000Z')),/expired/); });
 test('already claimed invitation is rejected',()=>{ assert.throws(()=>validateInvitationAcceptance({...base,status:'accepted'},'uid','john@example.com',Date.parse('2026-10-02T00:00:00.000Z')),/no longer active/); });
+test('claimed invitation recovers idempotently for the same uid and email',()=>{ assert.doesNotThrow(()=>validateInvitationAcceptance({...base,status:'accepted',acceptedUid:'uid'},'uid','JOHN@example.com',Date.parse('2026-10-02T00:00:00.000Z'))); });
+test('claimed invitation is rejected for a different uid',()=>{ assert.throws(()=>validateInvitationAcceptance({...base,status:'accepted',acceptedUid:'uid-1'},'uid-2','john@example.com',Date.parse('2026-10-02T00:00:00.000Z')),/no longer active/); });

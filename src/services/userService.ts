@@ -103,7 +103,7 @@ export async function getUserProfile(userId: string): Promise<User | null> {
     const docRef = doc(db, 'users', userId);
     const snap = await getDoc(docRef);
     if (snap.exists()) {
-      return { id: snap.id, ...snap.data() } as User;
+      return { ...snap.data(), id: snap.id } as User;
     }
     return null;
   } catch (error) {
@@ -120,7 +120,7 @@ export async function getUserByUsername(username: string): Promise<User | null> 
     const snap = await getDocs(q);
     if (!snap.empty) {
       const docSnap = snap.docs[0];
-      return { id: docSnap.id, ...docSnap.data() } as User;
+      return { ...docSnap.data(), id: docSnap.id } as User;
     }
     return null;
   } catch (error) {
@@ -141,7 +141,7 @@ export async function getAllUsers(): Promise<User[]> {
   try {
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as User));
+    return snap.docs.map(d => ({ ...d.data(), id: d.id } as User));
   } catch (error) {
     console.error('Error fetching users:', error);
     return [];
@@ -151,7 +151,7 @@ export async function getAllUsers(): Promise<User[]> {
 export function subscribeToUsers(callback: (users: User[]) => void): () => void {
   const q = collection(db, 'users');
   return onSnapshot(q, (snap) => {
-    const users = snap.docs.map(d => ({ id: d.id, ...d.data() } as User));
+    const users = snap.docs.map(d => ({ ...d.data(), id: d.id } as User));
     users.sort((a, b) => {
       const nameA = a.displayName || a.name || a.username || '';
       const nameB = b.displayName || b.name || b.username || '';

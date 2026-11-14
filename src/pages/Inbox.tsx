@@ -21,6 +21,7 @@ function CapturedInbox() {
   const isShared = new URLSearchParams(location.search).get('shared') === 'true';
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [sharingItem, setSharingItem] = useState<InboxItem | null>(null);
 
@@ -53,13 +54,17 @@ function CapturedInbox() {
           where('status', '==', viewMode),
           where('createdBy', '==', profile.id)
         );
+    setLoading(true);
+    setFetchError('');
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      let data = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) } as InboxItem));
+      let data = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id } as InboxItem));
       data = data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setItems(data);
+      setFetchError('');
       setLoading(false);
     }, (error) => {
       console.error("Error fetching inbox:", error);
+      setFetchError('Could not load your captured items. Check your connection or permissions and try again.');
       setLoading(false);
     });
     return () => unsubscribe();
@@ -223,6 +228,12 @@ function CapturedInbox() {
         </button>
       </div>
 
+
+      {fetchError && (
+        <div role="alert" className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+          {fetchError}
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-accent" /></div>

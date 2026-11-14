@@ -1,14 +1,48 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
-import { ArrowRight, ArrowUpRight, Bell, Check, Download, FileText, FolderKanban, Layers, LockKeyhole, Menu, MessageCircle, X } from 'lucide-react';
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Bell,
+  Check,
+  Download,
+  FolderKanban,
+  Layers,
+  LockKeyhole,
+  Menu,
+  MessageCircle,
+  X,
+} from 'lucide-react';
 import { CircuitBackground } from '../components/CircuitBackground';
+import {
+  DesktopWorkspaceMockup,
+  PhoneWorkspaceMockup,
+  WorkspaceExplorerSection,
+  useWorkspaceOperatorCycle,
+} from '../components/home/WorkspaceScreenShowcase';
 
 const FEATURES = [
-  { icon: FolderKanban, title: 'Your work, in one place', text: 'Projects, tasks, documents, meetings and follow-ups in one calm workspace.' },
-  { icon: MessageCircle, title: 'Meet Jess', text: 'A thoughtful AI assistant designed to help you research, plan, write and keep moving.' },
-  { icon: Bell, title: 'A more useful inbox', text: 'Keep messages, notifications, drafts and important captures organised together.' },
-  { icon: LockKeyhole, title: 'Private by design', text: 'Your workspace stays invitation-based, with access controls and clear ownership.' },
+  {
+    icon: FolderKanban,
+    title: 'Your work, in one place',
+    text: 'Projects, tasks, paginated A4 documents, meetings and follow-ups in one calm workspace.',
+  },
+  {
+    icon: MessageCircle,
+    title: 'Meet Jess',
+    text: 'A thoughtful AI assistant designed to help you research, plan, write and act across devices.',
+  },
+  {
+    icon: Bell,
+    title: 'A more useful inbox',
+    text: 'Keep shared files, direct messages, notifications and quick captures organized together.',
+  },
+  {
+    icon: LockKeyhole,
+    title: 'Private by design',
+    text: 'Your workspace stays invitation-based, with role-aware access controls and clear ownership.',
+  },
 ];
 
 const GITHUB_REPO_SLUG = 'jaystarbliss-dynamic-hub/HUB-MIND';
@@ -20,8 +54,10 @@ const LAST_KNOWN_PUBLIC_RELEASES = {
   url: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/desktop-v704/Hub-Mind-Setup-0.1.0-x64.exe',
   name: 'Hub-Mind-Setup-0.1.0-x64.exe',
   version: 'desktop-v704',
-  extensionUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/desktop-v704/Jess-Chrome-Extension.zip',
-  apkUrl: 'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.4.0/Hub-Mind-Android-v2.4.0.apk',
+  extensionUrl:
+    'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/desktop-v704/Jess-Chrome-Extension.zip',
+  apkUrl:
+    'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.4.0/Hub-Mind-Android-v2.4.0.apk',
   apkName: 'Hub-Mind-Android-v2.4.0.apk',
   apkVersion: '2.4.0',
 };
@@ -33,42 +69,69 @@ export function PublicHome() {
   const [inviteValue, setInviteValue] = useState('');
   const [error, setError] = useState('');
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [release, setRelease] = useState<typeof LAST_KNOWN_PUBLIC_RELEASES | null>(LAST_KNOWN_PUBLIC_RELEASES);
+  const [release, setRelease] = useState<typeof LAST_KNOWN_PUBLIC_RELEASES | null>(
+    LAST_KNOWN_PUBLIC_RELEASES
+  );
   const [installPrompt, setInstallPrompt] = useState<any>(null);
   const [installHelpOpen, setInstallHelpOpen] = useState(false);
+
+  const operatorCycle = useWorkspaceOperatorCycle(4300);
 
   useEffect(() => {
     const root = document.querySelector('.hm-public');
     if (!root) return;
     root.classList.add('hm-motion-ready');
     const nodes = Array.from(root.querySelectorAll<HTMLElement>('.hm-reveal'));
-    if (!('IntersectionObserver' in window)) { nodes.forEach(node => node.classList.add('is-visible')); return; }
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(entry => { if (entry.isIntersecting) { entry.target.classList.add('is-visible'); observer.unobserve(entry.target); } });
-    }, { threshold: 0.12, rootMargin: '0px 0px -35px 0px' });
-    nodes.forEach(node => observer.observe(node));
+    if (!('IntersectionObserver' in window)) {
+      nodes.forEach((node) => node.classList.add('is-visible'));
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.08, rootMargin: '0px 0px -25px 0px' }
+    );
+    nodes.forEach((node) => observer.observe(node));
     return () => observer.disconnect();
   }, []);
+
   useEffect(() => {
     let active = true;
     fetch(`https://api.github.com/repos/${GITHUB_REPO_SLUG}/releases?per_page=50`, {
       headers: { Accept: 'application/vnd.github+json' },
     })
-      .then(response => response.ok ? response.json() : Promise.reject(new Error('GitHub releases are temporarily unavailable')))
-      .then(rawReleases => {
-        const publishedReleases = (Array.isArray(rawReleases) ? rawReleases : [])
-          .filter((item: any) => !item.draft && !item.prerelease);
+      .then((response) =>
+        response.ok ? response.json() : Promise.reject(new Error('GitHub releases are temporarily unavailable'))
+      )
+      .then((rawReleases) => {
+        const publishedReleases = (Array.isArray(rawReleases) ? rawReleases : []).filter(
+          (item: any) => !item.draft && !item.prerelease
+        );
 
         // Windows and Android are separate release streams. Never assume the
         // newest release overall contains both platform installers.
-        const windowsRelease = publishedReleases.find((item: any) =>
-          Array.isArray(item.assets) && item.assets.some((asset: any) => /\.exe$/i.test(String(asset.name || '')))
+        const windowsRelease = publishedReleases.find(
+          (item: any) =>
+            Array.isArray(item.assets) &&
+            item.assets.some((asset: any) => /\.exe$/i.test(String(asset.name || '')))
         );
-        const androidRelease = publishedReleases.find((item: any) =>
-          Array.isArray(item.assets) && item.assets.some((asset: any) => /\.apk$/i.test(String(asset.name || '')))
+        const androidRelease = publishedReleases.find(
+          (item: any) =>
+            Array.isArray(item.assets) &&
+            item.assets.some((asset: any) => /\.apk$/i.test(String(asset.name || '')))
         );
-        const windowsAsset = windowsRelease?.assets?.find((asset: any) => /\.exe$/i.test(String(asset.name || '')));
-        const androidAsset = androidRelease?.assets?.find((asset: any) => /\.apk$/i.test(String(asset.name || '')));
+        const windowsAsset = windowsRelease?.assets?.find((asset: any) =>
+          /\.exe$/i.test(String(asset.name || ''))
+        );
+        const androidAsset = androidRelease?.assets?.find((asset: any) =>
+          /\.apk$/i.test(String(asset.name || ''))
+        );
         const extensionAsset = windowsRelease?.assets?.find((asset: any) =>
           /Jess-Chrome-Extension\.zip$/i.test(String(asset.name || ''))
         );
@@ -78,10 +141,13 @@ export function PublicHome() {
             url: windowsAsset?.browser_download_url || LAST_KNOWN_PUBLIC_RELEASES.url,
             name: windowsAsset?.name || LAST_KNOWN_PUBLIC_RELEASES.name,
             version: windowsRelease?.tag_name || LAST_KNOWN_PUBLIC_RELEASES.version,
-            extensionUrl: extensionAsset?.browser_download_url || LAST_KNOWN_PUBLIC_RELEASES.extensionUrl,
+            extensionUrl:
+              extensionAsset?.browser_download_url || LAST_KNOWN_PUBLIC_RELEASES.extensionUrl,
             apkUrl: androidAsset?.browser_download_url || LAST_KNOWN_PUBLIC_RELEASES.apkUrl,
             apkName: androidAsset?.name || LAST_KNOWN_PUBLIC_RELEASES.apkName,
-            apkVersion: String(androidRelease?.tag_name || LAST_KNOWN_PUBLIC_RELEASES.apkVersion).replace(/^android-v/i, ''),
+            apkVersion: String(
+              androidRelease?.tag_name || LAST_KNOWN_PUBLIC_RELEASES.apkVersion
+            ).replace(/^android-v/i, ''),
           });
         }
       })
@@ -90,12 +156,15 @@ export function PublicHome() {
         // outages/rate limits instead of incorrectly showing "coming soon".
         if (active) setRelease(LAST_KNOWN_PUBLIC_RELEASES);
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, []);
 
-
   useEffect(() => {
-    const capture = (event: Event) => { setInstallPrompt(event); };
+    const capture = (event: Event) => {
+      setInstallPrompt(event);
+    };
     window.addEventListener('beforeinstallprompt', capture);
     return () => window.removeEventListener('beforeinstallprompt', capture);
   }, []);
@@ -119,7 +188,10 @@ export function PublicHome() {
     event.preventDefault();
     setError('');
     const raw = inviteValue.trim();
-    if (!raw) { setError('Paste your invitation link or enter the invitation code.'); return; }
+    if (!raw) {
+      setError('Paste your invitation link or enter the invitation code.');
+      return;
+    }
     let id = raw;
     try {
       if (/^https?:\/\//i.test(raw)) {
@@ -129,50 +201,114 @@ export function PublicHome() {
         const url = new URL(raw, window.location.origin);
         id = url.searchParams.get('invite') || '';
       }
-    } catch { /* handled by validation below */ }
+    } catch {
+      /* handled by validation below */
+    }
     id = id.trim();
     if (!/^[A-Za-z0-9_-]{8,160}$/.test(id)) {
-      setError('That does not look like a valid Hub-Mind invitation. Use the full invitation link or its invitation ID.');
+      setError(
+        'That does not look like a valid Hub-Mind invitation. Use the full invitation link or its invitation ID.'
+      );
       return;
     }
     navigate('/login?invite=' + encodeURIComponent(id));
   };
 
   return (
-    <div className="hm-public min-h-screen overflow-hidden">
+    <div className="hm-public min-h-screen overflow-x-hidden">
       <div className="hm-site-background" aria-hidden="true">
         <CircuitBackground />
         <div className="hm-site-background-shade" />
       </div>
+
       <header className="hm-nav">
-        <a href="/" className="hm-brand" aria-label="Hub-Mind home">
-          <span className="hm-brand-mark"><img src="/hub-mind%20logo.png" alt="" /></span>
-          <span>Hub<span className="hm-brand-dash">-</span>Mind</span>
+        <a href="/" className="hm-brand whitespace-nowrap shrink-0" aria-label="Hub-Mind home">
+          <span className="hm-brand-mark">
+            <img src="/hub-mind%20logo.png" alt="" />
+          </span>
+          <span>
+            Hub<span className="hm-brand-dash">-</span>Mind
+          </span>
         </a>
-        <nav className={mobileMenu ? 'hm-nav-links is-open' : 'hm-nav-links'}>
-          <a href="#features" onClick={() => setMobileMenu(false)}>Workspace</a>
-          <a href="#jess" onClick={() => setMobileMenu(false)}>Meet Jess</a>
-          <a href="#desktop" onClick={() => setMobileMenu(false)}>Windows app</a>
+
+        <nav className={mobileMenu ? 'hm-nav-links is-open' : 'hm-nav-links'} aria-label="Primary">
+          <a href="#live-screens" className="whitespace-nowrap shrink-0" onClick={() => setMobileMenu(false)}>
+            Live Screens
+          </a>
+          <a href="#features" className="whitespace-nowrap shrink-0" onClick={() => setMobileMenu(false)}>
+            Workspace
+          </a>
+          <a href="#jess" className="whitespace-nowrap shrink-0" onClick={() => setMobileMenu(false)}>
+            Meet Jess
+          </a>
+          <a href="#desktop" className="whitespace-nowrap shrink-0" onClick={() => setMobileMenu(false)}>
+            Downloads
+          </a>
+          {mobileMenu && (
+            <button
+              type="button"
+              className="hm-button hm-button-quiet md:hidden"
+              onClick={() => {
+                setMobileMenu(false);
+                setInviteOpen(true);
+              }}
+            >
+              Get Invite
+            </button>
+          )}
         </nav>
-        <div className="hm-nav-actions">
-          <button className="hm-button hm-button-quiet hm-nav-invite" onClick={() => setInviteOpen(true)}>Get Invite</button>
-          <button className="hm-button hm-button-primary hm-nav-open" onClick={openWorkspace}>Open workspace <ArrowUpRight size={16}/></button>
+
+        <div className="hm-nav-actions shrink-0">
+          <button
+            className="hm-button hm-button-primary hm-nav-open whitespace-nowrap shrink-0"
+            onClick={openWorkspace}
+          >
+            Open workspace <ArrowUpRight size={16} />
+          </button>
         </div>
-        <button className="hm-mobile-toggle" aria-label="Toggle navigation" onClick={() => setMobileMenu(v => !v)}>{mobileMenu ? <X/> : <Menu/>}</button>
+
+        <button
+          className="hm-mobile-toggle"
+          aria-label="Toggle navigation"
+          onClick={() => setMobileMenu((v) => !v)}
+        >
+          {mobileMenu ? <X /> : <Menu />}
+        </button>
       </header>
 
       <main>
         <section className="hm-hero">
-          <div className="hm-hero-glow hm-glow-one" /><div className="hm-hero-glow hm-glow-two" />
+          <div className="hm-hero-glow hm-glow-one" />
+          <div className="hm-hero-glow hm-glow-two" />
           <div className="hm-hero-copy">
-            <h1>Welcome to<br/><span>Hub-Mind.</span></h1>
-            <p className="hm-hero-description">A quieter place to bring your work together. Plan the day, move projects forward, keep your knowledge close — and let Jess help with the busywork.</p>
+            <h1>
+              Welcome to
+              <br />
+              <span>Hub-Mind.</span>
+            </h1>
+            <p className="hm-hero-description">
+              A quieter place to bring your work together. Plan the day, move projects forward,
+              keep your knowledge close — and let Jess help with the busywork.
+            </p>
             <div className="hm-hero-actions">
-              <button className="hm-button hm-button-primary hm-button-large" onClick={openWorkspace}>Open Workspace <ArrowRight size={17}/></button>
-              <button className="hm-button hm-button-outline hm-button-large" onClick={() => setInviteOpen(true)}>Get Invite</button>
+              <button
+                className="hm-button hm-button-primary hm-button-large whitespace-nowrap shrink-0"
+                onClick={openWorkspace}
+              >
+                Open Workspace <ArrowRight size={17} />
+              </button>
+              <button
+                className="hm-button hm-button-outline hm-button-large whitespace-nowrap shrink-0"
+                onClick={() => setInviteOpen(true)}
+              >
+                Get Invite
+              </button>
             </div>
-            <div className="hm-trust-line"><LockKeyhole size={14}/> Private, invitation-based access <span>·</span> Built for focused work</div>
+            <div className="hm-trust-line">
+              <LockKeyhole size={14} /> Private, invitation-based access <span>·</span> Built for focused work
+            </div>
           </div>
+
           <div className="hm-hero-art" aria-label="Hub-Mind workspace preview">
             <div className="hm-hero-window-wrapper">
               <div className="hm-hero-window-glow" />
@@ -186,20 +322,65 @@ export function PublicHome() {
               </div>
             </div>
           </div>
-          <div className="hm-scroll-cue"><span/> A calmer way to work</div>
+
+          <div className="hm-scroll-cue">
+            <span /> A calmer way to work
+          </div>
         </section>
 
-        <section className="hm-signal-strip hm-reveal" aria-label="Hub-Mind principles"><div><span>01</span><strong>One connected workspace</strong><small>Projects, tasks, knowledge and follow-through</small></div><div><span>02</span><strong>One thought partner</strong><small>Jess for writing, research and planning</small></div><div><span>03</span><strong>Your work stays yours</strong><small>Invitation-based access and role-aware controls</small></div></section>
+        <section className="hm-signal-strip hm-reveal" aria-label="Hub-Mind principles">
+          <div>
+            <span>01</span>
+            <strong>Ten synced workspace screens</strong>
+            <small>Today, Inbox, Tasks, Projects, A4 Docs, Calendar and CRM</small>
+          </div>
+          <div>
+            <span>02</span>
+            <strong>One thought partner</strong>
+            <small>Jess for voice, writing, research and cross-device control</small>
+          </div>
+          <div>
+            <span>03</span>
+            <strong>Desktop &amp; Android native</strong>
+            <small>Operate cleanly from Windows or your phone with role-aware access</small>
+          </div>
+        </section>
+
+        <WorkspaceExplorerSection
+          cycle={operatorCycle}
+          onOpenWorkspace={openWorkspace}
+        />
 
         <section id="features" className="hm-features section-shell hm-reveal">
-          <div className="hm-section-heading"><div className="hm-eyebrow">THE WORKSPACE</div><h2>Less scattered.<br/><span>More in sync.</span></h2><p>Everything you need to organise your work, without another noisy place to manage.</p></div>
-          <div className="hm-feature-grid">{FEATURES.map((feature, i) => <article className="hm-feature hm-reveal" key={feature.title}><div className={'hm-feature-icon tone-' + i}><feature.icon size={20}/></div><span className="hm-feature-index">0{i+1}</span><h3>{feature.title}</h3><p>{feature.text}</p></article>)}</div>
+          <div className="hm-section-heading">
+            <div className="hm-eyebrow">THE WORKSPACE</div>
+            <h2>
+              Less scattered.
+              <br />
+              <span>More in sync.</span>
+            </h2>
+            <p>
+              Everything you need to organize your work, without another noisy stack of disconnected tools.
+            </p>
+          </div>
+          <div className="hm-feature-grid">
+            {FEATURES.map((feature, i) => (
+              <article className="hm-feature hm-reveal" key={feature.title}>
+                <div className={'hm-feature-icon tone-' + i}>
+                  <feature.icon size={20} />
+                </div>
+                <span className="hm-feature-index">0{i + 1}</span>
+                <h3>{feature.title}</h3>
+                <p>{feature.text}</p>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section id="jess" className="hm-jess-section hm-reveal">
           <div className="hm-jess-visual">
-            <div className="hm-jess-ring ring-a"/>
-            <div className="hm-jess-ring ring-b"/>
+            <div className="hm-jess-ring ring-a" />
+            <div className="hm-jess-ring ring-b" />
             <div className="hm-jess-core">
               <div className="hm-jess-core-inner">
                 <img src="/assets/jess-avatar.png" alt="Jess" className="hm-jess-core-avatar" />
@@ -207,38 +388,159 @@ export function PublicHome() {
             </div>
             <div className="hm-jess-caption">YOUR THOUGHT PARTNER</div>
           </div>
-          <div className="hm-jess-copy"><div className="hm-eyebrow">MEET JESS</div><h2>A little help.<br/><span>Right when you need it.</span></h2><p>Jess is Hub-Mind's AI assistant, designed to help you think things through, find information, draft and refine ideas, and turn conversations into clear next steps — while keeping you in control.</p><ul><li><Check size={16}/> Research with source-aware answers</li><li><Check size={16}/> Help with writing, planning and follow-through</li><li><Check size={16}/> Voice interaction and a floating assistant</li></ul><button className="hm-text-link" onClick={openWorkspace}>Meet Jess in your workspace <ArrowRight size={16}/></button><p className="hm-credit">Jess was designed and programmed by Jaystarbliss, founder of Jaystarbliss Studios. Her underlying AI model is provided by Google.</p></div>
+          <div className="hm-jess-copy">
+            <div className="hm-eyebrow">MEET JESS</div>
+            <h2>
+              A little help.
+              <br />
+              <span>Right when you need it.</span>
+            </h2>
+            <p>
+              Jess is Hub-Mind&apos;s AI assistant, designed to help you think things through, find
+              information, draft and refine ideas, and turn conversations into clear next steps —
+              while keeping you in control.
+            </p>
+            <ul>
+              <li>
+                <Check size={16} /> Research with source-aware answers
+              </li>
+              <li>
+                <Check size={16} /> Help with writing, planning and follow-through
+              </li>
+              <li>
+                <Check size={16} /> Voice interaction and a floating companion across Windows &amp; Android
+              </li>
+            </ul>
+            <button className="hm-text-link" onClick={openWorkspace}>
+              Meet Jess in your workspace <ArrowRight size={16} />
+            </button>
+            <p className="hm-credit">
+              Jess was designed and programmed by Jaystarbliss, founder of Jaystarbliss Studios. Her
+              underlying AI model is provided by Google.
+            </p>
+          </div>
         </section>
 
         <section id="desktop" className="hm-desktop-section hm-reveal">
-          <div className="hm-desktop-copy"><div className="hm-eyebrow">TAKE IT WITH YOU</div><h2>Your workspace.<br/><span>At home on Windows.</span></h2><p>{release?.url ? 'The Hub-Mind Windows desktop installer is available now, with a dedicated window and a persistent Jess companion.' : 'A dedicated Windows desktop experience is being prepared. The installer will appear here as soon as a release is published and verified.'}</p>
-          <div className="hm-desktop-points"><span><Check size={15}/> Dedicated desktop window</span><span><Check size={15}/> Floating Jess companion</span><span><Check size={15}/> Controlled system integrations</span></div>
-          {release?.url ? <a className="hm-button hm-button-primary hm-button-large" href={release.url}><Download size={17}/> Download for Windows <span className="hm-version">{release.version}</span></a> : <button className="hm-button hm-button-disabled hm-button-large" disabled title="A verified Windows installer has not been published yet"><Download size={17}/> Windows app coming soon</button>}
-          <div className="hm-install-actions">
-            {release?.apkUrl ? (
-              <a className="hm-button hm-button-outline hm-button-large" href={release.apkUrl}><Download size={16}/> Download Android APK <span className="hm-version">v{release.apkVersion}</span></a>
-            ) : (
-              <a className="hm-button hm-button-outline hm-button-large" href={release?.apkUrl || LAST_KNOWN_PUBLIC_RELEASES.apkUrl}><Download size={16}/> Android Companion APK (v2.4.0)</a>
-            )}
-            <button className="hm-button hm-button-outline hm-button-large" onClick={installWebApp}><Download size={16}/> Install Chrome app</button>
-            <button type="button" className="hm-button hm-button-outline hm-button-large" onClick={() => window.dispatchEvent(new CustomEvent('hubmind:open-updates-panel'))}><Layers size={16}/> View Version History</button>
-            <a className="hm-text-link" href={release?.extensionUrl || "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/tree/main/chrome-extension"} target="_blank" rel="noreferrer">Get Jess Chrome extension <ArrowUpRight size={15}/></a>
-          </div>
-          {release?.name && <small className="hm-release-name">{release.name}</small>}
-          </div>
-          <div className="hm-desktop-art">
-            <div className="hm-monitor">
-              <div className="hm-monitor-top"><span/><span/><span/><small>HUB-MIND / WORKSPACE</small></div>
-              <div className="hm-monitor-content">
-                <img
-                  src="/assets/hubmind-real-workspace.webp"
-                  alt="Hub-Mind Application Window"
-                  className="hm-monitor-window-preview"
-                />
-              </div>
+          <div className="hm-desktop-copy">
+            <div className="hm-eyebrow">TAKE IT WITH YOU</div>
+            <h2>
+              Your workspace.
+              <br />
+              <span>At home on Windows &amp; Android.</span>
+            </h2>
+            <p>
+              {release?.url
+                ? 'The Hub-Mind Windows desktop installer and native Android APK are available now, bringing a dedicated window, synced workspace tabs, and a persistent Jess companion.'
+                : 'A dedicated Windows desktop experience is being prepared. The installer will appear here as soon as a release is published and verified.'}
+            </p>
+            <div className="hm-desktop-points">
+              <span>
+                <Check size={15} /> Dedicated desktop window
+              </span>
+              <span>
+                <Check size={15} /> Native Android companion app
+              </span>
+              <span>
+                <Check size={15} /> Controlled two-way system integrations
+              </span>
             </div>
-            <div className="hm-monitor-stand"/>
-            <div className="hm-monitor-base"/>
+            {release?.url ? (
+              <a
+                className="hm-button hm-button-primary hm-button-large whitespace-nowrap"
+                href={release.url}
+              >
+                <Download size={17} /> Download for Windows{' '}
+                <span className="hm-version">{release.version}</span>
+              </a>
+            ) : (
+              <button
+                className="hm-button hm-button-disabled hm-button-large whitespace-nowrap"
+                disabled
+                title="A verified Windows installer has not been published yet"
+              >
+                <Download size={17} /> Windows app coming soon
+              </button>
+            )}
+            <div className="hm-install-actions">
+              {release?.apkUrl ? (
+                <a
+                  className="hm-button hm-button-outline hm-button-large whitespace-nowrap"
+                  href={release.apkUrl}
+                >
+                  <Download size={16} /> Download Android APK{' '}
+                  <span className="hm-version">v{release.apkVersion}</span>
+                </a>
+              ) : (
+                <a
+                  className="hm-button hm-button-outline hm-button-large whitespace-nowrap"
+                  href={release?.apkUrl || LAST_KNOWN_PUBLIC_RELEASES.apkUrl}
+                >
+                  <Download size={16} /> Android Companion APK (v2.4.0)
+                </a>
+              )}
+              <button
+                className="hm-button hm-button-outline hm-button-large whitespace-nowrap"
+                onClick={installWebApp}
+              >
+                <Download size={16} /> Install Chrome app
+              </button>
+              <button
+                type="button"
+                className="hm-button hm-button-outline hm-button-large whitespace-nowrap"
+                onClick={() => window.dispatchEvent(new CustomEvent('hubmind:open-updates-panel'))}
+              >
+                <Layers size={16} /> View Version History
+              </button>
+              <a
+                className="hm-text-link whitespace-nowrap"
+                href={
+                  release?.extensionUrl ||
+                  'https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/tree/main/chrome-extension'
+                }
+                target="_blank"
+                rel="noreferrer"
+              >
+                Get Jess Chrome extension <ArrowUpRight size={15} />
+              </a>
+            </div>
+            {release?.name && <small className="hm-release-name">{release.name}</small>}
+          </div>
+
+          <div
+            className="hm-desktop-art hm-dual-delivery-art"
+            onMouseEnter={() => operatorCycle.setIsHovered(true)}
+            onMouseLeave={() => operatorCycle.setIsHovered(false)}
+          >
+            <div className="hm-monitor-stack">
+              <div className="hm-monitor hm-monitor-live">
+                <div className="hm-monitor-top">
+                  <span />
+                  <span />
+                  <span />
+                  <small>HUB-MIND / {operatorCycle.activeScreen.label.toUpperCase()}</small>
+                </div>
+                <div className="hm-monitor-content hm-monitor-live-body">
+                  <DesktopWorkspaceMockup
+                    activeIndex={operatorCycle.activeIndex}
+                    nextIndex={operatorCycle.nextIndex}
+                    operatorPhase={operatorCycle.operatorPhase}
+                    onSelectScreen={operatorCycle.selectScreen}
+                  />
+                </div>
+              </div>
+              <div className="hm-monitor-stand" />
+              <div className="hm-monitor-base" />
+            </div>
+            <div className="hm-delivery-phone-overlay">
+              <PhoneWorkspaceMockup
+                activeIndex={operatorCycle.activeIndex}
+                nextIndex={operatorCycle.nextIndex}
+                operatorPhase={operatorCycle.operatorPhase}
+                onSelectScreen={operatorCycle.selectScreen}
+                size="sm"
+              />
+            </div>
             <div className="hm-desktop-orb" aria-label="Jess companion">
               <img src="/assets/jess-avatar.png" alt="Jess" className="hm-desktop-orb-img" />
             </div>
@@ -248,26 +550,190 @@ export function PublicHome() {
         <section id="getting-started" className="hm-desktop-section hm-getting-started hm-reveal">
           <div className="hm-desktop-copy">
             <div className="hm-eyebrow">GETTING STARTED</div>
-            <h2>Set up Hub-Mind.<br/><span>Make it yours.</span></h2>
-            <p>Use Hub-Mind on the web, install it as a Chrome app, or pair the Windows desktop client and native Android companion app. Sign in with the account invited to your workspace to keep your work, Jess voice memory, and cross-device controls connected.</p>
+            <h2>
+              Set up Hub-Mind.
+              <br />
+              <span>Make it yours.</span>
+            </h2>
+            <p>
+              Use Hub-Mind on the web, install it as a Chrome app, or pair the Windows desktop client
+              and native Android companion app. Sign in with the account invited to your workspace to
+              keep your work, Jess voice memory, and cross-device controls connected.
+            </p>
             <div className="hm-desktop-points">
-              <span><Check size={15}/> <strong>Web:</strong> Open Hub-Mind and sign in with your invited account.</span>
-              <span><Check size={15}/> <strong>Chrome app:</strong> Use the browser's Install Hub-Mind option, then launch it from your apps.</span>
-              <span><Check size={15}/> <strong>Chrome extension:</strong> Download the ZIP, extract it, open Chrome → Extensions → Manage extensions, enable Developer mode, then choose Load unpacked and select the extracted folder. Review its permissions before enabling it.</span>
-              {release?.extensionUrl && <a className="hm-button hm-button-quiet" href={release.extensionUrl}><Download size={15}/> Download Jess Chrome extension</a>}
-              <span><Check size={15}/> <strong>Windows:</strong> Download the installer, run it, then open Hub-Mind from the Start menu. Windows may show a publisher warning if the release is unsigned.</span>
-              <span><Check size={15}/> <strong>Android (v2.4.0, build 240):</strong> Install the Hub-Mind APK (`com.aistudio.hubmind.wzyqkp`), sign in with your workspace account, grant Microphone and Notification permissions, and enable the Hub-Mind Accessibility Service in Android Settings → Accessibility to allow Jess to inspect UI hierarchy and execute two-way phone/Windows commands.</span>
-              <span><Check size={15}/> <strong>Jess:</strong> Allow microphone access for voice use. Configure memory, personalization, web research, and cross-device permissions in Jess settings.</span>
+              <span>
+                <Check size={15} /> <strong>Web:</strong> Open Hub-Mind and sign in with your invited
+                account.
+              </span>
+              <span>
+                <Check size={15} /> <strong>Chrome app:</strong> Use the browser&apos;s Install Hub-Mind
+                option, then launch it from your apps.
+              </span>
+              <span>
+                <Check size={15} /> <strong>Chrome extension:</strong> Download the ZIP, extract it,
+                open Chrome → Extensions → Manage extensions, enable Developer mode, then choose Load
+                unpacked and select the extracted folder. Review its permissions before enabling it.
+              </span>
+              {release?.extensionUrl && (
+                <a className="hm-button hm-button-quiet" href={release.extensionUrl}>
+                  <Download size={15} /> Download Jess Chrome extension
+                </a>
+              )}
+              <span>
+                <Check size={15} /> <strong>Windows:</strong> Download the installer, run it, then
+                open Hub-Mind from the Start menu. Windows may show a publisher warning if the release
+                is unsigned.
+              </span>
+              <span>
+                <Check size={15} /> <strong>Android (v2.4.0, build 240):</strong> Install the
+                Hub-Mind APK (`com.aistudio.hubmind.wzyqkp`), sign in with your workspace account, grant
+                Microphone and Notification permissions, and enable the Hub-Mind Accessibility Service
+                in Android Settings → Accessibility to allow Jess to inspect UI hierarchy and execute
+                two-way phone/Windows commands.
+              </span>
+              <span>
+                <Check size={15} /> <strong>Jess:</strong> Allow microphone access for voice use.
+                Configure memory, personalization, web research, and cross-device permissions in Jess
+                settings.
+              </span>
             </div>
-            <button className="hm-button hm-button-primary hm-button-large" onClick={openWorkspace}>Sign in and get started <ArrowRight size={16}/></button>
+            <button className="hm-button hm-button-primary hm-button-large" onClick={openWorkspace}>
+              Sign in and get started <ArrowRight size={16} />
+            </button>
           </div>
         </section>
       </main>
 
-      <footer className="hm-footer"><div className="hm-footer-top"><a href="/" className="hm-brand"><span className="hm-brand-mark"><img src="/hub-mind%20logo.png" alt=""/></span><span>Hub<span className="hm-brand-dash">-</span>Mind</span></a><p>Make room for meaningful work.</p><button className="hm-button hm-button-outline" onClick={openWorkspace}>Open workspace <ArrowRight size={15}/></button></div><div className="hm-footer-bottom"><span>© {new Date().getFullYear()} Hub-Mind</span><span>Designed and built by <a href="https://jaystarbliss-studios.name.ng" target="_blank" rel="noreferrer">Jaystarbliss Studios</a> (JSW)</span><a href="mailto:hello@jaystarbliss-studios.name.ng">Contact</a></div></footer>
+      <footer className="hm-footer">
+        <div className="hm-footer-top">
+          <a href="/" className="hm-brand whitespace-nowrap shrink-0">
+            <span className="hm-brand-mark">
+              <img src="/hub-mind%20logo.png" alt="" />
+            </span>
+            <span>
+              Hub<span className="hm-brand-dash">-</span>Mind
+            </span>
+          </a>
+          <p>Make room for meaningful work.</p>
+          <button
+            className="hm-button hm-button-outline whitespace-nowrap shrink-0"
+            onClick={openWorkspace}
+          >
+            Open workspace <ArrowRight size={15} />
+          </button>
+        </div>
+        <div className="hm-footer-bottom">
+          <span>© {new Date().getFullYear()} Hub-Mind</span>
+          <span>
+            Designed and built by{' '}
+            <a href="https://jaystarbliss-studios.name.ng" target="_blank" rel="noreferrer">
+              Jaystarbliss Studios
+            </a>{' '}
+            (JSW)
+          </span>
+          <a href="mailto:hello@jaystarbliss-studios.name.ng">Contact</a>
+        </div>
+      </footer>
 
-      {installHelpOpen && <div className="hm-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setInstallHelpOpen(false); }}><section className="hm-invite-modal" role="dialog" aria-modal="true" aria-labelledby="hm-install-title"><button className="hm-modal-close" onClick={() => setInstallHelpOpen(false)} aria-label="Close"><X size={18}/></button><div className="hm-modal-icon"><Download size={22}/></div><div className="hm-eyebrow">INSTALL HUB-MIND</div><h2 id="hm-install-title">Keep Hub-Mind close.</h2><p>In Chrome or Microsoft Edge, open the browser menu and choose <strong>Install Hub-Mind</strong> or <strong>Apps → Install this site as an app</strong>, if that option is available. You can also continue using Hub-Mind in this browser.</p><button className="hm-button hm-button-primary hm-button-large" onClick={() => { setInstallHelpOpen(false); openWorkspace(); }}>Continue to Hub-Mind <ArrowRight size={16}/></button></section></div>}
-      {inviteOpen && <div className="hm-modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setInviteOpen(false); }}><section className="hm-invite-modal" role="dialog" aria-modal="true" aria-labelledby="hm-invite-title"><button className="hm-modal-close" onClick={() => setInviteOpen(false)} aria-label="Close"><X size={18}/></button><div className="hm-modal-icon"><LockKeyhole size={22}/></div><div className="hm-eyebrow">WORKSPACE ACCESS</div><h2 id="hm-invite-title">Your invitation is the key.</h2><p>Paste the full Hub-Mind invitation link or enter the invitation ID shared by your workspace administrator.</p><form onSubmit={submitInvite}><label htmlFor="hm-invite-code">Invitation link or code</label><input id="hm-invite-code" autoFocus value={inviteValue} onChange={event => setInviteValue(event.target.value)} placeholder="Paste link or invitation ID" autoComplete="off"/>{error && <p className="hm-form-error" role="alert">{error}</p>}<button className="hm-button hm-button-primary hm-button-large" type="submit">Continue to sign in <ArrowRight size={16}/></button></form><p className="hm-modal-footnote">Invitations expire after seven days and are tied to the invited Google account.</p></section></div>}
+      {installHelpOpen && (
+        <div
+          className="hm-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setInstallHelpOpen(false);
+          }}
+        >
+          <section
+            className="hm-invite-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hm-install-title"
+          >
+            <button
+              className="hm-modal-close"
+              onClick={() => setInstallHelpOpen(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <div className="hm-modal-icon">
+              <Download size={22} />
+            </div>
+            <div className="hm-eyebrow">INSTALL HUB-MIND</div>
+            <h2 id="hm-install-title">Keep Hub-Mind close.</h2>
+            <p>
+              In Chrome or Microsoft Edge, open the browser menu and choose{' '}
+              <strong>Install Hub-Mind</strong> or <strong>Apps → Install this site as an app</strong>,
+              if that option is available. You can also continue using Hub-Mind in this browser.
+            </p>
+            <button
+              className="hm-button hm-button-primary hm-button-large"
+              onClick={() => {
+                setInstallHelpOpen(false);
+                openWorkspace();
+              }}
+            >
+              Continue to Hub-Mind <ArrowRight size={16} />
+            </button>
+          </section>
+        </div>
+      )}
+
+      {inviteOpen && (
+        <div
+          className="hm-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setInviteOpen(false);
+          }}
+        >
+          <section
+            className="hm-invite-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="hm-invite-title"
+          >
+            <button
+              className="hm-modal-close"
+              onClick={() => setInviteOpen(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <div className="hm-modal-icon">
+              <LockKeyhole size={22} />
+            </div>
+            <div className="hm-eyebrow">WORKSPACE ACCESS</div>
+            <h2 id="hm-invite-title">Your invitation is the key.</h2>
+            <p>
+              Paste the full Hub-Mind invitation link or enter the invitation ID shared by your
+              workspace administrator.
+            </p>
+            <form onSubmit={submitInvite}>
+              <label htmlFor="hm-invite-code">Invitation link or code</label>
+              <input
+                id="hm-invite-code"
+                autoFocus
+                value={inviteValue}
+                onChange={(event) => setInviteValue(event.target.value)}
+                placeholder="Paste link or invitation ID"
+                autoComplete="off"
+              />
+              {error && (
+                <p className="hm-form-error" role="alert">
+                  {error}
+                </p>
+              )}
+              <button className="hm-button hm-button-primary hm-button-large" type="submit">
+                Continue to sign in <ArrowRight size={16} />
+              </button>
+            </form>
+            <p className="hm-modal-footnote">
+              Invitations expire after seven days and are tied to the invited Google account.
+            </p>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

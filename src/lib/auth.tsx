@@ -3,7 +3,7 @@ import { onAuthStateChanged, onIdTokenChanged, User as FirebaseUser, signOut } f
 import { doc, getDoc, getDocs, collection, limit, query, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { User } from '../types';
-import { acceptInvitation } from './invitations';
+import { acceptInvitation, findInvitationIdForUser } from './invitations';
 import { isAdminEmail, extractHandleFromEmail, generateAvailableUsername } from '../services/userService';
 import { handleFirestoreError, OperationType } from './firestoreErrorHandler';
 import { getLocalDeviceId } from '../services/crossDeviceService';
@@ -27,6 +27,8 @@ const AuthContext = createContext<AuthContextType>({
   updateProfileData: async () => {},
   logout: async () => {},
 });
+
+const PENDING_INVITE_STORAGE_KEY = 'hubmind_pending_invite';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Keep the Electron background command receiver aligned with Firebase auth.
@@ -64,9 +66,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let stopProfile: (() => void) | null = null;
     let disposed = false;
 
+    const attachProfileListener = (profileRef: ReturnType<typeof doc>, firebaseUser: FirebaseUser) => {
+      stopProfile?.();
+      stopProfile = onSnapshot(profileRef, (snap) => {
+        if (disposed) return;
+        if (!snap.exists()) {
+          setProfile(null);
+          setAuthorizationError('Your Hub-Mind profile was removed. Please contact an administrator if you believe this is a mistake.');
+          setLoading(false);
+          void signOut(auth).catch(() => {});
+          return;
+        }
+        const data = snap.data();
+        if (data.status === 'inactive' || data.status === 'suspended') {
+          setProfile(null);
+          setAuthorizationError('Your Hub-Mind account is currently inactive. Please contact an administrator.');
+          setLoading(false);
+          return;
+        }
+        setProfile({
+          ...data,
+          id: firebaseUser.uid,
+          email: firebaseUser.email || data.email,
+          photoUrl: firebaseUser.photoURL || data.photoUrl,
+        } as User);
+      }, (err) => {
+        console.warn('[AuthProvider] onSnapshot profile error:', err);
+      });
+    };
+
     const stopAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       stopProfile?.();
       stopProfile = null;
+      if (disposed) return;
       setUser(firebaseUser);
       setProfile(null);
       setAuthorizationError(null);
@@ -82,10 +114,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let existingSnap;
       try {
         existingSnap = await getDoc(profileRef);
-      } catch (err) {
+      } catch (err: any) {
         console.error('[AuthProvider] Error fetching user profile doc:', err);
-        handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+        if (!disposed) {
+          setAuthorizationError(
+            err?.code === 'permission-denied'
+              ? 'Unable to verify your Hub-Mind account permissions. Please sign out and sign in again.'
+              : 'Could not reach Hub-Mind to load your profile. Check your connection and try again.'
+          );
+          setLoading(false);
+        }
+        return;
       }
+
+      if (disposed) return;
 
       if (existingSnap && existingSnap.exists()) {
         const data = existingSnap.data();
@@ -94,9 +136,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false);
           return;
         }
+        if (data.status && data.status !== 'active') {
+          setAuthorizationError('Your Hub-Mind account is awaiting activation. Please contact an administrator.');
+          setLoading(false);
+          return;
+        }
 
         const activeProfile: User = {
           ...data,
+          status: data.status || 'active',
           id: firebaseUser.uid,
           email: firebaseUser.email || data.email,
           photoUrl: firebaseUser.photoURL || data.photoUrl,
@@ -104,25 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setProfile(activeProfile);
         setLoading(false);
-
-        stopProfile = onSnapshot(profileRef, (snap) => {
-          if (disposed) return;
-          if (!snap.exists()) {
-            setProfile(null);
-            setAuthorizationError('Your Hub-Mind profile was removed. Please contact an administrator if you believe this is a mistake.');
-            setLoading(false);
-            void signOut(auth).catch(() => {});
-            return;
-          }
-          setProfile({
-            ...snap.data(),
-            id: firebaseUser.uid,
-            email: firebaseUser.email || snap.data().email,
-            photoUrl: firebaseUser.photoURL || snap.data().photoUrl,
-          } as User);
-        }, (err) => {
-          console.warn('[AuthProvider] onSnapshot profile error:', err);
-        });
+        attachProfileListener(profileRef, firebaseUser);
         return;
       }
 
@@ -133,43 +163,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const isAdminByEmail = isAdminEmail(userEmail);
 
       if (isAdminByEmail) {
-        const now = new Date().toISOString();
-        const handle = extractHandleFromEmail(userEmail, firebaseUser.displayName || undefined);
-        const username = await generateAvailableUsername(handle, firebaseUser.uid);
-
-        const newAdminProfile: User = {
-          id: firebaseUser.uid,
-          username,
-          name: firebaseUser.displayName || 'Administrator',
-          displayName: firebaseUser.displayName || 'Administrator',
-          email: userEmail,
-          role: 'admin',
-          status: 'active',
-          photoUrl: firebaseUser.photoURL || undefined,
-          createdAt: now,
-          approvedAt: now,
-          defaultVisibility: 'workspace',
-        };
-
         try {
+          const now = new Date().toISOString();
+          const handle = extractHandleFromEmail(userEmail, firebaseUser.displayName || undefined);
+          const username = await generateAvailableUsername(handle, firebaseUser.uid);
+
+          const newAdminProfile: User = {
+            id: firebaseUser.uid,
+            username,
+            name: firebaseUser.displayName || 'Administrator',
+            displayName: firebaseUser.displayName || 'Administrator',
+            email: userEmail,
+            role: 'admin',
+            status: 'active',
+            photoUrl: firebaseUser.photoURL || undefined,
+            createdAt: now,
+            approvedAt: now,
+            defaultVisibility: 'workspace',
+          };
+
           await setDoc(profileRef, newAdminProfile);
+          if (disposed) return;
           setProfile(newAdminProfile);
           setLoading(false);
+          attachProfileListener(profileRef, firebaseUser);
           return;
         } catch (err: any) {
           console.error('[AuthProvider] Failed to auto-bootstrap admin profile:', err);
-          setAuthorizationError(`Failed to initialize admin profile: ${err?.message || 'Database permission error'}`);
-          setLoading(false);
+          if (!disposed) {
+            setAuthorizationError(`Failed to initialize admin profile: ${err?.message || 'Database permission error'}`);
+            setLoading(false);
+          }
           return;
         }
       }
 
-      const inviteId = new URLSearchParams(window.location.search).get('invite');
+      let inviteId = new URLSearchParams(window.location.search).get('invite');
+      if (!inviteId && typeof window !== 'undefined') {
+        try {
+          inviteId = window.sessionStorage.getItem(PENDING_INVITE_STORAGE_KEY);
+        } catch {}
+      }
+      if (!inviteId) {
+        inviteId = await findInvitationIdForUser(firebaseUser.uid, firebaseUser.email);
+      }
 
       // Check for invitation link
       if (!inviteId) {
-        setAuthorizationError('This Google account has not been authorized for Hub-Mind. Ask an administrator for an invitation.');
-        setLoading(false);
+        await signOut(auth).catch(() => {});
+        if (!disposed) {
+          setUser(null);
+          setAuthorizationError('This account has not been authorized for Hub-Mind yet. Ask an administrator for an invitation or sign in with your invited email.');
+          setLoading(false);
+        }
         return;
       }
 
@@ -184,24 +230,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: userEmail || invitation.email,
           role: 'staff',
           status: 'active',
-          phone: invitation.phone,
+          phone: invitation.phone || '',
           photoUrl: firebaseUser.photoURL || undefined,
           createdAt: now,
           approvedAt: now,
           approvedBy: invitation.invitedBy,
           invitationId: inviteId,
         };
+        if (!newStaffProfile.phone) delete newStaffProfile.phone;
+        if (!newStaffProfile.photoUrl) delete newStaffProfile.photoUrl;
 
         await setDoc(profileRef, newStaffProfile);
+        if (typeof window !== 'undefined') {
+          try { window.sessionStorage.removeItem(PENDING_INVITE_STORAGE_KEY); } catch {}
+          if (window.location.search.includes('invite=')) {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
+        if (disposed) return;
         setProfile(newStaffProfile);
         setLoading(false);
-        window.history.replaceState({}, '', window.location.pathname);
+        attachProfileListener(profileRef, firebaseUser);
       } catch (error: any) {
-        setAuthorizationError(error?.message || 'Unable to validate your Hub-Mind invitation.');
-        setLoading(false);
+        console.error('[AuthProvider] Staff invitation acceptance error:', error);
+        await signOut(auth).catch(() => {});
+        if (!disposed) {
+          setUser(null);
+          setAuthorizationError(error?.message || 'Unable to validate your Hub-Mind invitation.');
+          setLoading(false);
+        }
       }
 
     });
+
+    return () => {
+      disposed = true;
+      stopProfile?.();
+      stopAuth();
+    };
   }, []);
 
   const updatePreferredName = async (preferredName: string) => {

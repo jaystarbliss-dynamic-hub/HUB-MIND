@@ -165,4 +165,55 @@ if (!hasEmulator) {
       lifecycleState: 'COMPLETED',
     }));
   });
+
+  test('non-admin active member can list their own messages and notifications without admin access', async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection('messages').doc('m1').set({ senderId: 'owner', recipientId: 'reader', text: 'Hello assistant', createdAt: new Date().toISOString(), read: false });
+      await db.collection('messages').doc('m2').set({ senderId: 'reader', recipientId: 'owner', text: 'Reply', createdAt: new Date().toISOString(), read: false });
+      await db.collection('notifications').doc('n1').set({ userId: 'reader', title: 'New msg', message: 'Hi', read: false, createdAt: new Date().toISOString() });
+    });
+
+    const readerDb = env.authenticatedContext('reader', { email: 'reader@example.com' }).firestore();
+    await assertSucceeds(readerDb.collection('messages').where('recipientId', '==', 'reader').get());
+    await assertSucceeds(readerDb.collection('messages').where('senderId', '==', 'reader').get());
+    await assertFails(readerDb.collection('messages').get());
+    await assertSucceeds(readerDb.collection('notifications').where('userId', '==', 'reader').get());
+    await assertFails(readerDb.collection('notifications').get());
+  });
+
+  test('invited staff member can discover their invitation by email and accept it regardless of email casing', async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await db.collection('invitations').doc('inv-assistant').set({
+        username: 'assistant',
+        displayName: 'Studio Assistant',
+        email: 'assistant@example.com',
+        role: 'staff',
+        status: 'invited',
+        invitedBy: 'owner',
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      });
+    });
+
+    const assistantDb = env.authenticatedContext('assistant-uid', { email: 'Assistant@example.com' }).firestore();
+    await assertSucceeds(assistantDb.collection('invitations').where('email', '==', 'assistant@example.com').get());
+    await assertSucceeds(assistantDb.collection('invitations').doc('inv-assistant').update({
+      status: 'accepted',
+      acceptedAt: new Date().toISOString(),
+      acceptedUid: 'assistant-uid',
+    }));
+    await assertSucceeds(assistantDb.collection('users').doc('assistant-uid').set({
+      id: 'assistant-uid',
+      username: 'assistant',
+      name: 'Studio Assistant',
+      displayName: 'Studio Assistant',
+      email: 'assistant@example.com',
+      role: 'staff',
+      status: 'active',
+      invitationId: 'inv-assistant',
+      createdAt: new Date().toISOString(),
+    }));
+  });
 }

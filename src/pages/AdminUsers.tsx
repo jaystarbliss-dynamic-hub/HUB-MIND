@@ -38,14 +38,14 @@ export function AdminUsers() {
   useEffect(() => {
     if (!profile) return;
     return onSnapshot(query(collection(db, 'users')), s =>
-      setUsers(s.docs.map(d => ({ id: d.id, ...d.data() } as User)))
+      setUsers(s.docs.map(d => ({ ...d.data(), id: d.id } as User)))
     );
   }, [profile]);
 
   useEffect(() => {
     if (tab !== 'recurring') return;
     return onSnapshot(query(collection(db, 'recurringTaskTemplates')), s =>
-      setTemplates(s.docs.map(d => ({ id: d.id, ...d.data() } as RecurringTaskTemplate)))
+      setTemplates(s.docs.map(d => ({ ...d.data(), id: d.id } as RecurringTaskTemplate)))
     );
   }, [tab]);
 
@@ -53,7 +53,7 @@ export function AdminUsers() {
     if (tab !== 'activity') return;
     const q = query(collection(db, 'activityLogs'), orderBy('createdAt', 'desc'), limit(50));
     return onSnapshot(q, s =>
-      setActivityLogs(s.docs.map(d => ({ id: d.id, ...d.data() } as ActivityLog)))
+      setActivityLogs(s.docs.map(d => ({ ...d.data(), id: d.id } as ActivityLog)))
     );
   }, [tab]);
 

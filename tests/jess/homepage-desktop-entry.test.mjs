@@ -22,6 +22,14 @@ test('public landing page uses official branding and exposes workspace, install,
   assert.match(html, /<title>Hub-Mind<\/title>/);
   assert.equal(pkg.name, 'hub-mind');
   assert.match(vite, /start_url:\s*'\/login'/);
+
+  const showcase = await read('src/components/home/WorkspaceScreenShowcase.tsx');
+  for (const screenId of ['today', 'inbox', 'tasks', 'projects', 'documents', 'calendar', 'colleagues', 'knowledge', 'followups', 'jess']) {
+    assert.ok(showcase.includes(`id: '${screenId}'`), `Missing homepage showcase screen: ${screenId}`);
+  }
+  assert.match(showcase, /HeroDualDeviceShowcase/);
+  assert.match(showcase, /PhoneWorkspaceMockup/);
+  assert.match(showcase, /DesktopWorkspaceMockup/);
 });
 
 test('public landing page resolves Windows and Android downloads independently from the canonical repository', async () => {

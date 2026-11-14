@@ -95,7 +95,7 @@ export async function findRecipientUser(identifier: string): Promise<User | null
       const qEmail = query(collection(db, 'users'), where('email', '==', raw.toLowerCase()));
       const snapEmail = await getDocs(qEmail);
       if (!snapEmail.empty) {
-        return { id: snapEmail.docs[0].id, ...snapEmail.docs[0].data() } as User;
+        return { ...snapEmail.docs[0].data(), id: snapEmail.docs[0].id } as User;
       }
     } catch {}
   }
@@ -475,7 +475,7 @@ export function subscribeToResourceShares(
   return onSnapshot(
     q,
     snap => {
-      callback(snap.docs.map(d => ({ id: d.id, ...d.data() } as ResourceShare)));
+      callback(snap.docs.map(d => ({ ...d.data(), id: d.id } as ResourceShare)));
     },
     err => {
       console.warn('Shares subscription warning:', err);
@@ -485,7 +485,8 @@ export function subscribeToResourceShares(
 
 export function subscribeToSharesForUser(
   userId: string,
-  callback: (shares: ResourceShare[]) => void
+  callback: (shares: ResourceShare[]) => void,
+  onError?: (error: Error) => void
 ): () => void {
   if (!userId) {
     callback([]);
@@ -499,7 +500,7 @@ export function subscribeToSharesForUser(
   return onSnapshot(
     q,
     snap => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as ResourceShare));
+      const items = snap.docs.map(d => ({ ...d.data(), id: d.id } as ResourceShare));
       items.sort((a, b) =>
         String(b.updatedAt || b.createdAt || '').localeCompare(
           String(a.updatedAt || a.createdAt || '')
@@ -509,6 +510,7 @@ export function subscribeToSharesForUser(
     },
     err => {
       console.warn('User shares subscription warning:', err);
+      onError?.(err as Error);
     }
   );
 }
@@ -536,7 +538,7 @@ export function subscribeToUserResourceShare(
         callback(null);
         return;
       }
-      callback({ id: snap.id, ...data });
+      callback({ ...data, id: snap.id });
     },
     err => {
       console.warn('Single resource share subscription note:', err);

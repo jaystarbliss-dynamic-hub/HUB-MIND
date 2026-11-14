@@ -2,7 +2,8 @@ rules_version='2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn(){ return request.auth != null; }
-    function isBootstrappedAdmin(){ return signedIn() && request.auth.token.email in ['johnrufai242@gmail.com', 'rufaijohnny@gmail.com']; }
+    function sameEmail(a, b){ return a is string && b is string && a.lower() == b.lower(); }
+    function isBootstrappedAdmin(){ return signedIn() && request.auth.token.email is string && (request.auth.token.email in ['johnrufai242@gmail.com', 'rufaijohnny@gmail.com'] || request.auth.token.email.lower() in ['johnrufai242@gmail.com', 'rufaijohnny@gmail.com']); }
     function hasUser(){ return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
     function me(){ return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
     function member(){ return (hasUser() && me().status == 'active') || isBootstrappedAdmin(); }
@@ -44,14 +45,14 @@ service cloud.firestore {
     function newOwner(){ return member() && (admin() || ('ownerId' in request.resource.data && request.resource.data.ownerId == request.auth.uid)); }
     function createdByMe(){ return member() && (admin() || ('createdBy' in request.resource.data && request.resource.data.createdBy == request.auth.uid)); }
     function visibleList(){ return member() && (admin() || isOwnerOrCreator(resource.data) || isWorkspaceVisible(resource.data) || sharedRead()); }
-    function validAcceptedInvitation(invitationId){ return signedIn() && exists(/databases/$(database)/documents/invitations/$(invitationId)) && get(/databases/$(database)/documents/invitations/$(invitationId)).data.status == 'accepted' && get(/databases/$(database)/documents/invitations/$(invitationId)).data.acceptedUid == request.auth.uid && get(/databases/$(database)/documents/invitations/$(invitationId)).data.email == request.auth.token.email; }
+    function validAcceptedInvitation(invitationId){ return signedIn() && exists(/databases/$(database)/documents/invitations/$(invitationId)) && get(/databases/$(database)/documents/invitations/$(invitationId)).data.status == 'accepted' && get(/databases/$(database)/documents/invitations/$(invitationId)).data.acceptedUid == request.auth.uid && (get(/databases/$(database)/documents/invitations/$(invitationId)).data.email == request.auth.token.email || sameEmail(get(/databases/$(database)/documents/invitations/$(invitationId)).data.email, request.auth.token.email)); }
 
     match /{document=**} { allow read, write: if false; }
     match /users/{userId} {
       allow get, list: if member() || admin() || self(userId);
-      allow create: if (isBootstrappedAdmin() && request.resource.data.id == request.auth.uid && request.resource.data.role == 'admin' && request.resource.data.status == 'active' && request.resource.data.email == request.auth.token.email) ||
-                       (validAcceptedInvitation(request.resource.data.invitationId) && request.resource.data.id == request.auth.uid && request.resource.data.role == 'staff' && request.resource.data.status == 'active' && request.resource.data.email == request.auth.token.email) ||
-                       (request.resource.data.registrationSource == 'existing-auth' && request.resource.data.id == request.auth.uid && request.resource.data.role == 'staff' && request.resource.data.status == 'active' && request.resource.data.email == request.auth.token.email);
+      allow create: if (isBootstrappedAdmin() && request.resource.data.id == request.auth.uid && request.resource.data.role == 'admin' && request.resource.data.status == 'active' && (request.resource.data.email == request.auth.token.email || sameEmail(request.resource.data.email, request.auth.token.email))) ||
+                       (validAcceptedInvitation(request.resource.data.invitationId) && request.resource.data.id == request.auth.uid && request.resource.data.role == 'staff' && request.resource.data.status == 'active' && (request.resource.data.email == request.auth.token.email || sameEmail(request.resource.data.email, request.auth.token.email))) ||
+                       (request.resource.data.registrationSource == 'existing-auth' && request.resource.data.id == request.auth.uid && request.resource.data.role == 'staff' && request.resource.data.status == 'active' && (request.resource.data.email == request.auth.token.email || sameEmail(request.resource.data.email, request.auth.token.email)));
       allow update: if admin() || (self(userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['preferredName','photoUrl','name','phone','lastSeenAt','displayName','googleCalendarConnected','googleCalendarConnectedAt','googleCalendarDisconnectedAt','googleCalendarEmail','defaultVisibility','updatedAt','username']));
       allow delete: if admin();
       match /conversations/{document=**} { allow read, write: if self(userId) || admin(); }
@@ -89,16 +90,16 @@ service cloud.firestore {
       }
     }
     match /invitations/{id} {
-      allow get: if admin() || (signedIn() && resource.data.email == request.auth.token.email);
-      allow list: if admin();
+      allow get: if admin() || (signedIn() && (sameEmail(resource.data.email, request.auth.token.email) || ('acceptedUid' in resource.data && resource.data.acceptedUid == request.auth.uid)));
+      allow list: if admin() || (signedIn() && request.auth.token.email is string && (resource.data.email == request.auth.token.email || resource.data.email == request.auth.token.email.lower())) || (signedIn() && 'acceptedUid' in resource.data && resource.data.acceptedUid == request.auth.uid);
       allow create: if admin() && request.resource.data.role == 'staff' && request.resource.data.status == 'invited' && request.resource.data.invitedBy == request.auth.uid;
-      allow update: if admin() || (signedIn() && resource.data.status == 'invited' && resource.data.email == request.auth.token.email && request.resource.data.status == 'accepted' && request.resource.data.acceptedUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','acceptedAt','acceptedUid']));
+      allow update: if admin() || (signedIn() && resource.data.status == 'invited' && (resource.data.email == request.auth.token.email || sameEmail(resource.data.email, request.auth.token.email)) && request.resource.data.status == 'accepted' && request.resource.data.acceptedUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','acceptedAt','acceptedUid']));
       allow delete: if admin();
     }
     match /connections/{id} { allow get: if member() && (admin() || resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid); allow list: if admin() || (member() && (resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid)); allow create: if admin() || (member() && request.resource.data.requesterId == request.auth.uid && request.resource.data.recipientId is string && request.resource.data.recipientId != request.auth.uid); allow update, delete: if member() && (admin() || resource.data.requesterId == request.auth.uid || resource.data.recipientId == request.auth.uid); }
     match /shares/{id} {
-      allow get: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid || ('recipientId' in resource.data && resource.data.recipientId == request.auth.uid)));
-      allow list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid)) || (member() && ('recipientId' in resource.data && resource.data.recipientId == request.auth.uid));
+      allow get: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid));
+      allow list: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid));
       allow create: if admin() || (member() && request.resource.data.ownerId == request.auth.uid);
       allow update, delete: if admin() || (member() && (resource.data.ownerId == request.auth.uid || resource.data.recipientUserId == request.auth.uid));
     }
@@ -113,20 +114,21 @@ service cloud.firestore {
       allow update, delete: if admin() || (member() && resource.data.userId == request.auth.uid);
     }
     match /messages/{messageId} {
-      allow get, list: if member() && (admin() || resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid);
+      allow get: if admin() || (member() && (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid));
+      allow list: if admin() || (member() && resource.data.senderId == request.auth.uid) || (member() && resource.data.recipientId == request.auth.uid);
       allow create: if member()
         && request.resource.data.senderId == request.auth.uid
         && request.resource.data.recipientId is string
         && request.resource.data.recipientId != request.auth.uid
         && request.resource.data.text is string
         && request.resource.data.text.size() <= 12000;
-      allow update: if member()
+      allow update: if admin() || (member()
         && resource.data.recipientId == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt','read','updatedAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt','read','updatedAt']));
       allow delete: if admin() || (member() && resource.data.senderId == request.auth.uid);
     }
     match /messageDrafts/{draftId} {
-      allow get, list: if member() && resource.data.userId == request.auth.uid;
+      allow get, list: if admin() || (member() && resource.data.userId == request.auth.uid);
       allow create: if member() && request.resource.data.userId == request.auth.uid;
       allow update: if member() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
       allow delete: if admin() || (member() && resource.data.userId == request.auth.uid);

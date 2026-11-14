@@ -178,16 +178,17 @@
 .jess-chat-composer-footer .jess-chat-composer-actions>button:first-child:disabled{opacity:.3;cursor:not-allowed}
 /* Hero Spacing & Layout Polish */
 .hm-hero {
-  min-height: auto !important;
-  padding-top: clamp(16px, 2.8vw, 32px) !important;
-  padding-bottom: clamp(40px, 5.5vw, 68px) !important;
+  min-height: 640px !important;
+  padding-top: clamp(44px, 5.2vw, 68px) !important;
+  padding-bottom: clamp(78px, 7vw, 98px) !important;
+  gap: clamp(24px, 3vw, 48px);
 }
 .hm-hero-copy {
   margin-top: 0 !important;
 }
 .hm-hero h1 {
   margin-top: 0 !important;
-  margin-bottom: 18px !important;
+  margin-bottom: 20px !important;
 }
 
 /* Hero Floating Workspace Window */
@@ -431,25 +432,445 @@
 .hm-public .hm-nav{background:rgba(8,11,18,.72)}
 @media(prefers-reduced-motion:reduce){.hm-public canvas{visibility:hidden}}
 
-/* Keep the public-site header above the page content stacking context.
-   The header, main and footer are siblings with their own z-index layers;
-   raising only the dropdown cannot escape the header's old z-index: 1 layer. */
-.hm-public > header {
-  position: relative;
-  z-index: 10030 !important;
+/* ============================================================================
+   Dual Desktop & Smartphone Live Workspace Showcase
+   ============================================================================ */
+.hm-hero h1 {
+  text-wrap: balance;
 }
 
-.hm-public .hm-nav {
+.hm-hero-art {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hm-dual-hero-stage {
   position: relative;
-  z-index: 10031 !important;
+  width: min(100%, 660px);
+  padding: 8px 0 54px;
+}
+
+.hm-dual-hero-desktop {
+  width: 90%;
+  margin-right: auto;
+  transform: perspective(1200px) rotateY(-3.5deg) rotateX(1.5deg);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hm-dual-hero-stage:hover .hm-dual-hero-desktop {
+  transform: perspective(1200px) rotateY(0deg) rotateX(0deg);
+}
+
+.hm-dual-hero-phone {
+  position: absolute;
+  right: 0;
+  bottom: 36px;
+  z-index: 4;
+  transform: translateY(0);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hm-dual-hero-stage:hover .hm-dual-hero-phone {
+  transform: translateY(-6px);
+}
+
+.hm-hero-sync-bar {
+  position: relative;
+  z-index: 5;
+  margin-top: 14px;
+  width: 78%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 18, 28, 0.9);
+  backdrop-filter: blur(16px);
+}
+
+/* Simulated Operator Tap Ring & Screen Cross-Fade */
+.hm-screen-transition {
+  animation: hm-screen-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes hm-screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hm-operator-ring {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 9999px;
+  border: 1.5px solid #75e4d2;
+  background: rgba(117, 228, 210, 0.18);
+  pointer-events: none;
+  animation: hm-operator-aim 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.hm-device-switch-in {
+  animation: hm-device-switch 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes hm-device-switch {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.hm-operator-ring.is-phone {
+  right: auto;
+  left: 50%;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  margin-top: 0;
+  margin-left: -5px;
+}
+
+.hm-operator-ring.is-tapping {
+  animation: hm-operator-tap 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes hm-operator-aim {
+  from {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes hm-operator-tap {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(0.75);
+    background: rgba(117, 228, 210, 0.55);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+/* Interactive Full-Workspace Explorer (#live-screens) */
+.hm-explorer-section {
+  padding: 64px clamp(16px, 5vw, 72px);
+  background: linear-gradient(180deg, rgba(8, 11, 18, 0.5), rgba(11, 16, 24, 0.72));
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.hm-explorer-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.hm-explorer-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.hm-explorer-header .hm-section-heading {
+  max-width: 560px;
+}
+
+.hm-explorer-header .hm-section-heading h2 {
+  font-size: clamp(24px, 3vw, 36px);
+  letter-spacing: -1.1px;
+  line-height: 1.15;
+  margin: 10px 0 8px;
+  text-wrap: balance;
+}
+
+.hm-explorer-header .hm-section-heading > p {
+  font-size: 13px;
+  line-height: 1.65;
+  max-width: 520px;
+}
+
+.hm-explorer-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hm-control-btn {
+  height: 30px;
+  min-width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.88);
+  color: #e2e8f0;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.hm-control-btn:hover {
+  border-color: rgba(117, 228, 210, 0.6);
+  color: #75e4d2;
+}
+
+.hm-explorer-tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  scrollbar-width: none;
+}
+
+.hm-explorer-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.hm-explorer-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.hm-explorer-tab:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hm-explorer-tab.is-active {
+  color: #75e4d2;
+  background: rgba(117, 228, 210, 0.1);
+  border-color: rgba(117, 228, 210, 0.35);
+}
+
+.hm-explorer-theater {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+
+@media (min-width: 1024px) {
+  .hm-explorer-theater {
+    grid-template-columns: minmax(0, 1fr) 252px;
+    gap: 24px;
+  }
+}
+
+.hm-explorer-caption {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(15, 23, 42, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.hm-explorer-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--hm-teal);
+  background: var(--hm-teal);
+  color: #071312;
+  font-size: 11px;
+  font-weight: 700;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.hm-explorer-cta:hover {
+  background: #9af0e3;
+  transform: translateY(-1px);
+}
+
+/* Windows + Android Delivery Section Hardware Pair */
+.hm-dual-delivery-art {
+  width: 100%;
+  height: auto !important;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: 1000px;
+}
+
+.hm-monitor-stack {
+  width: min(100%, 490px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hm-monitor-live {
+  width: 100% !important;
+  height: auto !important;
+  padding: 7px !important;
+}
+
+.hm-monitor-live-body {
+  height: auto !important;
+  border-radius: 8px !important;
+}
+
+.hm-monitor-live-body .hm-device-desktop {
+  border: 0 !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.hm-monitor-stack .hm-monitor-stand {
+  position: relative !important;
+  bottom: auto !important;
+  width: 64px;
+  height: 30px;
+}
+
+.hm-monitor-stack .hm-monitor-base {
+  position: relative !important;
+  bottom: auto !important;
+  width: 120px;
+  height: 6px;
+}
+
+.hm-delivery-phone-overlay {
+  position: absolute;
+  right: -8px;
+  bottom: -6px;
+  z-index: 3;
+  width: 168px;
+}
+
+.hm-dual-delivery-art .hm-desktop-orb {
+  left: -10px;
+  right: auto;
+  bottom: 24px;
+}
+
+@media (max-width: 960px) {
+  .hm-hero {
+    grid-template-columns: 1fr !important;
+    gap: 32px !important;
+  }
+  .hm-dual-hero-stage {
+    padding-bottom: 12px;
+  }
+  .hm-dual-hero-desktop {
+    width: 100%;
+    transform: none;
+  }
+  .hm-dual-hero-phone {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    margin: -48px auto 0;
+    display: flex;
+    justify-content: center;
+  }
+  .hm-hero-sync-bar {
+    width: 100%;
+  }
 }
 
 @media (max-width: 760px) {
-  .hm-public .hm-nav-links.is-open {
-    position: absolute;
-    z-index: 10032 !important;
-    top: calc(100% - 1px);
-    left: 0;
-    right: 0;
+  .hm-explorer-section {
+    padding: 48px 14px;
+  }
+  .hm-explorer-header {
+    margin-bottom: 14px;
+  }
+  .hm-explorer-header .hm-section-heading h2 {
+    font-size: 24px;
+    letter-spacing: -0.9px;
+  }
+  .hm-explorer-header .hm-section-heading > p {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .hm-explorer-tab {
+    padding: 4px 8px;
+    font-size: 10.5px;
+  }
+  .hm-explorer-caption {
+    padding: 12px 13px;
+  }
+  .hm-dual-delivery-art {
+    flex-direction: column;
+    gap: 16px;
+    height: auto !important;
+    padding-top: 6px;
+  }
+  .hm-monitor,
+  .hm-monitor-live {
+    width: 100% !important;
+    height: auto !important;
+    transform: none !important;
+  }
+  .hm-delivery-phone-overlay {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    width: min(100%, 214px);
+    margin: 0 auto;
+  }
+  .hm-desktop-orb {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-screen-transition,
+  .hm-device-switch-in,
+  .hm-operator-ring,
+  .hm-operator-ring.is-tapping {
+    animation: none !important;
   }
 }
