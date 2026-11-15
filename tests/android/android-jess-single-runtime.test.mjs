@@ -46,8 +46,11 @@ test('Android floating orb is a transparent system overlay that forwards gesture
   assert.match(manifest, /android\.permission\.SYSTEM_ALERT_WINDOW/);
   assert.match(overlay, /TYPE_APPLICATION_OVERLAY/);
   assert.match(overlay, /PixelFormat\.TRANSLUCENT/);
-  assert.match(overlay, /onGesture\("toggle"\)/);
-  assert.match(overlay, /onGesture\("stop"\)/);
+  assert.match(overlay, /MotionEvent\.ACTION_MOVE/);
+  assert.match(overlay, /windowManager\.updateViewLayout\(view, params\)/);
+  assert.match(overlay, /positionPrefs\.edit\(\)/);
+  assert.match(overlay, /LONG_PRESS_MS/);
+  assert.match(overlay, /view\.performClick\(\)/);
   assert.match(overlay, /HubMindJessNativeEvents\.dispatch\(gesture\)/);
   assert.match(events, /MutableStateFlow<HubMindJessNativeGesture\?>/);
   assert.match(events, /fun consume\(/);
