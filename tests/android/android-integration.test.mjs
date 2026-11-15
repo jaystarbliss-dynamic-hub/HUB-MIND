@@ -17,7 +17,7 @@ const assertAndroidManifestPublicationState = (manifest) => {
   }
 };
 
-test('Android Gradle configuration enforces canonical applicationId, version 2.5.2 (252), and strict release signing', () => {
+test('Android Gradle configuration enforces canonical applicationId, version 2.5.3 (253), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
   assert.match(buildGradle, /versionCode\s*=\s*253/);
