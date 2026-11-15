@@ -12,6 +12,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import org.json.JSONObject
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
@@ -25,6 +26,8 @@ import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
 import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.agent.HubMindJessNativeEvents
 import com.example.hubmind.di.ServiceLocator
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -84,7 +87,7 @@ fun WorkspaceScreen(
                 }
             }
 
-            addJavascriptInterface(HubMindAndroidAuthBridge(this), "HubMindAndroid")
+            addJavascriptInterface(HubMindAndroidAuthBridge(context, this), "HubMindAndroid")
             addJavascriptInterface(androidDeviceBridge, "HubMindNative")
             androidDeviceBridge.attach(this)
 
@@ -177,8 +180,11 @@ private fun isTrustedWorkspaceUrl(uri: Uri): Boolean {
 }
 
 private class HubMindAndroidAuthBridge(
+    private val context: Context,
     private val webView: WebView
 ) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     @JavascriptInterface
     fun isAndroidApp(): Boolean = isTrustedWorkspaceOrigin()
 
@@ -188,14 +194,71 @@ private class HubMindAndroidAuthBridge(
         return NativeWebAuthTokenHolder.peek()
     }
 
+    /**
+     * Re-acquire the already-authorized Google credential silently when the
+     * Android Firebase session survived a process restart but the in-memory
+     * WebView handoff token did not. This must never show a second account
+     * chooser or another interactive sign-in screen.
+     */
+    @JavascriptInterface
+    fun requestGoogleIdToken() {
+        if (!isWorkspaceAuthRoute()) return
+        scope.launch {
+            val config = ServiceLocator.backendClient.fetchAndValidateRuntimeConfig().getOrElse {
+                dispatchAuthBridgeEvent("hubmind-native-token-error", it.message ?: "Could not load Hub-Mind sign-in configuration.")
+                return@launch
+            }
+            val clientId = config.firebaseGoogleClientId.trim()
+            if (clientId.isBlank()) {
+                dispatchAuthBridgeEvent("hubmind-native-token-error", "Hub-Mind Google sign-in configuration is unavailable.")
+                return@launch
+            }
+
+            val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestEmail()
+                .requestIdToken(clientId)
+                .build()
+            runCatching {
+                GoogleSignIn.getClient(context, options).silentSignIn()
+                    .addOnSuccessListener { account ->
+                        val token = account?.idToken.orEmpty()
+                        if (token.isBlank()) {
+                            dispatchAuthBridgeEvent("hubmind-native-token-error", "The saved Google account did not return a workspace token.")
+                        } else {
+                            NativeWebAuthTokenHolder.store(token)
+                            dispatchAuthBridgeEvent("hubmind-native-token-ready")
+                        }
+                    }
+                    .addOnFailureListener { error ->
+                        dispatchAuthBridgeEvent(
+                            "hubmind-native-token-error",
+                            error.message ?: "The saved Google account could not be restored automatically."
+                        )
+                    }
+            }.onFailure { error ->
+                dispatchAuthBridgeEvent(
+                    "hubmind-native-token-error",
+                    error.message ?: "Could not restore your existing Google sign-in."
+                )
+            }
+        }
+    }
+
     @JavascriptInterface
     fun completeGoogleSignIn() {
         if (isWorkspaceAuthRoute()) NativeWebAuthTokenHolder.clear()
     }
 
-    // Compatibility for a previously installed v2.5.0 WebView bundle.
+    // Compatibility for a previously bundled v2.5.0 WebView client.
     @JavascriptInterface
     fun consumeGoogleIdToken(): String = getGoogleIdToken()
+
+    private fun dispatchAuthBridgeEvent(name: String, message: String? = null) {
+        if (name !in setOf("hubmind-native-token-ready", "hubmind-native-token-error")) return
+        val detail = if (message != null) ",detail:{message:" + JSONObject.quote(message.take(500)) + "}" else ""
+        val script = "window.dispatchEvent(new CustomEvent('$name'{$detail}));"
+        webView.post { webView.evaluateJavascript(script, null) }
+    }
 
     private fun currentTrustedUrl(): Uri? {
         val currentUrl = runCatching { Uri.parse(webView.url.orEmpty()) }.getOrNull() ?: return null
