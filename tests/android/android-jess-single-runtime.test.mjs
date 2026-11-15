@@ -56,6 +56,10 @@ test('Android floating orb is a transparent system overlay that forwards gesture
   assert.match(service, /fun setHubMindActivityVisible\(context: Context, visible: Boolean\)/);
   assert.match(activity, /setHubMindActivityVisible\(applicationContext, true\)/);
   assert.match(activity, /setHubMindActivityVisible\(applicationContext, false\)/);
+  assert.match(activity, /override fun onUserLeaveHint\(\)/);
+  assert.doesNotMatch(activity, /HubMindAgentForegroundService\.refreshJessOverlay\(applicationContext\)/);
+  assert.match(service, /!jessMicrophoneActive &&\s*!screenCaptureManager\.isCaptureActive &&\s*hubMindActivityVisible/);
+  assert.match(service, /stopForeground\(STOP_FOREGROUND_REMOVE\)/);
   assert.match(workspace, /hubmind-native-jess-toggle/);
 });
 
