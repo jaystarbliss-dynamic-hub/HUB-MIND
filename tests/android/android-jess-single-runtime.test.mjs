@@ -19,21 +19,22 @@ test('Android tabs keep one workspace WebView alive and no longer mount the sepa
   assert.match(workspace, /HubMindJessNativeEvents\.events\.collect/);
 });
 
-test('Android Jess tab routes to the existing React companion orb, with the authenticated assistant mounted on that route', () => {
+test('Android Jess tab overlays the current workspace route and reuses the existing Jess Live client', () => {
   const app = read('src/App.tsx');
   const companion = read('src/pages/CompanionPage.tsx');
   const floating = read('src/components/JessFloatingAssistant.tsx');
 
   assert.match(app, /function AndroidNativeTabNavigationBridge/);
-  assert.match(app, /navigate\('\/orb'/);
-  assert.match(app, /const androidJessTab = isAndroidApp && location\.pathname === '\/orb'/);
-  assert.match(app, /desktopOverlayRoute && !androidJessTab/);
-  assert.match(companion, /postMessage\(\{ type: 'toggle' \}\)/);
-  assert.match(floating, /data\.type === 'toggle'/);
-  assert.match(floating, /new LiveAudioClient\(/);
+  assert.match(app, /setJessOpen\\(open\\)/);
+  assert.match(app, /data-hubmind-android-jess-tab/);
+  assert.match(app, /<CompanionPage \\/>/);
+  assert.match(app, /desktopOverlayRoute \\|\\| \\(publicOrLoginRoute && !isDesktopShell\\)/);
+  assert.doesNotMatch(app, /navigate\\('\\/orb'/);
+  assert.match(companion, /postMessage\\(\\{ type: 'toggle' \\}\\)/);
+  assert.match(floating, /setAndroidJessTabOpen/);
+  assert.match(floating, /new LiveAudioClient\\(/);
   assert.match(floating, /hubmind-native-jess-toggle/);
 });
-
 test('Android floating orb is a transparent system overlay that forwards gestures to the existing WebView', () => {
   const overlay = read('android/app/src/main/java/com/example/hubmind/agent/JessOrbOverlayManager.kt');
   const events = read('android/app/src/main/java/com/example/hubmind/agent/HubMindJessNativeEvents.kt');
