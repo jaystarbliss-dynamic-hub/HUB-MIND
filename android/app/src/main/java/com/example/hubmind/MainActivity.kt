@@ -177,15 +177,26 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, true)
         ServiceLocator.permissionStatusRepository.refreshFromSystem()
-        // Once the user has explicitly granted Display Over Other Apps, keep
-        // the system-wide Jess orb available even after the Activity is minimised.
         if (ServiceLocator.authRepository.isSessionReady.value &&
             ServiceLocator.authRepository.isSessionValid.value &&
             Settings.canDrawOverlays(this)
         ) {
             HubMindAgentForegroundService.refreshJessOverlay(this)
         }
+    }
+
+    override fun onStop() {
+        if (ServiceLocator.authRepository.isSessionReady.value &&
+            ServiceLocator.authRepository.isSessionValid.value &&
+            Settings.canDrawOverlays(this)
+        ) {
+            HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, false)
+        } else {
+            HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, true)
+        }
+        super.onStop()
     }
 
     private fun requestEssentialRuntimePermissions() {
