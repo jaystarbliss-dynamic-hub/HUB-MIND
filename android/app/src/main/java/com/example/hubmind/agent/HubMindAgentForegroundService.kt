@@ -97,10 +97,10 @@ class HubMindAgentForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        activeInstance = this
         createNotificationChannel()
         screenCaptureManager = AndroidScreenCaptureManager(applicationContext)
         jessOrbOverlayManager = JessOrbOverlayManager(applicationContext)
+        activeInstance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
