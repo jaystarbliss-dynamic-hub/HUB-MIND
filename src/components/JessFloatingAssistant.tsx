@@ -1196,6 +1196,72 @@ export function JessFloatingAssistant() {
     } else void start();
   }, [connection, start, stop]);
 
+  // Android's transparent system-overlay orb is only a control surface. It sends
+  // gestures back into this existing assistant; it never creates another model,
+  // conversation, Firebase identity, or microphone session.
+  useEffect(() => {
+    const onToggle = () => {
+      if (connection === 'connecting') return;
+      if (connection === 'connected' && clientRef.current) {
+        clientRef.current.toggleMute();
+        setSpeechState({
+          text: state === 'muted' ? "I'm listening. Go ahead." : 'Microphone is muted.',
+          speaker: 'jess',
+          visible: true,
+        });
+      } else {
+        void start();
+      }
+    };
+    const onMute = () => {
+      if (connection !== 'connected' || !clientRef.current) return;
+      clientRef.current.toggleMute();
+      setSpeechState({
+        text: state === 'muted' ? "I'm listening. Go ahead." : 'Microphone is muted.',
+        speaker: 'jess',
+        visible: true,
+      });
+    };
+    const onStop = () => { void stop(); };
+    window.addEventListener('hubmind-native-jess-toggle', onToggle);
+    window.addEventListener('hubmind-native-jess-mute', onMute);
+    window.addEventListener('hubmind-native-jess-stop', onStop);
+    return () => {
+      window.removeEventListener('hubmind-native-jess-toggle', onToggle);
+      window.removeEventListener('hubmind-native-jess-mute', onMute);
+      window.removeEventListener('hubmind-native-jess-stop', onStop);
+    };
+  }, [connection, start, state, stop]);
+
+  // Keep Android's foreground microphone service aligned with the real Live
+  // connection. This preserves the same web LiveAudioClient while the app is
+  // backgrounded; the foreground service only supplies Android lifecycle state.
+  useEffect(() => {
+    const bridge = (window as any).HubMindNative;
+    if (typeof bridge?.setJessMicrophoneActive !== 'function') return;
+    try {
+      bridge.setJessMicrophoneActive(connection === 'connected' || connection === 'connecting');
+    } catch (error) {
+      console.warn('[Jess] Could not update Android microphone foreground state:', error);
+    }
+  }, [connection]);
+
+  // Mirror real Live state and audio levels to the native orb overlay.
+  useEffect(() => {
+    const bridge = (window as any).HubMindNative;
+    if (typeof bridge?.setJessVisualState !== 'function') return;
+    try {
+      bridge.setJessVisualState(
+        state,
+        Math.max(0, Math.min(1, Number(inputLevel) || 0)),
+        Math.max(0, Math.min(1, Number(outputLevel) || 0)),
+        connection === 'connected'
+      );
+    } catch (error) {
+      console.warn('[Jess] Could not update Android orb visual state:', error);
+    }
+  }, [connection, inputLevel, outputLevel, state]);
+
   // Route desktop-character gestures through the same LiveAudioClient as the former orb.
   // The local pet never creates a second model session or owns a separate microphone.
   useEffect(() => {
@@ -1325,7 +1391,16 @@ export function JessFloatingAssistant() {
             activeBgTasks,
           });
         } else if (data.type === 'toggle') {
-          activate();
+          if (connection === 'connected' && clientRef.current) {
+            clientRef.current.toggleMute();
+            setSpeechState({
+              text: state === 'muted' ? "I'm listening. Go ahead." : 'Microphone is muted.',
+              speaker: 'jess',
+              visible: true,
+            });
+          } else if (connection !== 'connecting') {
+            void start(data.prompt);
+          }
         } else if (data.type === 'start') {
           void start(data.prompt);
         } else if (data.type === 'stop') {
