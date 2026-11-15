@@ -20,8 +20,8 @@ const assertAndroidManifestPublicationState = (manifest) => {
 test('Android Gradle configuration enforces canonical applicationId, version 2.5.2 (252), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
-  assert.match(buildGradle, /versionCode\s*=\s*252/);
-  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.2"/);
+  assert.match(buildGradle, /versionCode\s*=\s*253/);
+  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.3"/);
   assert.match(buildGradle, /if\s*\(hasDedicatedReleaseKeystore\)\s*\{\s*signingConfig\s*=\s*signingConfigs\.getByName\("release"\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.auth\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.firestore\)/);
@@ -389,8 +389,8 @@ test('Android releases have human-readable version and channel labels on homepag
   const modal = read('src/components/DesktopUpdatesModal.tsx');
   const gradle = read('android/app/build.gradle.kts');
 
-  assert.match(gradle, /versionCode\s*=\s*252/);
-  assert.match(gradle, /versionName\s*=\s*"2\.5\.2"/);
+  assert.match(gradle, /versionCode\s*=\s*253/);
+  assert.match(gradle, /versionName\s*=\s*"2\.5\.3"/);
   assert.match(naming, /OFFICIAL RELEASE/);
   assert.match(naming, /TEST BUILD · DEBUG SIGNED/);
   assert.match(naming, /compareAndroidReleaseVersions/);
