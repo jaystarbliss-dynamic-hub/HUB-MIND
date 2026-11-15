@@ -209,7 +209,7 @@ export function CompanionPage() {
 
   const handleOrbTap = useCallback(async () => {
     // Broadcast immediately to main workspace
-    bridgeChannelRef.current?.postMessage({ type: 'toggle-listen' });
+    bridgeChannelRef.current?.postMessage({ type: 'toggle' });
 
     if (owner && owner.leaseUntil > Date.now()) {
       if (owner.client === 'windows-desktop') {
