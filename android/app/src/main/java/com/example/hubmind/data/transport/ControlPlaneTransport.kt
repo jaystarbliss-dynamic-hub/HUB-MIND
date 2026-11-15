@@ -336,6 +336,9 @@ class HubMindControlPlaneTransportImpl(
         val duration = System.currentTimeMillis() - startMs
         val statusStr = if (actionResult.success) "COMPLETED" else "FAILED"
 
+        // A requested Android screen capture is returned as one bounded JPEG
+        // snapshot for the desktop UI. It is never captured or uploaded implicitly.
+        val remoteScreenshot = actionResult.screenshotBase64?.takeIf { it.length <= 850_000 }
         val updateMap = mutableMapOf<String, Any?>(
             "lifecycleState" to statusStr,
             "resultSuccess" to actionResult.success,
@@ -352,6 +355,10 @@ class HubMindControlPlaneTransportImpl(
                 "durationMs" to duration
             )
         )
+        if (remoteScreenshot != null) {
+            updateMap["resultScreenshotBase64"] = remoteScreenshot
+            updateMap["resultScreenshotCapturedAt"] = System.currentTimeMillis()
+        }
         runCatching {
             cmdRef.update(updateMap).await()
         }.onFailure {
@@ -368,6 +375,10 @@ class HubMindControlPlaneTransportImpl(
                         put("resultSummary", actionResult.outputText ?: "")
                         put("resultError", actionResult.error ?: "")
                         put("durationMs", duration)
+                        if (remoteScreenshot != null) {
+                            put("resultScreenshotBase64", remoteScreenshot)
+                            put("resultScreenshotCapturedAt", System.currentTimeMillis())
+                        }
                     }
                 )
             }
