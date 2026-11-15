@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { Activity, CheckCircle2, CircleAlert, Clock3, Loader2, RefreshCw, Smartphone, Monitor, RadioTower } from 'lucide-react';
+import { collection, deleteField, doc, limit, onSnapshot, orderBy, query, updateDoc } from 'firebase/firestore';
+import { Activity, CheckCircle2, CircleAlert, Clock3, Loader2, RefreshCw, Smartphone, Monitor, RadioTower, Camera } from 'lucide-react';
 import { db } from '../firebaseConfig';
 import { useAuth } from '../lib/auth';
+import { dispatchCrossDeviceCommand } from '../services/crossDeviceService';
 
 type DeviceCommandRecord = {
   id: string;
@@ -21,6 +22,15 @@ type DeviceCommandRecord = {
   completedAt?: number;
   expirationTime?: number;
   requiresConfirmation?: boolean;
+};
+
+type PairedDevice = {
+  id: string;
+  deviceId?: string;
+  deviceName?: string;
+  platform?: string;
+  status?: string;
+  batteryPercent?: number | null;
 };
 
 function formatTime(value?: number): string {
@@ -48,11 +58,15 @@ function stateTone(item: DeviceCommandRecord): string {
 export function DeviceActivity() {
   const { user, profile } = useAuth();
   const [records, setRecords] = useState<DeviceCommandRecord[]>([]);
+  const [devices, setDevices] = useState<PairedDevice[]>([]);
+  const [selectedAndroidId, setSelectedAndroidId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'android' | 'windows'>('all');
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
-  const [devicePlatforms, setDevicePlatforms] = useState<Record<string, string>>({});
+  const [capturingScreen, setCapturingScreen] = useState(false);
+  const [captureMessage, setCaptureMessage] = useState('');
+  const [lastCapturedFrame, setLastCapturedFrame] = useState<{ dataUrl: string; deviceName: string; capturedAt: number } | null>(null);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -63,18 +77,6 @@ export function DeviceActivity() {
 
     setLoading(true);
     setError('');
-    const devicesQuery = query(collection(db, 'users', user.uid, 'devices'), limit(100));
-    const unsubscribeDevices = onSnapshot(devicesQuery, snapshot => {
-      const platforms: Record<string, string> = {};
-      snapshot.docs.forEach(entry => {
-        const data = entry.data() as any;
-        platforms[entry.id] = String(data.platform || data.devicePlatform || '').toLowerCase();
-      });
-      setDevicePlatforms(platforms);
-    }, deviceError => {
-      console.warn('[DeviceActivity] Paired device registry unavailable:', deviceError);
-    });
-
     const commandQuery = query(
       collection(db, 'users', user.uid, 'deviceCommands'),
       orderBy('issuedAt', 'desc'),
@@ -82,10 +84,28 @@ export function DeviceActivity() {
     );
 
     const unsubscribe = onSnapshot(commandQuery, snapshot => {
-      setRecords(snapshot.docs.map(entry => ({
-        id: entry.id,
-        ...(entry.data() as Omit<DeviceCommandRecord, 'id'>),
-      })));
+      const nextRecords: DeviceCommandRecord[] = [];
+      for (const entry of snapshot.docs) {
+        const data = entry.data() as Omit<DeviceCommandRecord, 'id'>;
+        if (typeof data.resultScreenshotBase64 === 'string' && data.resultScreenshotBase64.length > 0) {
+          const target = String(data.targetDeviceId || 'Android phone');
+          setLastCapturedFrame({
+            dataUrl: 'data:image/jpeg;base64,' + data.resultScreenshotBase64,
+            deviceName: devices.find(device => device.id === target || device.deviceId === target)?.deviceName || target,
+            capturedAt: Number(data.resultScreenshotCapturedAt || data.completedAt || Date.now()),
+          });
+          // The user-requested preview is copied into this page's transient state,
+          // then removed from the durable command record to avoid retaining a phone
+          // screenshot in the activity history.
+          void updateDoc(doc(db, 'users', user.uid, 'deviceCommands', entry.id), {
+            resultScreenshotBase64: deleteField(),
+            resultScreenshotCapturedAt: deleteField(),
+          }).catch(err => console.warn('[DeviceActivity] Could not clear transient phone preview:', err));
+        }
+        const { resultScreenshotBase64: _image, resultScreenshotCapturedAt: _capturedAt, ...record } = data;
+        nextRecords.push({ id: entry.id, ...record });
+      }
+      setRecords(nextRecords);
       setLastUpdate(Date.now());
       setLoading(false);
       setError('');
@@ -95,17 +115,70 @@ export function DeviceActivity() {
       setLoading(false);
     });
 
-    return () => { unsubscribe(); unsubscribeDevices(); };
+    return () => unsubscribe();
+  }, [user?.uid, devices]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setDevices([]);
+      return;
+    }
+    const deviceQuery = query(collection(db, 'users', user.uid, 'devices'), limit(100));
+    return onSnapshot(deviceQuery, snapshot => {
+      const next = snapshot.docs.map(entry => ({
+        id: entry.id,
+        ...(entry.data() as Omit<PairedDevice, 'id'>),
+      }));
+      setDevices(next);
+      const onlineAndroid = next.filter(device =>
+        String(device.platform || '').toUpperCase() === 'ANDROID' &&
+        String(device.status || '').toUpperCase() === 'ONLINE'
+      );
+      setSelectedAndroidId(current =>
+        onlineAndroid.some(device => device.id === current) ? current : (onlineAndroid[0]?.id || '')
+      );
+    }, err => {
+      console.warn('[DeviceActivity] Could not load paired devices:', err);
+    });
   }, [user?.uid]);
+
+  const onlineAndroidDevices = useMemo(() => devices.filter(device =>
+    String(device.platform || '').toUpperCase() === 'ANDROID' &&
+    String(device.status || '').toUpperCase() === 'ONLINE'
+  ), [devices]);
+
+  const capturePhoneScreen = async () => {
+    if (!user?.uid || !selectedAndroidId || capturingScreen) return;
+    setCapturingScreen(true);
+    setCaptureMessage('Requesting a screenshot from the selected Android phone…');
+    try {
+      const result = await dispatchCrossDeviceCommand(
+        user.uid,
+        selectedAndroidId,
+        'CAPTURE_SCREEN',
+        {},
+        20_000
+      );
+      if (!result.success) {
+        setCaptureMessage(result.error || 'The Android phone could not capture its screen.');
+      } else {
+        setCaptureMessage('The phone confirmed the capture. Loading the preview…');
+      }
+    } catch (err: any) {
+      setCaptureMessage(err?.message || 'The screenshot request failed.');
+    } finally {
+      setCapturingScreen(false);
+    }
+  };
 
   const filtered = useMemo(() => records.filter(item => {
     if (filter === 'all') return true;
-    const platform = String(devicePlatforms[String(item.targetDeviceId || '')] || '').toLowerCase();
+    const id = String(item.targetDeviceId || '').toLowerCase();
     const action = String(item.actionType || '').toLowerCase();
-    if (filter === 'android') return platform === 'android' || action.includes('android');
-    if (filter === 'windows') return platform === 'windows' || action.includes('windows') || action.includes('chrome_');
+    if (filter === 'android') return id.startsWith('android-') || action.includes('android') || action === 'capture_screen';
+    if (filter === 'windows') return id.startsWith('win-') || action.includes('windows') || action.includes('chrome_');
     return true;
-  }), [records, filter, devicePlatforms]);
+  }), [records, filter]);
 
   const activeCount = records.filter(item => ['DISPATCHED', 'ACCEPTED', 'EXECUTING'].includes(String(item.lifecycleState || '').toUpperCase())).length;
 
@@ -151,6 +224,55 @@ export function DeviceActivity() {
         </div>
       </section>
 
+      <section className="rounded-2xl border border-slate-800 bg-slate-900 p-4 md:p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Smartphone size={16} className="text-teal-300" /> Android phone screen preview
+            </p>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
+              Request a one-time screenshot from an online paired phone. The phone must be unlocked and have Hub-Mind Accessibility enabled. Nothing is captured until you press the button.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              value={selectedAndroidId}
+              onChange={event => setSelectedAndroidId(event.target.value)}
+              disabled={!onlineAndroidDevices.length || capturingScreen}
+              className="min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-slate-200 disabled:opacity-50"
+              aria-label="Select Android phone"
+            >
+              {onlineAndroidDevices.length
+                ? onlineAndroidDevices.map(device => <option key={device.id} value={device.id}>{device.deviceName || device.id}</option>)
+                : <option value="">No online Android phone</option>}
+            </select>
+            <button
+              type="button"
+              onClick={() => void capturePhoneScreen()}
+              disabled={!selectedAndroidId || capturingScreen}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-teal-400/30 bg-teal-400/10 px-4 py-2.5 text-xs font-semibold text-teal-200 transition-colors hover:bg-teal-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {capturingScreen ? <Loader2 size={14} className="animate-spin" /> : <Camera size={14} />}
+              {capturingScreen ? 'Capturing…' : 'Capture phone screen'}
+            </button>
+          </div>
+        </div>
+        {captureMessage ? <p className="mt-3 text-xs text-slate-400">{captureMessage}</p> : null}
+        {lastCapturedFrame ? (
+          <div className="mt-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-3 py-2 text-[11px] text-slate-400">
+              <span>{lastCapturedFrame.deviceName}</span>
+              <span>Captured {formatTime(lastCapturedFrame.capturedAt)}</span>
+            </div>
+            <img src={lastCapturedFrame.dataUrl} alt="One-time screenshot captured from the paired Android phone" className="mx-auto max-h-[560px] max-w-full object-contain" />
+          </div>
+        ) : (
+          <div className="mt-4 rounded-xl border border-dashed border-slate-800 bg-slate-950/60 p-8 text-center text-xs text-slate-500">
+            No phone screenshot has been requested in this session.
+          </div>
+        )}
+      </section>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           {(['all', 'android', 'windows'] as const).map(value => (
@@ -194,7 +316,7 @@ export function DeviceActivity() {
       ) : (
         <div className="space-y-3">
           {filtered.map(item => {
-            const android = String(devicePlatforms[String(item.targetDeviceId || '')] || '').toLowerCase() === 'android';
+            const android = String(item.targetDeviceId || '').toLowerCase().startsWith('android-') || String(item.actionType || '').toUpperCase() === 'CAPTURE_SCREEN';
             const done = item.resultSuccess === true;
             return (
               <article key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 md:p-5">
@@ -219,19 +341,6 @@ export function DeviceActivity() {
                     {item.resultError || item.resultSummary}
                   </div>
                 )}
-                {item.resultScreenshotBase64 && (
-                  <figure className="mt-4 overflow-hidden rounded-xl border border-slate-700 bg-black">
-                    <img
-                      src={item.resultScreenshotBase64.startsWith('data:') ? item.resultScreenshotBase64 : `data:image/jpeg;base64,${item.resultScreenshotBase64}`}
-                      alt={`Screen capture returned by ${item.actionType || 'Android device'} command`}
-                      className="max-h-[520px] w-full object-contain"
-                      loading="lazy"
-                    />
-                    <figcaption className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-500">
-                      Device screen capture{item.resultScreenshotCapturedAt ? ` · ${formatTime(item.resultScreenshotCapturedAt)}` : ''}
-                    </figcaption>
-                  </figure>
-                )}
                 <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-500">
                   <span>Sent: {formatTime(item.issuedAt)}</span>
                   {item.completedAt ? <span>Completed: {formatTime(item.completedAt)}</span> : null}
@@ -244,7 +353,7 @@ export function DeviceActivity() {
       )}
 
       <p className="text-[11px] leading-relaxed text-slate-600">
-        This is a live command timeline, not a continuous mirror of the phone display. Visual screen sharing still requires the Android owner’s MediaProjection consent and an active supported screen-stream session.
+        The activity timeline updates as commands finish. Phone screen previews are one-time, user-requested snapshots; continuous screen sharing still requires the Android owner to approve the system MediaProjection prompt.
       </p>
     </div>
   );
