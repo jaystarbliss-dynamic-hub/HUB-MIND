@@ -105,9 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const onTokenError = (event: Event) => {
-      if (disposed || auth.currentUser) return;
+      if (disposed) return;
       clearRestoreTimeout();
       nativeAuthBootstrapPending.current = false;
+      if (auth.currentUser) return;
       const message = (event as CustomEvent<{ message?: string }>).detail?.message;
       setNativeAuthError(
         message || 'Hub-Mind could not automatically restore the Google account already signed in on this phone. Retry the secure session handoff.'
