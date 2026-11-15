@@ -112,7 +112,7 @@ test('Android floating orb can be dragged to a temporary hide target and fades w
   assert.match(overlay, /dismissedUntilNextMinimize/);
   assert.match(overlay, /dismissed_until_next_minimize/);
   assert.match(overlay, /positionPrefs\.edit\(\)\.putBoolean/);
-  assert.match(overlay, /val wasIdle = orbState === "idle" \|\| orbState === "muted"/);
+  assert.match(overlay, /val wasIdle = orbState == "idle" \\|\\| orbState == "muted"/);
   assert.match(overlay, /if \(isIdle && !wasIdle\) scheduleIdleFade\(\)/);
   assert.match(overlay, /isInsideDismissTarget/);
   assert.match(overlay, /showDismissTarget/);
