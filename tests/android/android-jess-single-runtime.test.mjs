@@ -67,6 +67,24 @@ test('Jess Live state controls Android microphone foreground state and mirrors r
   assert.match(service, /fun updateJessOverlayState\(/);
 });
 
+test('Android restores the already-authorized Google account silently instead of reopening a second sign-in form', () => {
+  const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const auth = read('src/lib/auth.tsx');
+  const app = read('src/App.tsx');
+
+  assert.match(workspace, /fun requestGoogleIdToken\(\)/);
+  assert.match(workspace, /GoogleSignIn\.getClient\(context, options\)\.silentSignIn\(\)/);
+  assert.match(workspace, /NativeWebAuthTokenHolder\.store\(token\)/);
+  assert.match(workspace, /hubmind-native-token-ready/);
+  assert.match(workspace, /hubmind-native-token-error/);
+  assert.match(auth, /bridge\.requestGoogleIdToken\(\)/);
+  assert.match(auth, /signInWithCredential\(auth, GoogleAuthProvider\.credential\(googleIdToken\)\)/);
+  assert.match(auth, /nativeAuthBootstrapPending\.current = true/);
+  assert.match(auth, /completeGoogleSignIn/);
+  assert.match(app, /nativeAuthError/);
+  assert.match(app, /Retry secure session/);
+});
+
 test('Sign-in screen removes the visible “or email” divider but preserves existing email-account access', () => {
   const login = read('src/pages/Login.tsx');
   const app = read('src/App.tsx');
