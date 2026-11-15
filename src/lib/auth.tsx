@@ -131,7 +131,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.warn('[Hub-Mind Android] Native sign-in handoff was unavailable:', error);
     }
 
-    if (auth.currentUser) {
+    let nativeUserId = '';
+    try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
+    const webUserMatchesNative = !!auth.currentUser &&
+      (!nativeUserId || auth.currentUser.uid === nativeUserId);
+
+    if (webUserMatchesNative) {
       if (existingToken) {
         try { bridge.completeGoogleSignIn?.(); } catch {}
       }
@@ -145,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           bridge.requestGoogleIdToken();
           restoreTimeout = window.setTimeout(() => {
             restoreTimeout = null;
-            if (disposed || auth.currentUser) return;
+            if (disposed || auth.currentUser?.uid === nativeUserId) return;
             nativeAuthBootstrapPending.current = false;
             setNativeAuthError('Hub-Mind is still waiting for Android to restore your saved Google session. Check your connection and retry the secure session handoff.');
             setLoading(false);
