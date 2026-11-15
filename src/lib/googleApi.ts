@@ -39,11 +39,10 @@ export const sendEmail = async (to: string, subject: string, body: string) => {
     const errorData = await res.json().catch(() => ({}));
     const apiMessage = errorData?.error?.message || errorData?.error_description || errorData?.error || '';
     if (res.status === 403) {
-      throw new Error(apiMessage
-        ? \`Google denied Gmail send permission: \${apiMessage}. Reconnect the Google account and approve Gmail send access.\`
-        : 'Google denied Gmail send permission. Reconnect the Google account and approve Gmail send access.');
+      const detail = apiMessage ? 'Google denied Gmail send permission: ' + apiMessage : 'Google denied Gmail send permission.';
+      throw new Error(detail + ' Reconnect the Google account and approve Gmail send access.');
     }
-    throw new Error(apiMessage || \`Gmail send failed with HTTP \${res.status}.\`);
+    throw new Error(apiMessage || ('Gmail send failed with HTTP ' + res.status + '.'));
   }
   return res.json();
 };
