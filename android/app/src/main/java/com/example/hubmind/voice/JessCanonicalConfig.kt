@@ -80,7 +80,7 @@ object JessCanonicalConfig {
                         put("type", "STRING")
                         put(
                             "description",
-                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
+                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS, GET_APP_USAGE_STATS, OPEN_USAGE_ACCESS_SETTINGS. GET_APP_USAGE_STATS requires the owner to grant Usage Access in Android Settings."
                         )
                     })
                     put("packageName", JSONObject().put("type", "STRING").put("description", "Android package name (e.g. com.android.chrome)"))
@@ -91,6 +91,8 @@ object JessCanonicalConfig {
                     put("x", JSONObject().put("type", "NUMBER").put("description", "Screen X coordinate in pixels"))
                     put("y", JSONObject().put("type", "NUMBER").put("description", "Screen Y coordinate in pixels"))
                     put("direction", JSONObject().put("type", "STRING").put("description", "Scroll or swipe direction: up, down, left, right"))
+                    put("days", JSONObject().put("type", "NUMBER").put("description", "For GET_APP_USAGE_STATS, look back 1-30 days; default 7."))
+                    put("limit", JSONObject().put("type", "NUMBER").put("description", "For GET_APP_USAGE_STATS, maximum number of apps to return; default 15."))
                 })
                 put("required", JSONArray().put("actionType"))
             })
