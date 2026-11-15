@@ -161,4 +161,7 @@ test('Android WebView auth failures with a stale cached user always release the 
   const tokenErrorBlock = auth.slice(tokenErrorStart, tokenErrorEnd);
   assert.match(tokenErrorBlock, /bridge\.getNativeUserId/);
   assert.match(tokenErrorBlock, /auth\.currentUser\.uid === nativeUserId/);
+  assert.match(tokenErrorBlock, /setUser\(null\)/);
+  assert.match(tokenErrorBlock, /setProfile\(null\)/);
+  assert.match(tokenErrorBlock, /setLoading\(false\)/);
 });
