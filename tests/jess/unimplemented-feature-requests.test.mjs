@@ -77,7 +77,7 @@ test('Android app usage reporting requires owner-granted Usage Access and is exp
   assert.match(reader, /OPSTR_GET_USAGE_STATS/);
   assert.match(reader, /queryUsageStats/);
   assert.match(reader, /hasUsageAccess/);
-  assert.match(reader, /owner must explicitly grant/i);
+  assert.match(reader, /device owner has explicitly granted/i);
   assert.match(manifest, /PACKAGE_USAGE_STATS/);
   assert.match(model, /GET_APP_USAGE_STATS/);
   assert.match(model, /OPEN_USAGE_ACCESS_SETTINGS/);
