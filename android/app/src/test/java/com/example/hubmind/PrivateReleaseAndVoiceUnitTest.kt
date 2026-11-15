@@ -28,7 +28,7 @@ class PrivateReleaseAndVoiceUnitTest {
         )
 
         assertTrue(manifest.versionCode > currentCode)
-        assertEquals("2.5.2", manifest.versionName)
+        assertEquals("2.5.3", manifest.versionName)
         assertEquals("com.aistudio.hubmind.wzyqkp", manifest.applicationId)
         assertEquals("a".repeat(64), manifest.sha256)
         assertTrue(manifest.apkUrl.startsWith("https://github.com/"))
