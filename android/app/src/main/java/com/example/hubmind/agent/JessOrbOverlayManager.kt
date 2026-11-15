@@ -1,6 +1,7 @@
 package com.example.hubmind.agent
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PixelFormat
@@ -10,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import com.example.hubmind.MainActivity
 import android.view.View
 import android.view.WindowManager
 import kotlin.math.min
@@ -25,6 +27,15 @@ class JessOrbOverlayManager(context: Context) {
     private val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val handler = Handler(Looper.getMainLooper())
     private val orbView = JessOrbView(appContext) { gesture ->
+        // Bring the existing app/WebView to the foreground; the gesture is
+        // queued in-process and consumed by its single Jess assistant.
+        runCatching {
+            appContext.startActivity(
+                Intent(appContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                }
+            )
+        }
         HubMindJessNativeEvents.dispatch(gesture)
     }
     private var attached = false
