@@ -185,3 +185,58 @@ body:has(.jess-orb-window) #root > div {
   from { opacity: 0; transform: translate(-50%, -4px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
+
+
+/* The Android native Jess tab uses this same companion orb as a full-screen
+   interaction surface. The Windows BrowserWindow retains its compact 96px layout. */
+.jess-orb-android-tab {
+  width: 100vw;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  max-width: none;
+  max-height: none;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(16, 185, 160, 0.11), transparent 43%),
+    radial-gradient(circle at 50% 58%, rgba(15, 23, 42, 0.35), transparent 68%);
+}
+
+.jess-orb-android-tab .jess-orb-drag {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(74vw, 270px);
+  height: min(74vw, 270px);
+}
+
+.jess-orb-android-tab .jess-orb-drag.is-dismiss-mode {
+  transform: translate(-50%, -50%) scale(0.92);
+}
+
+.jess-orb-android-tab .jess-orb-launch {
+  width: min(68vw, 248px);
+  height: min(68vw, 248px);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.22), 0 0 36px rgba(45, 212, 191, 0.22);
+}
+
+.jess-orb-android-tab .jess-status-dot {
+  left: calc(50% + min(24vw, 86px));
+  top: calc(50% + min(24vw, 86px));
+  width: 14px;
+  height: 14px;
+}
+
+.jess-orb-android-tab .jess-control-indicator {
+  left: calc(50% - min(24vw, 86px));
+  top: calc(50% + min(24vw, 86px));
+  width: 14px;
+  height: 14px;
+}
+
+.jess-orb-android-tab .jess-orb-dismiss-hint {
+  bottom: -34px;
+  font-size: 11px;
+  padding: 5px 10px;
+}
