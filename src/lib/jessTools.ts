@@ -14,7 +14,7 @@ import {
 } from './googleCalendar';
 import { globalSearch } from './globalSearch';
 import { queueJessDocumentEdit } from './jessDocumentBridge';
-import { getLocalDocsMap, setLocalDocsMap, fetchDocumentVersionHistory } from './offlineSync';
+import { getLocalDocsMap, setLocalDocsMap, fetchDocumentVersionHistory, createNamedCheckpoint } from './offlineSync';
 import { jessBackgroundTasks } from '../services/jessBackgroundTasks';
 import { materializeRecurringMeetings } from './recurringMeetings';
 import { getCachedCollection } from '../services/jessWorkspaceCache';
