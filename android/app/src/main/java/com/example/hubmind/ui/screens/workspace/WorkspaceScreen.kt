@@ -245,6 +245,21 @@ private class HubMindAndroidAuthBridge(
     }
 
     @JavascriptInterface
+    fun getNativeUserId(): String {
+        if (!isWorkspaceAuthRoute()) return ""
+        return ServiceLocator.authRepository.currentUser.value?.id.orEmpty()
+    }
+
+    @JavascriptInterface
+    fun signOutNative() {
+        if (!isWorkspaceAuthRoute()) return
+        scope.launch {
+            ServiceLocator.authRepository.signOut()
+            HubMindAgentForegroundService.stopService(context)
+        }
+    }
+
+    @JavascriptInterface
     fun completeGoogleSignIn() {
         if (isWorkspaceAuthRoute()) NativeWebAuthTokenHolder.clear()
     }
