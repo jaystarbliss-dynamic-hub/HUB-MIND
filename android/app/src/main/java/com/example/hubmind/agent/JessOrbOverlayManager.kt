@@ -28,6 +28,7 @@ class JessOrbOverlayManager(context: Context) {
     private val appContext = context.applicationContext
     private val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val handler = Handler(Looper.getMainLooper())
+    private val positionPrefs = appContext.getSharedPreferences("hubmind_jess_overlay", Context.MODE_PRIVATE)
     private val orbView = JessOrbView(appContext) { onOverlayGesture(it) }
     private var attached = false
     private var overlayParams: WindowManager.LayoutParams? = null
@@ -56,8 +57,8 @@ class JessOrbOverlayManager(context: Context) {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                x = overlayParams?.x ?: dp(10)
-                y = overlayParams?.y ?: 0
+                x = positionPrefs.getInt("x", overlayParams?.x ?: dp(10))
+                y = positionPrefs.getInt("y", overlayParams?.y ?: 0)
                 title = "Hub-Mind Jess"
             }
             overlayParams = params
@@ -97,12 +98,15 @@ class JessOrbOverlayManager(context: Context) {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!hasMoved) {
-                        if (event.eventTime - event.downTime >= LONG_PRESS_MS) {
-                            onOverlayGesture("stop")
-                        } else {
-                            view.performClick()
-                        }
+                    if (hasMoved) {
+                        positionPrefs.edit()
+                            .putInt("x", params.x)
+                            .putInt("y", params.y)
+                            .apply()
+                    } else if (event.eventTime - event.downTime >= LONG_PRESS_MS) {
+                        onOverlayGesture("stop")
+                    } else {
+                        view.performClick()
                     }
                     hasMoved = false
                     true
