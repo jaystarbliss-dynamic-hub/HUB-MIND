@@ -169,8 +169,8 @@ test('Android updater only offers a published matching app with a valid SHA-256 
   assert.match(checker, /verifyApkChecksum/);
   assertAndroidManifestPublicationState(manifest);
   assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
-  assert.equal(manifest.versionCode, 252);
-  assert.equal(manifest.versionName, '2.5.2');
+  assert.equal(manifest.versionCode, 253);
+  assert.equal(manifest.versionName, '2.5.3');
 });
 
 test('Android CI fixes Metaspace and fingerprints the built APK instead of assuming a runner debug keystore', () => {
