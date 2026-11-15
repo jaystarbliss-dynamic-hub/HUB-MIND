@@ -197,9 +197,14 @@ export function CompanionPage() {
     // Tap / double-tap handling
     const now = Date.now();
     if (now - p.lastTap < 380) {
-      // Double tap: restore full workspace
+      // Double tap restores the Windows workspace, or ends the current Android
+      // Live session when this companion route is being used inside the APK.
       p.lastTap = 0;
-      void window.hubMindDesktop?.showMain();
+      if (window.hubMindDesktop?.showMain) {
+        void window.hubMindDesktop.showMain();
+      } else {
+        bridgeChannelRef.current?.postMessage({ type: 'stop' });
+      }
     } else {
       // Single tap: toggle listening or activate voice
       p.lastTap = now;
@@ -210,6 +215,11 @@ export function CompanionPage() {
   const handleOrbTap = useCallback(async () => {
     // Broadcast immediately to main workspace
     bridgeChannelRef.current?.postMessage({ type: 'toggle' });
+
+    // Android's /orb route and its authenticated workspace share this same
+    // React tree and LiveAudioClient. The BroadcastChannel message above is
+    // sufficient; do not create a desktop-only Firestore activation request.
+    if ((window as any).HubMindAndroid?.isAndroidApp?.() === true) return;
 
     if (owner && owner.leaseUntil > Date.now()) {
       if (owner.client === 'windows-desktop') {
