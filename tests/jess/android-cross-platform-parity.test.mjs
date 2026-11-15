@@ -133,3 +133,32 @@ test('Android Workspace auth identifies the native shell and its centered gate c
   assert.doesNotMatch(gate, /rounded-3xl border border-slate-800 bg-slate-900/);
   assert.match(auth, /window\.dispatchEvent\(new CustomEvent\('hubmind-native-token-error'/);
 });
+
+
+test('Android WebView auth failures with a stale cached user always release the gate for recovery', async () => {
+  const auth = await read('../../src/lib/auth.tsx');
+  const signInStart = auth.indexOf('void signInWithCredential(');
+  const catchStart = auth.indexOf('.catch((error) => {', signInStart);
+  const finallyStart = auth.indexOf('.finally(() => {', catchStart);
+  const catchBlock = auth.slice(catchStart, finallyStart);
+  const emptyTokenStart = auth.indexOf('if (!googleIdToken) {');
+  const emptyTokenEnd = auth.indexOf('\n      }', emptyTokenStart);
+  const emptyTokenBlock = auth.slice(emptyTokenStart, emptyTokenEnd);
+
+  assert.notEqual(signInStart, -1, 'native Google credential exchange must be present');
+  assert.match(catchBlock, /if \(!disposed\)/);
+  assert.match(catchBlock, /setUser\(null\)/);
+  assert.match(catchBlock, /setProfile\(null\)/);
+  assert.match(catchBlock, /hubmind-native-token-error/);
+  assert.match(catchBlock, /setLoading\(false\)/);
+  assert.doesNotMatch(catchBlock, /if \(!disposed && !auth\.currentUser\)/);
+  assert.match(emptyTokenBlock, /nativeAuthBootstrapPending\.current = false/);
+  assert.match(emptyTokenBlock, /setLoading\(false\)/);
+  assert.match(emptyTokenBlock, /hubmind-native-token-error/);
+
+  const tokenErrorStart = auth.indexOf('const onTokenError = (event: Event) => {');
+  const tokenErrorEnd = auth.indexOf('\n    };', tokenErrorStart);
+  const tokenErrorBlock = auth.slice(tokenErrorStart, tokenErrorEnd);
+  assert.match(tokenErrorBlock, /bridge\.getNativeUserId/);
+  assert.match(tokenErrorBlock, /auth\.currentUser\.uid === nativeUserId/);
+});
