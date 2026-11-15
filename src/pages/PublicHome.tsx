@@ -216,6 +216,7 @@ export function PublicHome() {
       /* handled by validation below */
     }
     id = id.trim();
+    if (/^HM-[A-Z0-9]{4}(?:-[A-Z0-9]{4}){2}$/i.test(id)) id = id.toUpperCase();
     if (!/^[A-Za-z0-9_-]{8,160}$/.test(id)) {
       setError(
         'That does not look like a valid Hub-Mind invitation. Use the full invitation link or its invitation ID.'
@@ -747,6 +748,12 @@ export function PublicHome() {
             <p className="hm-modal-footnote">
               Invitations expire after seven days and are tied to the invited Google account.
             </p>
+            <a
+              className="hm-text-link mt-4 inline-flex items-center justify-center"
+              href={`mailto:jstarblissstudios@gmail.com?subject=${encodeURIComponent('Hub-Mind invitation request')}&body=${encodeURIComponent('Hello Jaystarbliss Studios,\n\nI would like to request an invitation to Hub-Mind.\n\nName:\nGoogle account email:\nReason for requesting access:\n\nThank you.')}`}
+            >
+              Need an invitation? Request one by email
+            </a>
           </section>
         </div>
       )}
