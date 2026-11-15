@@ -24,7 +24,7 @@
 
 | Feature / Subsystem | Primary Implementation Files | Real Implementation Status | Operational Notes |
 | :--- | :--- | :--- | :--- |
-| **Authentication Flow** | `AuthScreen.kt`, `AuthViewModel.kt`, `AuthRepositoryImpl.kt` | **Implemented & Verified** | Email/Password & Google Sign-In with admin role checking for `johnrufai242@gmail.com` / `rufaijohnny@gmail.com`. |
+| **Authentication Flow** | `AuthScreen.kt`, `AuthViewModel.kt`, `AuthRepositoryImpl.kt` | **Implemented & Verified** | Google Sign-In only, automatic first-run account chooser, saved-session restoration, and admin role checking for `johnrufai242@gmail.com` / `rufaijohnny@gmail.com`. |
 | **Jess Assistant Chat UI** | `JessHomeScreen.kt`, `JessHomeViewModel.kt`, `ChatMessageItem` | **Implemented & Verified** | Threaded messages, target device chip, scenario chips, live input field, and tool badge renderings. |
 | **Jess Animated Orb** | `JessOrbView.kt` | **Implemented & Verified** | Procedural Canvas renderer reacting to `IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, and `ERROR`. |
 | **Accessibility Node Inspection** | `HubMindAccessibilityService.kt` | **Implemented (Needs Physical Phone)** | Dumps active window `AccessibilityNodeInfo` tree into `UiNodeInfo` models (bounds, view ID, text, clickable/editable flags). |

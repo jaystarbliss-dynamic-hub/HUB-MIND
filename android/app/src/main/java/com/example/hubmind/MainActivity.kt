@@ -1,6 +1,15 @@
 package com.example.hubmind
 
 import android.Manifest
+import android.app.Activity
+import android.webkit.WebView
+import androidx.lifecycle.lifecycleScope
+import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import org.json.JSONObject
+import kotlinx.coroutines.launch
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -49,11 +58,73 @@ class MainActivity : ComponentActivity() {
         ServiceLocator.permissionStatusRepository.refreshFromSystem()
     }
 
+    private var pendingWorkspaceWebView: WebView? = null
+    private var workspaceGoogleSignInInProgress = false
+
+    // Workspace recovery uses this Activity-owned launcher so a WebView can request
+    // the same native Google account picker as the first-run sign-in screen.
+    private val workspaceGoogleSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val targetWebView = pendingWorkspaceWebView
+        pendingWorkspaceWebView = null
+        workspaceGoogleSignInInProgress = false
+        if (targetWebView == null) return@registerForActivityResult
+
+        if (result.resultCode != Activity.RESULT_OK || result.data == null) {
+            dispatchWorkspaceAuthEvent(
+                targetWebView,
+                "hubmind-native-token-error",
+                "Google account selection was cancelled. Choose an account to continue."
+            )
+            return@registerForActivityResult
+        }
+
+        val idToken = runCatching {
+            GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                .getResult(ApiException::class.java)
+                ?.idToken
+                .orEmpty()
+        }.getOrElse { error ->
+            dispatchWorkspaceAuthEvent(
+                targetWebView,
+                "hubmind-native-token-error",
+                "Google Sign-In failed: ${error.message ?: "Please choose your account again."}"
+            )
+            return@registerForActivityResult
+        }
+
+        if (idToken.isBlank()) {
+            dispatchWorkspaceAuthEvent(
+                targetWebView,
+                "hubmind-native-token-error",
+                "Google did not return a secure sign-in token. Verify the Android OAuth configuration."
+            )
+            return@registerForActivityResult
+        }
+
+        lifecycleScope.launch {
+            NativeWebAuthTokenHolder.store(idToken)
+            ServiceLocator.authRepository.signInWithGoogle(idToken).fold(
+                onSuccess = {
+                    dispatchWorkspaceAuthEvent(targetWebView, "hubmind-native-token-ready")
+                },
+                onFailure = { error ->
+                    NativeWebAuthTokenHolder.clear()
+                    dispatchWorkspaceAuthEvent(
+                        targetWebView,
+                        "hubmind-native-token-error",
+                        error.message ?: "This Google account is not authorized for Hub-Mind."
+                    )
+                }
+            )
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ServiceLocator.initialize(applicationContext)
         enableEdgeToEdge()
-        requestEssentialRuntimePermissions()
 
         setContent {
             HubMindTheme {
@@ -65,6 +136,10 @@ class MainActivity : ComponentActivity() {
                     if (!isSessionReady) return@LaunchedEffect
                     if (!isSessionValid) {
                         HubMindAgentForegroundService.stopService(applicationContext)
+                    } else {
+                        // Keep first launch focused on Google account selection.
+                        // Ask for microphone/notification permissions only after auth succeeds.
+                        requestEssentialRuntimePermissions()
                     }
                 }
 
@@ -122,6 +197,7 @@ class MainActivity : ComponentActivity() {
                             // React/Firebase session and the same LiveAudioClient.
                             WorkspaceScreen(
                                 currentNativeTab = currentTab.name,
+                                onRequestGoogleSignIn = ::launchWorkspaceGoogleSignIn,
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .alpha(
@@ -171,6 +247,69 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun launchWorkspaceGoogleSignIn(webView: WebView) {
+        if (workspaceGoogleSignInInProgress) return
+        workspaceGoogleSignInInProgress = true
+        pendingWorkspaceWebView = webView
+
+        lifecycleScope.launch {
+            val config = ServiceLocator.backendClient.fetchAndValidateRuntimeConfig().getOrElse { error ->
+                pendingWorkspaceWebView = null
+                workspaceGoogleSignInInProgress = false
+                dispatchWorkspaceAuthEvent(
+                    webView,
+                    "hubmind-native-token-error",
+                    error.message ?: "Could not load Hub-Mind Google sign-in configuration."
+                )
+                return@launch
+            }
+
+            val webClientId = config.firebaseGoogleClientId.trim()
+            if (webClientId.isBlank()) {
+                pendingWorkspaceWebView = null
+                workspaceGoogleSignInInProgress = false
+                dispatchWorkspaceAuthEvent(
+                    webView,
+                    "hubmind-native-token-error",
+                    "Firebase Google OAuth Web Client ID is missing from /api/config."
+                )
+                return@launch
+            }
+
+            val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestEmail()
+                .requestIdToken(webClientId)
+                .build()
+
+            runCatching {
+                workspaceGoogleSignInLauncher.launch(
+                    GoogleSignIn.getClient(this@MainActivity, options).signInIntent
+                )
+            }.onFailure { error ->
+                pendingWorkspaceWebView = null
+                workspaceGoogleSignInInProgress = false
+                dispatchWorkspaceAuthEvent(
+                    webView,
+                    "hubmind-native-token-error",
+                    error.message ?: "Could not open the Google account chooser."
+                )
+            }
+        }
+    }
+
+    private fun dispatchWorkspaceAuthEvent(
+        webView: WebView,
+        eventName: String,
+        message: String? = null
+    ) {
+        if (eventName !in setOf("hubmind-native-token-ready", "hubmind-native-token-error")) return
+        val detail = message?.let {
+            "{detail:{message:${JSONObject.quote(it.take(500))}}}"
+        } ?: "{}"
+        val script = "window.dispatchEvent(new CustomEvent('$eventName',$detail));"
+        webView.post { webView.evaluateJavascript(script, null) }
     }
 
     override fun onResume() {

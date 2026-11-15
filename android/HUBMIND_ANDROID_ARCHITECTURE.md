@@ -14,7 +14,7 @@ This document establishes the architecture for the **native Android application*
 ## 2. Existing Hub-Mind System Inspection
 
 ### 2.1 Authentication & User Authorization
-- **Provider**: Firebase Authentication (Email/Password, Google OAuth).
+- **Provider**: Firebase Authentication (Google Sign-In only).
 - **Profile Store**: Firestore collection `users/{userId}`.
 - **Roles**: `admin`, `staff`.
 - **Status**: `active`, `training`, `suspended`, `inactive`. Access is restricted to `status == 'active'` (or bootstrap administrator emails `johnrufai242@gmail.com`, `rufaijohnny@gmail.com`).

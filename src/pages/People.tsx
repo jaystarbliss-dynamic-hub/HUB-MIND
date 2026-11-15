@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { User, UserConnection } from '../types';
 import { subscribeToUsers } from '../services/userService';
@@ -30,6 +31,7 @@ import { SendDirectInfoModal } from '../components/SendDirectInfoModal';
 
 export function People() {
   const { profile } = useAuth();
+  const location = useLocation();
   const [users, setUsers] = useState<User[]>([]);
   const [connections, setConnections] = useState<UserConnection[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,6 +42,14 @@ export function People() {
   const [sendToUser, setSendToUser] = useState<User | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'connections' | 'requests' | 'directory'>('connections');
+
+  // Allow voice navigation and deep links to open the requested Colleagues sub-tab.
+  useEffect(() => {
+    const tab = new URLSearchParams(location.search).get('tab');
+    if (tab === 'requests' || tab === 'directory' || tab === 'connections') {
+      setActiveTab(tab);
+    }
+  }, [location.search]);
 
   useEffect(() => {
     let unsubConn = () => {};

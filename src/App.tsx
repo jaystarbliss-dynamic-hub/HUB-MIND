@@ -11,6 +11,7 @@ import './pages/public-home.css';
 import { Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
 import { isJessInstalledApp } from './services/jessWakeListener';
 import { DesktopUpdatesModal } from './components/DesktopUpdatesModal';
+import { AndroidGoogleSignInGate } from './components/AndroidGoogleSignInGate';
 
 function safeLazy<T extends React.ComponentType<any>>(importer: () => Promise<{ [key: string]: any }>, namedExport?: string): React.LazyExoticComponent<T> {
   return lazy(async () => {
@@ -59,6 +60,7 @@ const CompanionPage = safeLazy(() => import('./pages/CompanionPage'), 'Companion
 const JessTranscriptOverlayPage = safeLazy(() => import('./pages/JessTranscriptOverlayPage'), 'JessTranscriptOverlayPage');
 const JessSettings = safeLazy(() => import('./pages/JessSettings'), 'JessSettings');
 const JessOrbPage = safeLazy(() => import('./pages/JessOrbPage'), 'JessOrbPage');
+const DeviceActivity = safeLazy(() => import('./pages/DeviceActivity'), 'DeviceActivity');
 
 const LoadingScreen = () => <div className="h-screen w-full flex items-center justify-center bg-slate-950 text-slate-400"><Loader2 className="w-8 h-8 animate-spin text-accent" /></div>;
 
@@ -80,30 +82,24 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, { error:
 }
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
-  const { user, profile, loading, nativeAuthError, retryNativeAuth } = useAuth();
-  if (loading) return <LoadingScreen />;
-  if (!user || !profile) {
-    const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
-    if (isAndroidApp && nativeAuthError) {
-      return (
-        <main className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6">
-          <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-7 text-center shadow-2xl">
-            <img src="/hub-mind%20logo.png" alt="Hub-Mind" className="mx-auto mb-5 h-16 w-16 object-contain" />
-            <h1 className="mb-2 text-xl font-bold text-white">Restoring your workspace</h1>
-            <p className="mb-5 text-sm leading-relaxed text-slate-400">{nativeAuthError}</p>
-            <button
-              type="button"
-              onClick={retryNativeAuth}
-              className="rounded-xl bg-teal-500 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-teal-400"
-            >
-              Retry secure session
-            </button>
-          </section>
-        </main>
-      );
-    }
-    return <Navigate to="/login" replace />;
+  const { user, profile, loading, nativeAuthError, authorizationError } = useAuth();
+  const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
+
+  // Android has one native Google identity. Never send its embedded WebView to
+  // the browser login form or expose a partially authenticated workspace shell.
+  if (isAndroidApp && (loading || !user || !profile)) {
+    return (
+      <AndroidGoogleSignInGate
+        checking={loading}
+        message={nativeAuthError || authorizationError}
+        title="Connect your Google account"
+        subtitle="Hub-Mind is checking the Google account already registered on this device."
+      />
+    );
   }
+
+  if (loading) return <LoadingScreen />;
+  if (!user || !profile) return <Navigate to="/login" replace />;
   if (profile.status !== 'active') return <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6"><div className="max-w-md text-center bg-slate-900 border border-slate-800 rounded-2xl p-8"><h1 className="text-xl font-bold text-white mb-2">Account access unavailable</h1><p className="text-sm text-slate-400">Your Hub-Mind account is not currently active. Please contact an administrator.</p></div></div>;
   if (allowedRoles && !allowedRoles.includes(profile.role)) return <div className="p-8 text-center text-red-400">Access Denied</div>;
   return <>{children}</>;
@@ -233,6 +229,7 @@ export default function App() {
           <Route path="meetings/:id" element={<MeetingDetail />} />
           <Route path="calendar" element={<Calendar />} />
           <Route path="colleagues" element={<Colleagues />} />
+          <Route path="device-activity" element={<DeviceActivity />} />
           <Route path="people" element={<Navigate to="/workspace/colleagues" replace />} />
           <Route path="documents" element={<Documents />} />
           <Route path="documents/:id" element={<DocumentEditor />} />

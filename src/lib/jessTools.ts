@@ -14,7 +14,7 @@ import {
 } from './googleCalendar';
 import { globalSearch } from './globalSearch';
 import { queueJessDocumentEdit } from './jessDocumentBridge';
-import { getLocalDocsMap, setLocalDocsMap, fetchDocumentVersionHistory } from './offlineSync';
+import { getLocalDocsMap, setLocalDocsMap, fetchDocumentVersionHistory, createNamedCheckpoint } from './offlineSync';
 import { jessBackgroundTasks } from '../services/jessBackgroundTasks';
 import { materializeRecurringMeetings } from './recurringMeetings';
 import { getCachedCollection } from '../services/jessWorkspaceCache';
@@ -253,7 +253,7 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
   { name: 'inspect_github_codebase', description: 'Inspect files and directories in the public Hub-Mind repository (Jaystarbliss-studios/HUB-MIND). Allows reading source code, package.json, documentation, Electron files, or listing directory contents. Use whenever asked about the codebase, files, or internal code structure.', parameters: object({ path: { type: 'string', description: 'File or directory path in the repository (e.g. "package.json", "electron/main.cjs", "README.md", "src/App.tsx")' }, branch: { type: 'string', description: 'Optional git branch (default: "main")' } }) },
   { name: 'open_visual_updates_panel', description: 'Open the visual Desktop Releases & Version History panel on screen for the user so they can visually view all releases, download desktop installers, and review changelogs.', parameters: object({}) },
   { name: 'list_paired_devices', description: 'List all paired and registered Hub-Mind devices on this user account (Android phones, Windows workstations, and web sessions) with online/offline status, battery, capabilities, and permission mode.', parameters: object({}) },
-  { name: 'control_android_device', description: 'Dispatch an authenticated native action to the user’s paired Android phone via the Hub-Mind cross-device control plane and await the verified result from the phone agent. Supported actions: LAUNCH_APP, OPEN_DEEP_LINK, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, CLIPBOARD_READ, CLIPBOARD_WRITE, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, SET_VOLUME, GET_DEVICE_STATUS, GET_INSTALLED_APPS.', parameters: object({ targetDeviceId: { type: 'string', description: 'Optional specific Android deviceId from list_paired_devices; defaults to the primary online Android device.' }, actionType: { type: 'string', enum: ['LAUNCH_APP', 'OPEN_DEEP_LINK', 'TAP', 'DOUBLE_TAP', 'LONG_PRESS', 'SWIPE', 'SCROLL', 'TYPE_TEXT', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS', 'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS', 'CLIPBOARD_READ', 'CLIPBOARD_WRITE', 'GET_SCREEN_HIERARCHY', 'CAPTURE_SCREEN', 'SET_VOLUME', 'GET_DEVICE_STATUS', 'GET_INSTALLED_APPS'] }, packageName: { type: 'string' }, appName: { type: 'string' }, uri: { type: 'string' }, text: { type: 'string' }, targetText: { type: 'string' }, viewId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, startX: { type: 'number' }, startY: { type: 'number' }, endX: { type: 'number' }, endY: { type: 'number' }, direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, level: { type: 'number' } }, ['actionType']) },
+  { name: 'control_android_device', description: 'Dispatch an authenticated native action to the user’s paired Android phone via the Hub-Mind cross-device control plane and await the verified result from the phone agent. Supported actions: LAUNCH_APP, OPEN_DEEP_LINK, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, CLIPBOARD_READ, CLIPBOARD_WRITE, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, SET_VOLUME, GET_DEVICE_STATUS, GET_INSTALLED_APPS, GET_APP_USAGE_STATS, OPEN_USAGE_ACCESS_SETTINGS. Usage statistics require the phone owner to enable Android Usage Access manually.', parameters: object({ targetDeviceId: { type: 'string', description: 'Optional specific Android deviceId from list_paired_devices; defaults to the primary online Android device.' }, actionType: { type: 'string', enum: ['LAUNCH_APP', 'OPEN_DEEP_LINK', 'TAP', 'DOUBLE_TAP', 'LONG_PRESS', 'SWIPE', 'SCROLL', 'TYPE_TEXT', 'NAVIGATE_BACK', 'GO_HOME', 'OPEN_RECENTS', 'OPEN_NOTIFICATIONS', 'OPEN_QUICK_SETTINGS', 'CLIPBOARD_READ', 'CLIPBOARD_WRITE', 'GET_SCREEN_HIERARCHY', 'CAPTURE_SCREEN', 'SET_VOLUME', 'GET_DEVICE_STATUS', 'GET_INSTALLED_APPS', 'GET_APP_USAGE_STATS', 'OPEN_USAGE_ACCESS_SETTINGS'] }, packageName: { type: 'string' }, appName: { type: 'string' }, uri: { type: 'string' }, text: { type: 'string' }, targetText: { type: 'string' }, viewId: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, startX: { type: 'number' }, startY: { type: 'number' }, endX: { type: 'number' }, endY: { type: 'number' }, direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] }, level: { type: 'number' }, days: { type: 'number', description: 'Usage look-back window in days, 1-30.' }, limit: { type: 'number', description: 'Maximum apps to return, 1-30.' } }, ['actionType']) },
   
   // Workspace Users & Directory
   { name: 'list_workspace_users', description: 'List and search colleagues, team members, and users in the Hub-Mind workspace to find usernames, roles, and contacts for sharing resources, assigning tasks, and sending schedules.', parameters: object({ query: { type: 'string', description: 'Optional search query by name, username, or email' }, limit: { type: 'number' } }) },
@@ -327,10 +327,16 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
     }, ['resourceType', 'resourceId']) 
   },
 
+  // Predictive planning, code assistance, and automated project documentation
+  { name: 'get_local_time_context', description: 'Read the actual local date, time, IANA time zone, UTC offset and locale of the device running Hub-Mind. Use this before interpreting relative dates, deadlines or schedules; never assume UTC when a local device time is available.', parameters: object({}) },
+  { name: 'get_predictive_tasking', description: 'Prioritize the signed-in user’s open tasks using actual deadlines, overdue state, priority and progress. Return a ranked next-action queue with concise reasons and prep suggestions. This is advisory: never create, assign or reschedule tasks without a separate user request.', parameters: object({ horizonDays: { type: 'number', description: 'Look-ahead window in days (1–30, default 14).' }, limit: { type: 'number', description: 'Maximum recommendations (1–20, default 10).' } }) },
+  { name: 'get_code_review_context', description: 'Load code from an accessible Hub-Mind document so Jess can act as an AI pair programmer. Return the source with line numbers, inferred language and review focus. The model should then provide concrete bug, security, performance, readability and test findings; do not claim to have run the code.', parameters: object({ documentId: { type: 'string', description: 'Document ID, or current document when omitted.' }, focus: { type: 'string', description: 'Optional review focus: bugs, security, performance, architecture, tests or general.' }, maxCharacters: { type: 'number', description: 'Maximum source characters (1,000–30,000; default 18,000).' } }) },
+  { name: 'generate_project_documentation', description: 'Generate or refresh a factual project documentation document from the project record and its linked tasks, meetings and accessible documents. Include generation time, sources, current status, completed/open work, deadlines and unresolved gaps. Provide projectId or projectName. Existing generated documentation can be refreshed by documentId. This tool never invents code changes or unrecorded project facts.', parameters: object({ projectId: { type: 'string' }, projectName: { type: 'string' }, documentId: { type: 'string', description: 'Optional existing generated project document to refresh.' }, title: { type: 'string', description: 'Optional documentation title.' } }) },
+
   // Tasks
   { name: 'list_tasks', description: 'List tasks visible to the signed-in user with status or priority filters.', parameters: object({ status: { type: 'string' }, priority: { type: 'string' }, limit: { type: 'number' } }) },
-  { name: 'create_task', description: 'Create a new task in Hub-Mind.', parameters: object({ title: { type: 'string' }, description: { type: 'string' }, priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low'] }, deadline: { type: 'string' }, assignedTo: { type: 'string' } }, ['title']) },
-  { name: 'update_task', description: 'Update an existing task.', parameters: object({ taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, priority: { type: 'string' }, status: { type: 'string' }, deadline: { type: 'string' }, assignedTo: { type: 'string' } }, ['taskId']) },
+  { name: 'create_task', description: 'Create a new task in Hub-Mind. Optionally link it to a project so it appears in predictive tasking and generated project documentation.', parameters: object({ title: { type: 'string' }, description: { type: 'string' }, priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low'] }, deadline: { type: 'string' }, assignedTo: { type: 'string' }, projectId: { type: 'string' } }, ['title']) },
+  { name: 'update_task', description: 'Update an existing task. Updating a project-linked task refreshes its generated project documentation when one exists.', parameters: object({ taskId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, priority: { type: 'string' }, status: { type: 'string' }, deadline: { type: 'string' }, assignedTo: { type: 'string' }, projectId: { type: 'string' } }, ['taskId']) },
   { name: 'delete_task', description: 'Delete a task from Hub-Mind. Opens the dashboard confirmation modal so the user has final confirmation.', parameters: object({ taskId: { type: 'string' }, confirmed: { type: 'boolean' } }, ['taskId']) },
   
   // Documents
@@ -461,7 +467,7 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
     description: 'Send one discrete, explicit user-requested action to the selected online Hub-Mind device (Android phone or Windows workstation). Use only when the user directly asked for the action in the current turn. Windows control requires Jess Full Control to be active on that laptop. Never repeat a command after a timeout or sent_unverified result; first check its status.',
     parameters: object({
       actionType: { type: 'string', enum: [
-        'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS',
+        'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP','GET_INSTALLED_APPS','GET_APP_USAGE_STATS','OPEN_USAGE_ACCESS_SETTINGS','CAPTURE_SCREEN','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD','NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS',
         'list_windows','manage_windows','control_mouse','drag_windows_mouse','type_windows_text','press_windows_keys','control_system_volume','control_screen_brightness','take_windows_screenshot','find_windows_ui_element','list_windows_ui_elements','invoke_windows_ui_element','set_windows_ui_value','read_windows_screen','open_local_windows_path','launch_windows_application','get_windows_time','get_windows_system_info','chrome_bridge_status','chrome_list_tabs','chrome_open_tab','chrome_close_tab','chrome_activate_tab','chrome_navigate_tab','chrome_reload_tab','chrome_read_page','chrome_find_element','chrome_click_element','chrome_fill_field','chrome_scroll','chrome_capture_screenshot','manage_windows_files','manage_windows_clipboard','control_windows_power','scan_windows_storage','clean_windows_storage_candidates','start_windows_auto_scroll','stop_windows_auto_scroll','show_hub_mind_workspace','jess_stop','desktop_run_readonly_command','desktop_open_website'
       ]},
       targetDeviceId: { type: 'string', description: 'Optional explicit registered device ID. Defaults to the device selected in Jess settings.' },
@@ -1255,7 +1261,21 @@ export async function executeJessTool(
         }
         if (!item) return { result: { success: false, error: 'I could not find that document among the documents you can access. Please check the title or your read permission.' } };
         try {
-          const versions = await fetchDocumentVersionHistory(item.id, { throwOnRemoteError: true });
+          let versions = await fetchDocumentVersionHistory(item.id, { throwOnRemoteError: true });
+          // Every document should have a meaningful initial revision, even when its
+          // body is intentionally empty. Preserve the current state as a baseline
+          // instead of reporting a misleading empty history.
+          if (!versions.length) {
+            await createNamedCheckpoint(
+              item.id,
+              'Initial revision baseline',
+              String(item.data.title || 'Untitled Document'),
+              String(item.data.content || ''),
+              String(user.displayName || user.name || user.username || 'Hub-Mind user'),
+              user.email
+            );
+            versions = await fetchDocumentVersionHistory(item.id, { throwOnRemoteError: true });
+          }
           const sorted = [...versions].sort((a: any, b: any) => new Date(b.createdAt || b.savedAt || 0).getTime() - new Date(a.createdAt || a.savedAt || 0).getTime()).slice(0, safeLimit(args.limit, 20));
           return { result: {
             success: true,
@@ -1271,7 +1291,7 @@ export async function executeJessTool(
               changeSummary: v.changeSummary || v.checkpointName || null,
               contentAvailable: typeof v.content === 'string' && v.content.length > 0,
             })),
-            message: sorted.length ? 'Retrieved the document revision history, including locally saved revisions where available.' : 'The history lookup completed successfully but no saved revisions were found. If you expected revisions, check whether this device has local versions or whether the user can read the document versions subcollection.',
+            message: sorted.length ? 'Retrieved the document revision history, including locally saved revisions where available.' : 'An initial revision baseline was created from the current document state because no earlier saved revisions were available.',
           } };
         } catch (error: any) {
           return { result: { success: false, error: 'I found the document but could not retrieve its revision history. This is a history-access or storage issue, not proof that the document has no revisions.', details: error?.message || String(error) } };
@@ -1860,6 +1880,241 @@ export async function executeJessTool(
         };
       }
 
+      case 'get_local_time_context': {
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hourCycle: 'h23',
+        }).formatToParts(now);
+        const part = (type: string) => parts.find(p => p.type === type)?.value || '';
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const offsetMinutes = -now.getTimezoneOffset();
+        const offset = (offsetMinutes < 0 ? '-' : '+') +
+          String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, '0') + ':' +
+          String(Math.abs(offsetMinutes) % 60).padStart(2, '0');
+        return { result: {
+          success: true,
+          localDate: `${part('year')}-${part('month')}-${part('day')}`,
+          localTime: `${part('hour')}:${part('minute')}:${part('second')}`,
+          localDateTime: `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${offset}`,
+          timeZone,
+          utcOffset: offset,
+          locale: Intl.DateTimeFormat().resolvedOptions().locale || 'unknown',
+          timestamp: now.toISOString(),
+          source: 'The device running Hub-Mind',
+        } };
+      }
+
+      case 'get_predictive_tasking': {
+        const horizonDays = Math.max(1, Math.min(30, Number(args.horizonDays) || 14));
+        const resultLimit = Math.max(1, Math.min(20, Number(args.limit) || 10));
+        const taskSnap = await getDocs(user.role === 'admin'
+          ? query(collection(db, 'tasks'), limit(300))
+          : query(collection(db, 'tasks'), where('assignedTo', '==', user.id), limit(300)));
+        const now = Date.now();
+        const horizonEnd = now + horizonDays * 24 * 60 * 60 * 1000;
+        const priorityWeight: Record<string, number> = { urgent: 100, high: 65, medium: 35, low: 10 };
+        const ranked = taskSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
+          .filter((task: any) => !['completed', 'cancelled', 'archived'].includes(String(task.status || '').toLowerCase()))
+          .map((task: any) => {
+            const rawDeadline = task.deadline || task.dueDate || task.dueAt || null;
+            const deadlineAt = rawDeadline ? new Date(rawDeadline).getTime() : NaN;
+            const validDeadline = Number.isFinite(deadlineAt);
+            const hoursUntil = validDeadline ? (deadlineAt - now) / 3_600_000 : null;
+            let score = priorityWeight[String(task.priority || 'medium').toLowerCase()] || 35;
+            const reasons: string[] = [];
+            if (validDeadline && deadlineAt < now) { score += 120; reasons.push('overdue'); }
+            else if (validDeadline && hoursUntil !== null && hoursUntil <= 24) { score += 85; reasons.push('due within 24 hours'); }
+            else if (validDeadline && hoursUntil !== null && hoursUntil <= 72) { score += 55; reasons.push('due within 3 days'); }
+            else if (validDeadline && deadlineAt <= horizonEnd) { score += 25; reasons.push('due within look-ahead window'); }
+            if (String(task.priority).toLowerCase() === 'urgent') reasons.push('urgent priority');
+            else if (String(task.priority).toLowerCase() === 'high') reasons.push('high priority');
+            if (String(task.status || '').toLowerCase().includes('progress')) { score += 8; reasons.push('already in progress'); }
+            if (!validDeadline) reasons.push('no deadline set');
+            return {
+              id: task.id,
+              title: String(task.title || 'Untitled task'),
+              status: task.status || 'assigned',
+              priority: task.priority || 'medium',
+              deadline: rawDeadline,
+              assignedTo: task.assignedTo || null,
+              score,
+              reasons,
+              recommendedNextStep: validDeadline && deadlineAt < now
+                ? 'Review the blocker and agree a revised delivery time.'
+                : validDeadline && hoursUntil !== null && hoursUntil <= 24
+                  ? 'Reserve a focused work block and confirm any dependencies.'
+                  : 'Check the next concrete milestone and prepare the required materials.',
+            };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, resultLimit);
+        return { result: {
+          success: true,
+          generatedAt: new Date(now).toISOString(),
+          horizonDays,
+          totalOpenTasks: ranked.length,
+          recommendations: ranked,
+          advisoryOnly: true,
+          message: ranked.length
+            ? 'Ranked open tasks by deadline pressure, priority and progress. These are suggestions only; no tasks were changed.'
+            : 'No open tasks were found in the accessible task list.',
+        } };
+      }
+
+      case 'get_code_review_context': {
+        const docId = String(args.documentId || context?.documentId || '').trim();
+        if (!docId) return { result: { success: false, error: 'Open a code document or provide its document ID first.' } };
+        const item = await readResource('documents', docId, user);
+        if (!item) return { result: { success: false, error: 'Code document not found or you do not have read access.' } };
+        const source = String(item.data.content || '');
+        const plain = source
+          .replace(/<pre[^>]*><code[^>]*>/gi, '\n')
+          .replace(/<\/code><\/pre>/gi, '\n')
+          .replace(/<\/(?:p|div|h[1-6]|li)>/gi, '\n')
+          .replace(/<[^>]+>/g, '')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+          .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+          .trim();
+        if (!plain) return { result: { success: false, error: 'The selected document is empty. Paste or save source code into it before requesting a review.' } };
+        const maxChars = Math.max(1000, Math.min(30000, Number(args.maxCharacters) || 18000));
+        const bounded = plain.slice(0, maxChars);
+        const title = String(item.data.title || 'Untitled code document');
+        const extension = title.includes('.') ? title.split('.').pop()?.toLowerCase() : '';
+        const languageByExt: Record<string, string> = {
+          ts: 'TypeScript', tsx: 'TypeScript React', js: 'JavaScript', jsx: 'JavaScript React',
+          py: 'Python', kt: 'Kotlin', java: 'Java', cs: 'C#', ps1: 'PowerShell',
+          html: 'HTML', css: 'CSS', sql: 'SQL', json: 'JSON', md: 'Markdown',
+        };
+        const lines = bounded.split('\n');
+        const numbered = lines.map((line, index) => `${String(index + 1).padStart(4, ' ')} | ${line}`).join('\n');
+        return { result: {
+          success: true,
+          documentId: item.id,
+          title,
+          language: languageByExt[extension || ''] || 'Unknown (infer from source)',
+          focus: String(args.focus || 'general'),
+          totalLines: plain.split('\n').length,
+          truncated: plain.length > maxChars,
+          sourceCode: numbered,
+          reviewInstructions: 'Review the supplied source. Prioritize reproducible defects and security issues; cite line numbers; distinguish confirmed problems from hypotheses; propose focused patches and tests. Do not claim code was executed.',
+        } };
+      }
+
+      case 'generate_project_documentation': {
+        const projectTerm = String(args.projectId || args.projectName || '').trim();
+        if (!projectTerm) return { result: { success: false, error: 'Provide a project ID or project name.' } };
+        let project = await readResource('projects', projectTerm, user);
+        if (!project) {
+          const projectSnap = await getDocs(query(collection(db, 'projects'), limit(200)));
+          const normalized = projectTerm.toLowerCase();
+          const candidates = projectSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
+            .filter((p: any) => String(p.name || p.title || '').toLowerCase() === normalized ||
+              String(p.name || p.title || '').toLowerCase().includes(normalized));
+          if (candidates.length > 1) return { result: { success: false, needsClarification: true, matches: candidates.slice(0, 8).map(p => ({ id: p.id, name: p.name || p.title })), message: 'Several projects match that name. Choose the correct project before generating documentation.' } };
+          if (candidates[0]) project = { id: candidates[0].id, data: candidates[0] };
+        }
+        if (!project) return { result: { success: false, error: 'Project not found or you do not have access to it.' } };
+
+        const sourceWarnings: string[] = [];
+        const loadLinked = async (collectionName: string) => {
+          try {
+            const snap = await getDocs(query(collection(db, collectionName), where('projectId', '==', project.id), limit(120)));
+            return snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+          } catch (error: any) {
+            sourceWarnings.push(`${collectionName}: ${error?.message || 'not accessible'}`);
+            return [];
+          }
+        };
+        const [tasks, meetings, accessibleDocs] = await Promise.all([
+          loadLinked('tasks'),
+          loadLinked('meetings'),
+          fetchAllDocumentsForUser(user).catch((error: any) => {
+            sourceWarnings.push(`documents: ${error?.message || 'not accessible'}`);
+            return [];
+          }),
+        ]);
+        const linkedDocs = accessibleDocs.filter((d: any) => d.projectId === project.id);
+        const projectData: any = project.data || {};
+        const projectName = String(projectData.name || projectData.title || 'Untitled project');
+        const openTasks = tasks.filter((t: any) => !['completed', 'cancelled'].includes(String(t.status || '').toLowerCase()));
+        const completedTasks = tasks.filter((t: any) => String(t.status || '').toLowerCase() === 'completed');
+        const fmtDate = (value: any) => {
+          if (!value) return 'Not recorded';
+          const date = new Date(value);
+          return Number.isFinite(date.getTime()) ? date.toISOString() : String(value);
+        };
+        const taskLines = tasks.length ? tasks.map((t: any) =>
+          `- [${String(t.status || 'unknown').toUpperCase()}] ${t.title || 'Untitled task'} | Priority: ${t.priority || 'medium'} | Deadline: ${fmtDate(t.deadline)} | Assignee: ${t.assignedTo || 'Unassigned'}`
+        ).join('\n') : '- No linked tasks were found in the accessible project task records.';
+        const meetingLines = meetings.length ? meetings.map((m: any) =>
+          `- ${m.title || m.subject || m.notesRaw?.slice(0, 90) || 'Meeting'} | Date: ${fmtDate(m.date || m.startAt || m.createdAt)} | Status: ${m.status || 'not recorded'}`
+        ).join('\n') : '- No linked meetings were found in the accessible project meeting records.';
+        const docLines = linkedDocs.length ? linkedDocs.map((d: any) =>
+          `- ${d.title || 'Untitled document'} | Category: ${d.category || 'not recorded'} | Updated: ${fmtDate(d.updatedAt)}`
+        ).join('\n') : '- No linked accessible documents were found.';
+        const generatedAt = new Date().toISOString();
+        const title = String(args.title || `${projectName} - Project Documentation`).slice(0, 180);
+        const markdown = [
+          `# ${projectName}`,
+          '',
+          '## Project Overview',
+          String(projectData.description || 'No project description has been recorded.'),
+          '',
+          `- **Project ID:** ${project.id}`,
+          `- **Status:** ${projectData.status || 'Not recorded'}`,
+          `- **Owner:** ${projectData.ownerName || projectData.ownerId || 'Not recorded'}`,
+          `- **Created:** ${fmtDate(projectData.createdAt)}`,
+          `- **Documentation generated:** ${generatedAt}`,
+          '',
+          '## Current Work',
+          `- **Open tasks:** ${openTasks.length}`,
+          `- **Completed tasks:** ${completedTasks.length}`,
+          '',
+          taskLines,
+          '',
+          '## Meetings and Milestones',
+          meetingLines,
+          '',
+          '## Linked Documents',
+          docLines,
+          '',
+          '## Risks and Gaps',
+          openTasks.filter((t: any) => t.deadline && new Date(t.deadline).getTime() < Date.now() && String(t.status || '').toLowerCase() !== 'completed')
+            .map((t: any) => `- Overdue task: ${t.title || t.id} (deadline ${fmtDate(t.deadline)})`).join('\n') || '- No overdue linked tasks were detected from the records that were available.',
+          sourceWarnings.length ? `\n## Source Access Warnings\n${sourceWarnings.map(x => `- ${x}`).join('\n')}` : '',
+          '',
+          '## Source and Accuracy Note',
+          'This document was assembled from records currently stored in Hub-Mind. It does not include unrecorded code changes, conversations or work performed outside the platform. Verify source warnings before treating the document as complete.',
+        ].filter(Boolean).join('\n');
+
+        const existingId = String(args.documentId || '').trim();
+        const saved = existingId
+          ? await executeJessTool('update_document', { documentId: existingId, title, content: markdown, mode: 'replace' }, user, onPreferredName, context)
+          : await executeJessTool('create_document', { title, content: markdown, projectId: project.id, category: 'documentation' }, user, onPreferredName, context);
+        if (!saved.result?.success) return { result: { success: false, error: saved.result?.error || 'Project documentation could not be saved.', details: saved.result } };
+        const documentId = saved.result.documentId;
+        if (documentId && !existingId) {
+          await updateDoc(doc(db, 'documents', documentId), { isAutoGeneratedProjectDoc: true, projectId: project.id });
+        }
+        return { result: {
+          success: true,
+          projectId: project.id,
+          projectName,
+          documentId: documentId || existingId,
+          title,
+          openTasks: openTasks.length,
+          completedTasks: completedTasks.length,
+          meetings: meetings.length,
+          linkedDocuments: linkedDocs.length,
+          sourceWarnings,
+          message: sourceWarnings.length
+            ? 'Project documentation was generated, but some linked sources could not be read. Review the Source Access Warnings section before treating it as complete.'
+            : 'Project documentation was generated from current Hub-Mind project records.',
+        }, actionPayload: saved.actionPayload };
+      }
+
       case 'list_tasks': {
         const snap = await getDocs(user.role === 'admin' ? query(collection(db, 'tasks'), limit(safeLimit(args.limit))) : query(collection(db, 'tasks'), where('assignedTo', '==', user.id), limit(safeLimit(args.limit))));
         return {
@@ -1885,12 +2140,22 @@ export async function executeJessTool(
           ownerId: user.id,
           visibility: 'workspace',
           deadline: args.deadline || '',
+          projectId: args.projectId || null,
           checklist: [],
           comments: [],
           createdAt: now,
           updatedAt: now,
         };
         const ref = await addDoc(collection(db, 'tasks'), data);
+        if (data.projectId) {
+          try {
+            const docs = await fetchAllDocumentsForUser(user);
+            const autoDoc = docs.find((d: any) => d.projectId === data.projectId && d.isAutoGeneratedProjectDoc === true);
+            if (autoDoc) await executeJessTool('generate_project_documentation', { projectId: data.projectId, documentId: autoDoc.id }, user, onPreferredName, context);
+          } catch (error) {
+            console.warn('[Jess] Automatic project documentation refresh after task creation failed:', error);
+          }
+        }
         return {
           result: { success: true, taskId: ref.id, task: { id: ref.id, ...data } },
           actionPayload: navigatePayload(`/tasks/${ref.id}`),
@@ -1901,12 +2166,25 @@ export async function executeJessTool(
         if (!(await canWrite('tasks', args.taskId, user))) {
           return { result: { success: false, error: 'You do not have permission to update this task.' } };
         }
+        const taskRef = doc(db, 'tasks', args.taskId);
+        const before = await getDoc(taskRef);
+        const previous: any = before.exists() ? before.data() : {};
         const patch: any = { updatedAt: new Date().toISOString() };
-        for (const key of ['title', 'description', 'priority', 'status', 'deadline', 'assignedTo']) {
+        for (const key of ['title', 'description', 'priority', 'status', 'deadline', 'assignedTo', 'projectId']) {
           if (args[key] !== undefined) patch[key] = args[key];
         }
-        await updateDoc(doc(db, 'tasks', args.taskId), patch);
-        return { result: { success: true, taskId: args.taskId, updated: patch } };
+        await updateDoc(taskRef, patch);
+        const projectId = String(patch.projectId || previous.projectId || '').trim();
+        if (projectId) {
+          try {
+            const docs = await fetchAllDocumentsForUser(user);
+            const autoDoc = docs.find((d: any) => d.projectId === projectId && d.isAutoGeneratedProjectDoc === true);
+            if (autoDoc) await executeJessTool('generate_project_documentation', { projectId, documentId: autoDoc.id }, user, onPreferredName, context);
+          } catch (error) {
+            console.warn('[Jess] Automatic project documentation refresh after task update failed:', error);
+          }
+        }
+        return { result: { success: true, taskId: args.taskId, updated: patch, projectDocumentationRefreshed: Boolean(projectId) } };
       }
 
       case 'delete_task': {
@@ -2124,6 +2402,15 @@ export async function executeJessTool(
           synced: true,
         };
         setLocalDocsMap(localDocs);
+        // Save version 1 immediately, including for intentionally blank documents.
+        await createNamedCheckpoint(
+          ref.id,
+          'Initial version',
+          rawTitle,
+          data.content,
+          String(user.displayName || user.name || user.username || 'Hub-Mind user'),
+          user.email
+        ).catch(error => console.warn('[Jess] Initial document checkpoint could not be saved:', error));
 
         if (args.content) {
           queueJessDocumentEdit({ documentId: ref.id, content: data.content, mode: 'replace' });
@@ -2170,6 +2457,14 @@ export async function executeJessTool(
         const snap = await getDoc(ref);
         const current: any = snap.exists() ? snap.data() : (getLocalDocsMap()[docId] || {});
         const now = new Date().toISOString();
+        await createNamedCheckpoint(
+          docId,
+          'Before Jess edit',
+          String(current.title || rawTitle || 'Untitled Document'),
+          String(current.content || ''),
+          String(user.displayName || user.name || user.username || 'Hub-Mind user'),
+          user.email
+        ).catch(error => console.warn('[Jess] Pre-edit document checkpoint could not be saved:', error));
         const patch: any = { updatedAt: now, lastEditedAt: now, lastSavedAt: now, version: Number(current.version || 1) + 1 };
         if (rawTitle !== undefined) patch.title = rawTitle;
         
@@ -3031,8 +3326,16 @@ export async function executeJessTool(
       case 'navigate_app': {
         let path = String(args.path || '').trim();
         const lower = path.toLowerCase().replace(/^\/+/, '').replace(/^workspace\//, '');
-        if (lower === 'people' || lower === 'colleagues' || lower === 'colleague' || lower === 'team' || lower === 'directory' || lower === 'members') {
-          path = '/workspace/colleagues';
+        if (['requests', 'connection requests', 'pending requests', 'colleagues/requests', 'people/requests'].includes(lower)) {
+          path = '/workspace/colleagues?tab=requests';
+        } else if (['directory', 'workspace directory', 'colleagues/directory', 'people/directory', 'members'].includes(lower)) {
+          path = '/workspace/colleagues?tab=directory';
+        } else if (['connections', 'colleagues', 'people', 'colleague', 'team'].includes(lower)) {
+          path = '/workspace/colleagues?tab=connections';
+        } else if (['inbox archive', 'archived inbox', 'processed inbox', 'inbox/processed', 'inbox/archive'].includes(lower)) {
+          path = '/workspace/inbox?tab=processed';
+        } else if (['inbox', 'inbox/unprocessed', 'unprocessed inbox', 'quick captures'].includes(lower)) {
+          path = '/workspace/inbox?tab=unprocessed';
         } else if (lower === 'today' || lower === 'dashboard' || lower === 'home' || lower === 'workspace') {
           path = '/workspace';
         } else if (path.startsWith('/workspace/')) {
@@ -3294,7 +3597,7 @@ export async function executeJessTool(
         const actionType = String(args?.actionType || '').trim();
         const androidActions = new Set([
           'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP',
-          'GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD',
+          'GET_INSTALLED_APPS','GET_APP_USAGE_STATS','OPEN_USAGE_ACCESS_SETTINGS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD',
           'NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'
         ]);
         const windowsActions = new Set([

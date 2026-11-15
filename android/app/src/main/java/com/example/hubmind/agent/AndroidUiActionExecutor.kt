@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.provider.Settings
 import kotlinx.coroutines.delay
 
 /**
@@ -478,6 +479,44 @@ class AndroidUiActionExecutor(private val context: Context) {
                     verified = true,
                     installedApps = apps,
                     outputText = "Found ${apps.size} launchable applications."
+                )
+            }
+
+            AndroidActionType.OPEN_USAGE_ACCESS_SETTINGS -> {
+                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val launched = runCatching {
+                    if (intent.resolveActivity(context.packageManager) == null) false
+                    else { context.startActivity(intent); true }
+                }.getOrDefault(false)
+                AndroidActionResult(
+                    commandId = command.commandId,
+                    actionType = command.actionType,
+                    success = launched,
+                    verified = launched,
+                    outputText = if (launched) "Opened Android Usage Access settings. Hub-Mind still needs to be enabled manually by the device owner." else null,
+                    error = if (!launched) "Android Usage Access settings could not be opened on this device." else null
+                )
+            }
+
+            AndroidActionType.GET_APP_USAGE_STATS -> {
+                val reader = AndroidUsageStatsReader(context)
+                val days = (command.parameters["days"] as? Number)?.toInt() ?: 7
+                val limit = (command.parameters["limit"] as? Number)?.toInt() ?: 15
+                val usage = reader.readRecentUsage(days, limit)
+                val summary = usage.records.joinToString("\\n") { record ->
+                    "${record.appName} (${record.packageName}): ${record.foregroundMinutes} foreground minutes; last used ${if (record.lastUsedAt > 0) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(record.lastUsedAt)) else "unknown"}"
+                }
+                AndroidActionResult(
+                    commandId = command.commandId,
+                    actionType = command.actionType,
+                    success = usage.success,
+                    verified = usage.success,
+                    outputText = if (usage.success) {
+                        "Android app usage for the last ${usage.days} day(s):\\n" + (summary.ifBlank { "No foreground app usage records were returned." })
+                    } else null,
+                    error = usage.error
                 )
             }
         }

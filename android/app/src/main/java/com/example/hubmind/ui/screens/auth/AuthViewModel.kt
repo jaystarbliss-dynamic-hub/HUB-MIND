@@ -31,6 +31,10 @@ class AuthViewModel(
         }
     }
 
+    fun beginGoogleSignIn() {
+        _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+    }
+
     fun signInWithGoogleIdToken(idToken: String) {
         if (idToken.isBlank()) {
             onGoogleSignInError("Google Sign-In did not return a valid ID token. Please try again.")

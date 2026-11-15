@@ -16,6 +16,7 @@ import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.agent.JessTranscriptOverlayManager
 import com.example.hubmind.agent.AndroidActionType
 import com.example.hubmind.agent.AndroidAppLauncher
+import com.example.hubmind.agent.AndroidUsageStatsReader
 import com.example.hubmind.agent.AndroidCommand
 import com.example.hubmind.agent.AndroidUiActionExecutor
 import com.example.hubmind.agent.HubMindAccessibilityService
@@ -1028,6 +1029,9 @@ class DeviceRegistryRepositoryImpl(
                 add(DeviceCapability.ANDROID_ACCESSIBILITY)
                 add(DeviceCapability.SCREEN_READING)
                 add(DeviceCapability.MOUSE_KEYBOARD_INPUT)
+            }
+            if (context?.let { AndroidUsageStatsReader(it).hasUsageAccess() } == true) {
+                add(DeviceCapability.APP_USAGE_STATS)
             }
         }
         return DeviceNode(

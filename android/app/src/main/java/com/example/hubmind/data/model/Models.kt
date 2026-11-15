@@ -39,7 +39,8 @@ enum class DeviceCapability {
     ANDROID_ACCESSIBILITY,
     TELEPHONY_SMS,
     CAMERA_CAPTURE,
-    NOTIFICATION_LISTENER
+    NOTIFICATION_LISTENER,
+    APP_USAGE_STATS
 }
 
 data class DeviceNode(

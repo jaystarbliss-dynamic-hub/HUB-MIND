@@ -137,34 +137,43 @@ fun AuthScreen(
                 }
             }
 
-            OutlinedButton(
-                onClick = {
-                    scope.launch {
-                        ServiceLocator.backendClient.fetchAndValidateRuntimeConfig().fold(
-                            onSuccess = { cfg ->
-                                val webClientId = cfg.firebaseGoogleClientId
-                                if (webClientId.isBlank()) {
-                                    viewModel.onGoogleSignInError(
-                                        "Firebase Google OAuth Web Client ID is missing from /api/config."
-                                    )
-                                } else {
-                                    val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                                        .requestEmail()
-                                        .requestIdToken(webClientId)
-                                        .build()
-                                    googleSignInLauncher.launch(
-                                        GoogleSignIn.getClient(context, options).signInIntent
-                                    )
-                                }
-                            },
-                            onFailure = { error ->
-                                viewModel.onGoogleSignInError(
-                                    error.message ?: "Could not load Hub-Mind Firebase configuration."
-                                )
-                            }
+            val launchGoogleAccountPicker: () -> Unit = {
+        scope.launch {
+            viewModel.beginGoogleSignIn()
+            ServiceLocator.backendClient.fetchAndValidateRuntimeConfig().fold(
+                onSuccess = { cfg ->
+                    val webClientId = cfg.firebaseGoogleClientId.trim()
+                    if (webClientId.isBlank()) {
+                        viewModel.onGoogleSignInError(
+                            "Firebase Google OAuth Web Client ID is missing from /api/config."
+                        )
+                    } else {
+                        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                            .requestEmail()
+                            .requestIdToken(webClientId)
+                            .build()
+                        googleSignInLauncher.launch(
+                            GoogleSignIn.getClient(context, options).signInIntent
                         )
                     }
                 },
+                onFailure = { error ->
+                    viewModel.onGoogleSignInError(
+                        error.message ?: "Could not load Hub-Mind Firebase configuration."
+                    )
+                }
+            )
+        }
+    }
+
+    // First launch opens Android's native Google account chooser automatically.
+    // Returning users normally bypass this screen because Firebase restores the session.
+    LaunchedEffect(Unit) {
+        launchGoogleAccountPicker()
+    }
+
+    OutlinedButton(
+                onClick = launchGoogleAccountPicker,
                 enabled = !state.isLoading,
                 modifier = Modifier.fillMaxWidth().height(52.dp).testTag("google_sign_in_button"),
                 shape = RoundedCornerShape(12.dp),

@@ -5,9 +5,10 @@ export const initGoogleApi = async () => {
 };
 
 export const getGoogleToken = async (): Promise<string> => {
-  const cached = getCachedCalendarToken();
+  const requiredScopes = [...CALENDAR_SCOPES, ...GMAIL_SCOPES];
+  const cached = getCachedCalendarToken(requiredScopes);
   if (cached) return cached;
-  return requestGoogleAccessToken([...CALENDAR_SCOPES, ...GMAIL_SCOPES]);
+  return requestGoogleAccessToken(requiredScopes);
 };
 
 export const getCalendarEvents = async (timeMin: string, timeMax: string) => {
@@ -34,7 +35,15 @@ export const sendEmail = async (to: string, subject: string, body: string) => {
     },
     body: JSON.stringify({ raw: encodedMessage })
   });
-  if (!res.ok) throw new Error("Failed to send email");
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    const apiMessage = errorData?.error?.message || errorData?.error_description || errorData?.error || '';
+    if (res.status === 403) {
+      const detail = apiMessage ? 'Google denied Gmail send permission: ' + apiMessage : 'Google denied Gmail send permission.';
+      throw new Error(detail + ' Reconnect the Google account and approve Gmail send access.');
+    }
+    throw new Error(apiMessage || ('Gmail send failed with HTTP ' + res.status + '.'));
+  }
   return res.json();
 };
 

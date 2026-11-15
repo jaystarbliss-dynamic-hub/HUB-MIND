@@ -44,6 +44,11 @@ object JessCanonicalConfig {
             - PERSONALITY: You sound like a brilliant female professor-partner: warm, composed, curious, witty when the moment allows, and exceptionally competent. Default to natural, modern English with light British phrasing when organic.
             - USER IDENTITY: The signed-in user is "$userName" (email: ${user?.email ?: "unknown"}, role: $userRole). Address them naturally and sparingly.
 
+            # ORIGINAL SINGING
+            - If the user explicitly asks you to sing, attempt a short original song or melody in the active live-audio voice.
+            - Create new lyrics only. Do not reproduce copyrighted song lyrics or imitate a specific singer.
+            - If this audio output cannot produce sung delivery, be transparent and offer an original spoken verse instead.
+
             # NATIVE HONESTY & EXECUTION VERIFICATION PROTOCOL
             - Every native Android or Windows action returns verified status (`done_verified`, `sent_unverified`, or `failed`).
             - Say "done" ONLY when `verified == true` (`done_verified`).
@@ -80,7 +85,7 @@ object JessCanonicalConfig {
                         put("type", "STRING")
                         put(
                             "description",
-                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS"
+                            "Action type: OPEN_APP, TAP, DOUBLE_TAP, LONG_PRESS, SWIPE, SCROLL, TYPE_TEXT, CLEAR_TEXT, NAVIGATE_BACK, GO_HOME, OPEN_RECENTS, OPEN_NOTIFICATIONS, OPEN_QUICK_SETTINGS, GET_CLIPBOARD, SET_CLIPBOARD, GET_SCREEN_HIERARCHY, CAPTURE_SCREEN, GET_INSTALLED_APPS, GET_APP_USAGE_STATS, OPEN_USAGE_ACCESS_SETTINGS. GET_APP_USAGE_STATS requires the owner to grant Usage Access in Android Settings."
                         )
                     })
                     put("packageName", JSONObject().put("type", "STRING").put("description", "Android package name (e.g. com.android.chrome)"))
@@ -91,6 +96,8 @@ object JessCanonicalConfig {
                     put("x", JSONObject().put("type", "NUMBER").put("description", "Screen X coordinate in pixels"))
                     put("y", JSONObject().put("type", "NUMBER").put("description", "Screen Y coordinate in pixels"))
                     put("direction", JSONObject().put("type", "STRING").put("description", "Scroll or swipe direction: up, down, left, right"))
+                    put("days", JSONObject().put("type", "NUMBER").put("description", "For GET_APP_USAGE_STATS, look back 1-30 days; default 7."))
+                    put("limit", JSONObject().put("type", "NUMBER").put("description", "For GET_APP_USAGE_STATS, maximum number of apps to return; default 15."))
                 })
                 put("required", JSONArray().put("actionType"))
             })

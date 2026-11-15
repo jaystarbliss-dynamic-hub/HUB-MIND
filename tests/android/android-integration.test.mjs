@@ -20,8 +20,8 @@ const assertAndroidManifestPublicationState = (manifest) => {
 test('Android Gradle configuration enforces canonical applicationId, version 2.5.2 (252), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
-  assert.match(buildGradle, /versionCode\s*=\s*252/);
-  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.2"/);
+  assert.match(buildGradle, /versionCode\s*=\s*253/);
+  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.3"/);
   assert.match(buildGradle, /if\s*\(hasDedicatedReleaseKeystore\)\s*\{\s*signingConfig\s*=\s*signingConfigs\.getByName\("release"\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.auth\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.firestore\)/);
@@ -169,8 +169,8 @@ test('Android updater only offers a published matching app with a valid SHA-256 
   assert.match(checker, /verifyApkChecksum/);
   assertAndroidManifestPublicationState(manifest);
   assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
-  assert.equal(manifest.versionCode, 251);
-  assert.equal(manifest.versionName, '2.5.1');
+  assert.equal(manifest.versionCode, 252);
+  assert.equal(manifest.versionName, '2.5.2');
 });
 
 test('Android CI fixes Metaspace and fingerprints the built APK instead of assuming a runner debug keystore', () => {
@@ -389,8 +389,8 @@ test('Android releases have human-readable version and channel labels on homepag
   const modal = read('src/components/DesktopUpdatesModal.tsx');
   const gradle = read('android/app/build.gradle.kts');
 
-  assert.match(gradle, /versionCode\s*=\s*252/);
-  assert.match(gradle, /versionName\s*=\s*"2\.5\.2"/);
+  assert.match(gradle, /versionCode\s*=\s*253/);
+  assert.match(gradle, /versionName\s*=\s*"2\.5\.3"/);
   assert.match(naming, /OFFICIAL RELEASE/);
   assert.match(naming, /TEST BUILD · DEBUG SIGNED/);
   assert.match(naming, /compareAndroidReleaseVersions/);

@@ -162,16 +162,44 @@ async function dispatch(message) {
       const tab = await tabById(a.tabId);
       const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: ({ selector, value }) => {
         const el = document.querySelector(selector);
-        if (!el || !('value' in el) || el.disabled) return { filled: false, error: 'Field was not found or is disabled.' };
+        if (!el || el.disabled) return { filled: false, error: 'Field was not found or is disabled.' };
         const type = String(el.type || '').toLowerCase();
-        const label = [el.getAttribute('aria-label'), el.getAttribute('autocomplete'), el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('placeholder')].filter(Boolean).join(' ').toLowerCase();
+        const label = [el.getAttribute('aria-label'), el.getAttribute('autocomplete'), el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('placeholder'), el.getAttribute('data-testid')].filter(Boolean).join(' ').toLowerCase();
         if (type === 'password' || /password|credit.?card|card.?number|cvv|cvc|security.?code|one.?time.?code|otp|payment/.test(label)) {
           return { filled: false, error: 'Jess is blocked from filling password, payment, card, security-code or one-time-code fields.' };
         }
+
+        // Support document editors, chat composers and other contenteditable
+        // fields in addition to normal form controls. Prefer the browser edit
+        // command so React/ProseMirror can process an actual editing event.
+        if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
+          el.focus();
+          let inserted = false;
+          try {
+            const selection = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+            inserted = document.execCommand('insertText', false, value);
+          } catch {}
+          if (!inserted) {
+            el.textContent = value;
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+          }
+          const actual = String(el.textContent || '').trim();
+          const expected = String(value || '').trim();
+          return { filled: actual === expected, value: actual.slice(0, 500), tag: el.tagName, contentEditable: true };
+        }
+
+        if (!('value' in el)) return { filled: false, error: 'The selected element is not an editable input, textarea, select, or contenteditable field.' };
         const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
         const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-        setter?.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
-        return { filled: el.value === value, value: String(el.value).slice(0, 500), tag: el.tagName };
+        setter?.call(el, value);
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return { filled: el.value === value, value: String(el.value).slice(0, 500), tag: el.tagName, contentEditable: false };
       }, args: [{ selector: String(a.selector || '').slice(0, 500), value: String(a.value || '').slice(0, 10000) }] });
       return { ok: !!result?.result?.filled, verified: !!result?.result?.filled, evidence: { tabId: tab.id, ...result?.result } };
     }

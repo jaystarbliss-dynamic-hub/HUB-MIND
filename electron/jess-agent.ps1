@@ -552,7 +552,20 @@ function Invoke-Action($q){
     return @{ok=$true;verified=$false;evidence=@{uri=$name;scheme=($name -split ':',2)[0];note='URI handler invoked; verify the opened app or page with list_windows or a screenshot'}}
    }
    $apps=@(Get-StartApps -ErrorAction SilentlyContinue)
-   $app=$apps|Where-Object{[string]::Equals($_.Name,$name,[StringComparison]::OrdinalIgnoreCase)-or[string]::Equals($_.AppID,$name,[StringComparison]::OrdinalIgnoreCase)}|Select-Object -First 1
+   $app=$null
+   # Normalize common spoken Microsoft Teams names to the installed Start Menu app.
+   if($name -match '^(?i:teams|microsoft teams|microsoft teams for work|teams work or school)$'){
+    $teamMatches=@($apps|Where-Object{([string]$_.Name -match '(?i)teams')-or([string]$_.AppID -match '(?i)teams')})
+    $preferred=@($teamMatches|Where-Object{[string]$_.Name -match '^(?i:Microsoft Teams|Teams)$'})
+    if($preferred.Count -eq 1){$app=$preferred[0]}
+    elseif($preferred.Count -gt 1){
+     $workSchool=@($preferred|Where-Object{[string]$_.Name -match '(?i)work or school'})
+     if($workSchool.Count -eq 1){$app=$workSchool[0]}
+    }
+    if(!$app -and $teamMatches.Count -eq 1){$app=$teamMatches[0]}
+    if(!$app -and $teamMatches.Count -gt 1){throw ('More than one Teams app is installed. Choose the exact app name: '+(($teamMatches|ForEach-Object{$_.Name+' ['+$_.AppID+']'}) -join '; '))}
+   }
+   if(!$app){$app=$apps|Where-Object{[string]::Equals($_.Name,$name,[StringComparison]::OrdinalIgnoreCase)-or[string]::Equals($_.AppID,$name,[StringComparison]::OrdinalIgnoreCase)}|Select-Object -First 1}
    if(!$app){
     $resolvedMatches=@($apps|Where-Object{$_.Name.IndexOf($name,[StringComparison]::OrdinalIgnoreCase)-ge 0-or$_.AppID.IndexOf($name,[StringComparison]::OrdinalIgnoreCase)-ge 0})
     if($resolvedMatches.Count -eq 1){$app=$resolvedMatches[0]}elseif($resolvedMatches.Count -gt 1){throw ('Application name is ambiguous. Use an exact Start Menu name or AppUserModelID. Candidates: '+(($resolvedMatches|Select-Object -First 8|ForEach-Object{$_.Name+' ['+$_.AppID+']'}) -join '; '))}
@@ -568,7 +581,7 @@ function Invoke-Action($q){
    $appPath=$null
    foreach($root in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths','HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths')){
     foreach($candidate in @($name,$leaf)){
-     try{$key=Get-ItemProperty -LiteralPath (Join-Path $root $candidate) -ErrorAction Stop;$raw=[string]$key.'(default)';if($raw -match '^\"([^\"]+)\"'){$raw=$resolvedMatches[1]}else{$raw=$raw.Trim()};if($raw -and (Test-Path -LiteralPath $raw -PathType Leaf)){$appPath=$raw;break}}catch{}
+     try{$key=Get-ItemProperty -LiteralPath (Join-Path $root $candidate) -ErrorAction Stop;$raw=[string]$key.'(default)';if($raw -match '^\"([^\"]+)\"'){$raw=$Matches[1]}else{$raw=$raw.Trim()};if($raw -and (Test-Path -LiteralPath $raw -PathType Leaf)){$appPath=$raw;break}}catch{}
     }
     if($appPath){break}
    }

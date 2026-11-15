@@ -26,7 +26,9 @@ enum class AndroidActionType {
     OPEN_NOTIFICATIONS,
     OPEN_QUICK_SETTINGS,
     SET_VOLUME,
-    GET_DEVICE_STATUS
+    GET_DEVICE_STATUS,
+    GET_APP_USAGE_STATS,
+    OPEN_USAGE_ACCESS_SETTINGS
 }
 
 data class AndroidCommand(

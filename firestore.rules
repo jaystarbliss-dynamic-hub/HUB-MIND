@@ -85,7 +85,10 @@ service cloud.firestore {
           && request.resource.data.sourceDeviceId == resource.data.sourceDeviceId
           && request.resource.data.targetDeviceId == resource.data.targetDeviceId
           && request.resource.data.actionType == resource.data.actionType
-          && request.resource.data.lifecycleState in ['DISPATCHED', 'ACCEPTED', 'EXECUTING', 'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'];
+          && request.resource.data.lifecycleState in ['DISPATCHED', 'ACCEPTED', 'EXECUTING', 'COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT']
+          && (!('resultScreenshotBase64' in request.resource.data)
+            || (request.resource.data.resultScreenshotBase64 is string
+              && request.resource.data.resultScreenshotBase64.size() <= 850000));
         allow delete: if (self(userId) && member()) || admin();
       }
     }
