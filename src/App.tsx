@@ -1,5 +1,5 @@
 import React, { Component, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth';
 import { LoadingProvider } from './lib/loadingContext';
 import { Layout } from './components/Layout';
@@ -129,10 +129,8 @@ function AuthenticatedAssistantWidgets() {
   // shell is allowed to mount Jess on / and /login once an authenticated profile
   // is available, because that is where a desktop click may arrive after launch.
   const desktopOverlayRoute = ['/companion', '/companion-transcript', '/orb'].includes(location.pathname);
-  const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
-  const androidJessTab = isAndroidApp && location.pathname === '/orb';
   const publicOrLoginRoute = location.pathname === '/' || location.pathname === '/login';
-  if ((desktopOverlayRoute && !androidJessTab) || (publicOrLoginRoute && !isDesktopShell)) return null;
+  if (desktopOverlayRoute || (publicOrLoginRoute && !isDesktopShell)) return null;
   if (!user || !profile || profile.status !== 'active') return null;
   return <><JessDocumentBridge /><JessFloatingAssistant /></>;
 }
@@ -146,16 +144,14 @@ function WorkspaceRoutes() {
  * inside the one persistent WebView, preserving the authenticated React tree,
  * the floating Jess instance and its existing Gemini Live session.
  */
+/**
+ * The Android Jess tab is a full-screen overlay on the current workspace route.
+ * The underlying page stays mounted and remains the context Jess can inspect or
+ * operate. CompanionPage and JessFloatingAssistant share one React tree,
+ * Firebase identity and LiveAudioClient.
+ */
 function AndroidNativeTabNavigationBridge() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const lastWorkspacePathRef = React.useRef('/workspace');
-
-  React.useEffect(() => {
-    if (location.pathname !== '/orb' && location.pathname !== '/login' && location.pathname !== '/') {
-      lastWorkspacePathRef.current = location.pathname + location.search + location.hash;
-    }
-  }, [location.pathname, location.search, location.hash]);
+  const [jessOpen, setJessOpen] = React.useState(false);
 
   React.useEffect(() => {
     const bridge = (window as any).HubMindAndroid;
@@ -166,30 +162,32 @@ function AndroidNativeTabNavigationBridge() {
       let storedTab = '';
       try { storedTab = localStorage.getItem('hubmind.android.nativeTab') || ''; } catch {}
       const tab = detailTab || storedTab;
-
-      if (tab === 'JESS') {
-        if (location.pathname !== '/orb') {
-          if (location.pathname !== '/' && location.pathname !== '/login') {
-            lastWorkspacePathRef.current = location.pathname + location.search + location.hash;
-          }
-          navigate('/orb', { replace: true });
-        }
-        return;
-      }
-
-      if (tab && tab !== 'JESS' && location.pathname === '/orb') {
-        navigate(lastWorkspacePathRef.current || '/workspace', { replace: true });
-      }
+      const open = tab === 'JESS';
+      setJessOpen(open);
+      window.dispatchEvent(new CustomEvent('hubmind-android-jess-tab-state', {
+        detail: { open },
+      }));
     };
 
     window.addEventListener('hubmind-android-tab-change', handleTabChange);
-    // Recover the native tab selection if React mounted after the initial WebView
-    // page-load event was dispatched.
     handleTabChange(new Event('hubmind-android-tab-change'));
     return () => window.removeEventListener('hubmind-android-tab-change', handleTabChange);
-  }, [navigate, location.pathname, location.search, location.hash]);
+  }, []);
 
-  return null;
+  if (!jessOpen) return null;
+  return (
+    <div
+      data-hubmind-android-jess-tab="true"
+      className="fixed inset-0 z-[9997] flex items-center justify-center overflow-hidden bg-slate-950/96"
+      aria-label="Jess assistant tab"
+    >
+      <Suspense fallback={<LoadingScreen />}>
+        <ProtectedRoute>
+          <CompanionPage />
+        </ProtectedRoute>
+      </Suspense>
+    </div>
+  );
 }
 
 export default function App() {
