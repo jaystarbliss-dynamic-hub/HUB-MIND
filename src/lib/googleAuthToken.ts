@@ -30,7 +30,7 @@ function normalizeScopeList(value?: string | string[]): string {
 
 function hasRequiredScopes(grantedValue: string, requiredScopes: string[]): boolean {
   if (!requiredScopes.length) return true;
-  const granted = new Set(String(grantedValue || '').split(/\\s+/).filter(Boolean));
+  const granted = new Set(String(grantedValue || '').split(/\s+/).filter(Boolean));
   return requiredScopes.every(scope => granted.has(scope));
 }
 
