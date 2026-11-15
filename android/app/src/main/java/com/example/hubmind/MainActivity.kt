@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import com.example.R
 import androidx.compose.ui.Modifier
 import com.example.hubmind.di.ServiceLocator
@@ -32,8 +33,6 @@ import com.example.hubmind.ui.screens.auth.AuthScreen
 import com.example.hubmind.ui.screens.auth.AuthViewModel
 import com.example.hubmind.ui.screens.devices.DevicesScreen
 import com.example.hubmind.ui.screens.devices.DevicesViewModel
-import com.example.hubmind.ui.screens.home.JessHomeScreen
-import com.example.hubmind.ui.screens.home.JessHomeViewModel
 import com.example.hubmind.ui.screens.settings.SettingsScreen
 import com.example.hubmind.ui.screens.settings.SettingsViewModel
 import com.example.hubmind.ui.screens.workspace.WorkspaceScreen
@@ -109,20 +108,23 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxSize()
                                 .padding(innerPadding)
                         ) {
+                            // Keep one authenticated WebView mounted for the lifetime of the
+                            // signed-in shell. Workspace and Jess are two views of the same
+                            // React/Firebase session and the same LiveAudioClient.
+                            WorkspaceScreen(
+                                currentNativeTab = currentTab.name,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .alpha(
+                                        if (currentTab == HubMindNavDestination.WORKSPACE ||
+                                            currentTab == HubMindNavDestination.JESS
+                                        ) 1f else 0f
+                                    )
+                            )
+
                             when (currentTab) {
-                                HubMindNavDestination.JESS -> {
-                                    val jessViewModel = remember {
-                                        JessHomeViewModel(
-                                            jessRepository = ServiceLocator.jessRepository,
-                                            conversationRepository = ServiceLocator.conversationRepository,
-                                            deviceRegistryRepository = ServiceLocator.deviceRegistryRepository
-                                        )
-                                    }
-                                    JessHomeScreen(viewModel = jessViewModel)
-                                }
-                                HubMindNavDestination.WORKSPACE -> {
-                                    WorkspaceScreen(modifier = Modifier.fillMaxSize())
-                                }
+                                HubMindNavDestination.JESS,
+                                HubMindNavDestination.WORKSPACE -> Unit
                                 HubMindNavDestination.DEVICES -> {
                                     val devicesViewModel = remember {
                                         DevicesViewModel(
