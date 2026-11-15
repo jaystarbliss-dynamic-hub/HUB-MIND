@@ -45,6 +45,7 @@ private const val HUB_MIND_WORKSPACE_HOST = "hub-mind.netlify.app"
 @Composable
 fun WorkspaceScreen(
     currentNativeTab: String = "WORKSPACE",
+    onRequestGoogleSignIn: (WebView) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -87,7 +88,10 @@ fun WorkspaceScreen(
                 }
             }
 
-            addJavascriptInterface(HubMindAndroidAuthBridge(context, this), "HubMindAndroid")
+            addJavascriptInterface(
+                HubMindAndroidAuthBridge(context, this, onRequestGoogleSignIn),
+                "HubMindAndroid"
+            )
             addJavascriptInterface(androidDeviceBridge, "HubMindNative")
             androidDeviceBridge.attach(this)
 
@@ -181,7 +185,8 @@ private fun isTrustedWorkspaceUrl(uri: Uri): Boolean {
 
 private class HubMindAndroidAuthBridge(
     private val context: Context,
-    private val webView: WebView
+    private val webView: WebView,
+    private val onRequestInteractiveGoogleSignIn: (WebView) -> Unit
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -223,22 +228,39 @@ private class HubMindAndroidAuthBridge(
                     .addOnSuccessListener { account ->
                         val token = account?.idToken.orEmpty()
                         if (token.isBlank()) {
-                            dispatchAuthBridgeEvent("hubmind-native-token-error", "The saved Google account did not return a workspace token.")
+                            launchInteractiveGoogleSignIn()
                         } else {
                             NativeWebAuthTokenHolder.store(token)
                             dispatchAuthBridgeEvent("hubmind-native-token-ready")
                         }
                     }
-                    .addOnFailureListener { error ->
-                        dispatchAuthBridgeEvent(
-                            "hubmind-native-token-error",
-                            error.message ?: "The saved Google account could not be restored automatically."
-                        )
+                    .addOnFailureListener {
+                        // The cached Google consent may be missing even while the
+                        // native Firebase session is valid. Fall back to the actual
+                        // Android account picker instead of leaving Workspace stuck.
+                        launchInteractiveGoogleSignIn()
                     }
+            }.onFailure {
+                launchInteractiveGoogleSignIn()
+            }
+        }
+    }
+
+    /** Open the Android-native Google account chooser from a WebView recovery screen. */
+    @JavascriptInterface
+    fun startGoogleSignIn() {
+        if (!isWorkspaceAuthRoute()) return
+        launchInteractiveGoogleSignIn()
+    }
+
+    private fun launchInteractiveGoogleSignIn() {
+        webView.post {
+            runCatching {
+                onRequestInteractiveGoogleSignIn(webView)
             }.onFailure { error ->
                 dispatchAuthBridgeEvent(
                     "hubmind-native-token-error",
-                    error.message ?: "Could not restore your existing Google sign-in."
+                    error.message ?: "Could not open the Google account chooser."
                 )
             }
         }
