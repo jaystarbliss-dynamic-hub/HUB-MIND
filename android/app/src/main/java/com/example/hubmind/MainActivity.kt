@@ -125,7 +125,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         ServiceLocator.initialize(applicationContext)
         enableEdgeToEdge()
-        requestEssentialRuntimePermissions()
 
         setContent {
             HubMindTheme {
@@ -137,6 +136,10 @@ class MainActivity : ComponentActivity() {
                     if (!isSessionReady) return@LaunchedEffect
                     if (!isSessionValid) {
                         HubMindAgentForegroundService.stopService(applicationContext)
+                    } else {
+                        // Keep first launch focused on Google account selection.
+                        // Ask for microphone/notification permissions only after auth succeeds.
+                        requestEssentialRuntimePermissions()
                     }
                 }
 
