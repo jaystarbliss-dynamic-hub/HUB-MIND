@@ -100,7 +100,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .catch((error) => {
           console.error('[Hub-Mind Android] Workspace sign-in handoff failed:', error);
           if (!disposed && !auth.currentUser) {
-            setNativeAuthError('Your existing Hub-Mind sign-in could not be connected to the workspace. Retry the secure session handoff; you should not need to choose your account again.');
+            const message = 'Your existing Hub-Mind sign-in could not be connected to the workspace. Retry the secure session handoff; you should not need to choose your account again.';
+            setNativeAuthError(message);
+            window.dispatchEvent(new CustomEvent('hubmind-native-token-error', { detail: { message } }));
           }
         })
         .finally(() => {
