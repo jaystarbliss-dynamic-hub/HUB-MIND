@@ -25,14 +25,14 @@ test('Android Jess tab overlays the current workspace route and reuses the exist
   const floating = read('src/components/JessFloatingAssistant.tsx');
 
   assert.match(app, /function AndroidNativeTabNavigationBridge/);
-  assert.match(app, /setJessOpen\\(open\\)/);
+  assert.match(app, /setJessOpen\(open\)/);
   assert.match(app, /data-hubmind-android-jess-tab/);
-  assert.match(app, /<CompanionPage \\/>/);
-  assert.match(app, /desktopOverlayRoute \\|\\| \\(publicOrLoginRoute && !isDesktopShell\\)/);
-  assert.doesNotMatch(app, /navigate\\('\\/orb'/);
-  assert.match(companion, /postMessage\\(\\{ type: 'toggle' \\}\\)/);
+  assert.match(app, /<CompanionPage \/>/);
+  assert.match(app, /desktopOverlayRoute \|\| \(publicOrLoginRoute && !isDesktopShell\)/);
+  assert.doesNotMatch(app, /navigate\('\/orb'/);
+  assert.match(companion, /postMessage\(\{ type: 'toggle' \}\)/);
   assert.match(floating, /setAndroidJessTabOpen/);
-  assert.match(floating, /new LiveAudioClient\\(/);
+  assert.match(floating, /new LiveAudioClient\(/);
   assert.match(floating, /hubmind-native-jess-toggle/);
 });
 test('Android floating orb is a transparent system overlay that forwards gestures to the existing WebView', () => {
