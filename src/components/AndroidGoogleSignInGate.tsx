@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 type AndroidGoogleSignInGateProps = {
   checking?: boolean;
@@ -7,11 +7,7 @@ type AndroidGoogleSignInGateProps = {
   subtitle?: string;
 };
 
-/**
- * Android never signs in through a WebView popup. This screen asks the native
- * Android Activity to show Google's account chooser and exchange the result
- * with both native Firebase Auth and this WebView's Firebase Auth.
- */
+/** Android signs in through its native account session, never a WebView popup. */
 export function AndroidGoogleSignInGate({
   checking = false,
   message = null,
@@ -20,25 +16,40 @@ export function AndroidGoogleSignInGate({
 }: AndroidGoogleSignInGateProps) {
   const [busy, setBusy] = useState(false);
   const [eventMessage, setEventMessage] = useState('');
+  const timeoutRef = useRef<number | null>(null);
+  const visibleMessage = eventMessage || message;
+
+  const clearPendingTimeout = () => {
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+  };
 
   useEffect(() => {
     const onTokenError = (event: Event) => {
+      clearPendingTimeout();
       const detail = (event as CustomEvent<{ message?: string }>).detail;
       setEventMessage(detail?.message || 'Google sign-in could not be completed. Please try again.');
       setBusy(false);
     };
     const onTokenReady = () => {
-      setBusy(true);
+      // A token is ready for Firebase exchange; it is not proof of completed auth.
+      // Keep the retry control available until the authenticated route replaces this screen.
+      clearPendingTimeout();
       setEventMessage('');
+      setBusy(false);
     };
-
     window.addEventListener('hubmind-native-token-error', onTokenError);
     window.addEventListener('hubmind-native-token-ready', onTokenReady);
     return () => {
+      clearPendingTimeout();
       window.removeEventListener('hubmind-native-token-error', onTokenError);
       window.removeEventListener('hubmind-native-token-ready', onTokenReady);
     };
   }, []);
+
+  useEffect(() => {
+    if (!checking || visibleMessage) setBusy(false);
+  }, [checking, visibleMessage]);
 
   const chooseGoogleAccount = () => {
     const bridge = (window as any).HubMindAndroid;
@@ -46,48 +57,40 @@ export function AndroidGoogleSignInGate({
       setEventMessage('The native Google sign-in service is unavailable in this app build. Update Hub-Mind and try again.');
       return;
     }
+    clearPendingTimeout();
     setBusy(true);
     setEventMessage('');
+    timeoutRef.current = window.setTimeout(() => {
+      timeoutRef.current = null;
+      setBusy(false);
+      setEventMessage('Google sign-in did not return a response. Your existing account has not been signed out. Please try again.');
+    }, 25000);
     try {
       bridge.startGoogleSignIn();
     } catch (error: any) {
+      clearPendingTimeout();
       setBusy(false);
       setEventMessage(error?.message || 'Could not open the Google account chooser.');
     }
   };
 
-  const visibleMessage = eventMessage || message;
-
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-950 px-6 py-10 text-slate-100">
-      <section className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl">
-        <img
-          src="/hub-mind%20logo.png"
-          alt="Hub-Mind"
-          className="mx-auto mb-5 h-20 w-20 object-contain"
-          width={80}
-          height={80}
-        />
+    <main className="flex min-h-[100dvh] w-full items-center justify-center bg-slate-950 px-6 py-10 text-slate-100">
+      <div className="flex w-full max-w-sm flex-col items-center text-center">
+        <img src="/hub-mind%20logo.png" alt="Hub-Mind" className="mb-5 h-20 w-20 object-contain" width={80} height={80} />
         <h1 className="mb-2 text-2xl font-bold text-white">{title}</h1>
         <p className="mb-6 text-sm leading-relaxed text-slate-400">{subtitle}</p>
-
         {checking && !visibleMessage && (
-          <p className="mb-4 text-xs text-teal-300" role="status">
-            Checking your saved Google session…
-          </p>
+          <p className="mb-4 text-xs text-teal-300" role="status">Restoring your saved Hub-Mind session…</p>
         )}
-
         {visibleMessage && (
-          <div className="mb-5 rounded-xl border border-amber-700/40 bg-amber-950/30 p-3 text-left text-sm text-amber-200" role="alert">
-            {visibleMessage}
-          </div>
+          <div className="mb-5 w-full text-center text-sm text-amber-200" role="alert">{visibleMessage}</div>
         )}
-
         <button
           type="button"
           onClick={chooseGoogleAccount}
           disabled={busy}
-          className="flex w-full items-center justify-center gap-3 rounded-xl bg-white px-5 py-3.5 font-semibold text-slate-900 transition-colors hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
+          className="flex min-h-12 w-full items-center justify-center gap-3 rounded-xl bg-white px-5 py-3.5 font-semibold text-slate-900 transition-colors hover:bg-slate-100 disabled:cursor-wait disabled:opacity-70"
         >
           {busy ? (
             <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900" aria-hidden="true" />
@@ -101,10 +104,10 @@ export function AndroidGoogleSignInGate({
           )}
           {busy ? 'Connecting to Google…' : 'Continue with Google'}
         </button>
-        <p className="mt-5 text-xs text-slate-500">
+        <p className="mt-5 text-center text-xs text-slate-500">
           Hub-Mind uses your authorised Google account. No studio email or password is required.
         </p>
-      </section>
+      </div>
     </main>
   );
 }
