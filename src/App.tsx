@@ -129,8 +129,10 @@ function AuthenticatedAssistantWidgets() {
   // shell is allowed to mount Jess on / and /login once an authenticated profile
   // is available, because that is where a desktop click may arrive after launch.
   const desktopOverlayRoute = ['/companion', '/companion-transcript', '/orb'].includes(location.pathname);
+  const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
+  const androidJessTab = isAndroidApp && location.pathname === '/orb';
   const publicOrLoginRoute = location.pathname === '/' || location.pathname === '/login';
-  if (desktopOverlayRoute || (publicOrLoginRoute && !isDesktopShell)) return null;
+  if ((desktopOverlayRoute && !androidJessTab) || (publicOrLoginRoute && !isDesktopShell)) return null;
   if (!user || !profile || profile.status !== 'active') return null;
   return <><JessDocumentBridge /><JessFloatingAssistant /></>;
 }
@@ -139,9 +141,61 @@ function WorkspaceRoutes() {
   return <ProtectedRoute><Layout /></ProtectedRoute>;
 }
 
+/**
+ * The Android bottom bar does not mount another assistant. It changes the route
+ * inside the one persistent WebView, preserving the authenticated React tree,
+ * the floating Jess instance and its existing Gemini Live session.
+ */
+function AndroidNativeTabNavigationBridge() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const lastWorkspacePathRef = React.useRef('/workspace');
+
+  React.useEffect(() => {
+    if (location.pathname !== '/orb' && location.pathname !== '/login' && location.pathname !== '/') {
+      lastWorkspacePathRef.current = location.pathname + location.search + location.hash;
+    }
+  }, [location.pathname, location.search, location.hash]);
+
+  React.useEffect(() => {
+    const bridge = (window as any).HubMindAndroid;
+    if (typeof bridge?.isAndroidApp !== 'function' || bridge.isAndroidApp() !== true) return;
+
+    const handleTabChange = (event: Event) => {
+      const detailTab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
+      let storedTab = '';
+      try { storedTab = localStorage.getItem('hubmind.android.nativeTab') || ''; } catch {}
+      const tab = detailTab || storedTab;
+
+      if (tab === 'JESS') {
+        if (location.pathname !== '/orb') {
+          if (location.pathname !== '/' && location.pathname !== '/login') {
+            lastWorkspacePathRef.current = location.pathname + location.search + location.hash;
+          }
+          navigate('/orb', { replace: true });
+        }
+        return;
+      }
+
+      if (tab && tab !== 'JESS' && location.pathname === '/orb') {
+        navigate(lastWorkspacePathRef.current || '/workspace', { replace: true });
+      }
+    };
+
+    window.addEventListener('hubmind-android-tab-change', handleTabChange);
+    // Recover the native tab selection if React mounted after the initial WebView
+    // page-load event was dispatched.
+    handleTabChange(new Event('hubmind-android-tab-change'));
+    return () => window.removeEventListener('hubmind-android-tab-change', handleTabChange);
+  }, [navigate, location.pathname, location.search, location.hash]);
+
+  return null;
+}
+
 export default function App() {
   return <AppErrorBoundary><AuthProvider><LoadingProvider><BrowserRouter>
     <PWAPrompt />
+    <AndroidNativeTabNavigationBridge />
     <Suspense fallback={<LoadingScreen />}>
       <Routes>
         <Route path="/" element={<AppHomeRoute />} />
