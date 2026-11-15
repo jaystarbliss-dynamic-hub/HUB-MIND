@@ -101,15 +101,30 @@ test('Android restores the already-authorized Google account silently instead of
   assert.match(app, /Retry secure session/);
 });
 
-test('Sign-in screen removes the visible “or email” divider but preserves existing email-account access', () => {
+test('Hub-Mind uses Google-only authentication and Android launches the native account picker', () => {
   const login = read('src/pages/Login.tsx');
+  const gate = read('src/components/AndroidGoogleSignInGate.tsx');
   const app = read('src/App.tsx');
   const nativeLogin = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthScreen.kt');
+  const nativeActivity = read('android/app/src/main/java/com/example/hubmind/MainActivity.kt');
+  const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const viewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
 
-  assert.doesNotMatch(login, />\s*or email\s*</i);
-  assert.match(login, /signInWithEmailAndPassword/);
   assert.match(login, /Continue with Google/);
-  assert.doesNotMatch(nativeLogin, /or email/i);
-  // Windows desktop uses the same hosted React Login route as Web.
-  assert.match(app, /import\('\.\/pages\/Login'\)/);
+  assert.doesNotMatch(login, /signInWithEmailAndPassword|createUserWithEmailAndPassword|sendPasswordResetEmail/);
+  assert.doesNotMatch(login, /Studio email|type="password"|Forgot password/);
+  assert.match(login, /AndroidGoogleSignInGate/);
+  assert.match(gate, /HubMindAndroid/);
+  assert.match(gate, /startGoogleSignIn/);
+  assert.match(app, /AndroidGoogleSignInGate/);
+  assert.match(app, /loading \|\| !user \|\| !profile/);
+  assert.match(nativeLogin, /LaunchedEffect\(Unit\)/);
+  assert.match(nativeLogin, /launchGoogleAccountPicker\(\)/);
+  assert.match(viewModel, /fun beginGoogleSignIn\(\)/);
+  assert.match(workspace, /fun startGoogleSignIn\(\)/);
+  assert.match(workspace, /onRequestInteractiveGoogleSignIn/);
+  assert.match(workspace, /launchInteractiveGoogleSignIn\(\)/);
+  assert.match(nativeActivity, /workspaceGoogleSignInLauncher/);
+  assert.match(nativeActivity, /ServiceLocator\.authRepository\.signInWithGoogle\(idToken\)/);
+  assert.match(nativeActivity, /onRequestGoogleSignIn = ::launchWorkspaceGoogleSignIn/);
 });
