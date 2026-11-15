@@ -3326,8 +3326,16 @@ export async function executeJessTool(
       case 'navigate_app': {
         let path = String(args.path || '').trim();
         const lower = path.toLowerCase().replace(/^\/+/, '').replace(/^workspace\//, '');
-        if (lower === 'people' || lower === 'colleagues' || lower === 'colleague' || lower === 'team' || lower === 'directory' || lower === 'members') {
-          path = '/workspace/colleagues';
+        if (['requests', 'connection requests', 'pending requests', 'colleagues/requests', 'people/requests'].includes(lower)) {
+          path = '/workspace/colleagues?tab=requests';
+        } else if (['directory', 'workspace directory', 'colleagues/directory', 'people/directory', 'members'].includes(lower)) {
+          path = '/workspace/colleagues?tab=directory';
+        } else if (['connections', 'colleagues', 'people', 'colleague', 'team'].includes(lower)) {
+          path = '/workspace/colleagues?tab=connections';
+        } else if (['inbox archive', 'archived inbox', 'processed inbox', 'inbox/processed', 'inbox/archive'].includes(lower)) {
+          path = '/workspace/inbox?tab=processed';
+        } else if (['inbox', 'inbox/unprocessed', 'unprocessed inbox', 'quick captures'].includes(lower)) {
+          path = '/workspace/inbox?tab=unprocessed';
         } else if (lower === 'today' || lower === 'dashboard' || lower === 'home' || lower === 'workspace') {
           path = '/workspace';
         } else if (path.startsWith('/workspace/')) {
