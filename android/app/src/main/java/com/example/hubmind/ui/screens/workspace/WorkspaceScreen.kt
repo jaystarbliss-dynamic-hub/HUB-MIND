@@ -255,8 +255,8 @@ private class HubMindAndroidAuthBridge(
 
     private fun dispatchAuthBridgeEvent(name: String, message: String? = null) {
         if (name !in setOf("hubmind-native-token-ready", "hubmind-native-token-error")) return
-        val detail = if (message != null) ",detail:{message:" + JSONObject.quote(message.take(500)) + "}" else ""
-        val script = "window.dispatchEvent(new CustomEvent('$name'{$detail}));"
+        val init = if (message != null) "{detail:{message:" + JSONObject.quote(message.take(500)) + "}}" else "{}"
+        val script = "window.dispatchEvent(new CustomEvent('$name',$init));"
         webView.post { webView.evaluateJavascript(script, null) }
     }
 
