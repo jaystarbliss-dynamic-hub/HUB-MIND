@@ -6,7 +6,7 @@
 - **Website**: https://hub-mind.netlify.app
 - **Application ID**: `com.aistudio.hubmind.wzyqkp` (must remain unchanged).
 - **Current integration version candidate**: `2.5.3` / version code `253`.
-- **Last verified production release**: `2.5.1` / version code `251`; it remains the public update target until the 2.5.3 signed release is published.
+- **Last verified production release**: `2.5.2` / version code `252`; it remains the public update target until the 2.5.3 signed release is published.
 - **In-app update manifest**: https://hub-mind.netlify.app/api/app-version.json.
 
 The website's Updates panel reads Android APK assets from the public GitHub Releases API. The Android app's update checker reads the static manifest above and verifies the APK SHA-256 before offering installation.
