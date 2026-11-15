@@ -17,12 +17,12 @@ class PrivateReleaseAndVoiceUnitTest {
 
     @Test
     fun testAppUpdateManifestComparison() {
-        val currentCode = 251
+        val currentCode = 252
         val manifest = AppUpdateManifest(
-            versionCode = 252,
-            versionName = "2.5.2",
+            versionCode = 253,
+            versionName = "2.5.3",
             applicationId = "com.aistudio.hubmind.wzyqkp",
-            apkUrl = "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.5.2/Hub-Mind-Android-v2.5.2.apk",
+            apkUrl = "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.5.3/Hub-Mind-Android-v2.5.3.apk",
             sha256 = "a".repeat(64),
             releaseNotes = "New hands-free features and bug fixes."
         )
