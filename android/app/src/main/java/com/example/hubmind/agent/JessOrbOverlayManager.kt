@@ -28,7 +28,7 @@ class JessOrbOverlayManager(context: Context) {
     private val appContext = context.applicationContext
     private val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val handler = Handler(Looper.getMainLooper())
-    private val orbView = JessOrbView(appContext) { HubMindJessNativeEvents.dispatch(it) }
+    private val orbView = JessOrbView(appContext) { onOverlayGesture(it) }
     private var attached = false
     private var overlayParams: WindowManager.LayoutParams? = null
     private var overlaySizePx = dp(82)
@@ -145,11 +145,7 @@ class JessOrbOverlayManager(context: Context) {
             if (!attached) return@post
             runCatching { windowManager.removeView(orbView) }
             attached = false
-            overlayParams = overlayParams?.also {
-                // Retain the user's position across foreground/background transitions.
-                it.x = overlayParams?.x ?: it.x
-                it.y = overlayParams?.y ?: it.y
-            }
+            // Keep overlayParams.x/y so the user's chosen position is restored next time.
         }
     }
 
