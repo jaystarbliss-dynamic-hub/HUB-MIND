@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, Users, Calendar, Folder, Bell, LogOut, Settings, Inbox, Plus, X, Brain, Book, Briefcase, Search, Clock3, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Users, Calendar, Folder, Bell, LogOut, Settings, Inbox, Plus, X, Brain, Book, Briefcase, Search, Clock3, ShieldCheck, Activity } from 'lucide-react';
 import { auth, db } from '../firebaseConfig';
 import { signOut } from 'firebase/auth';
 import { collection, addDoc, query, where, onSnapshot, getDocs, updateDoc, doc } from 'firebase/firestore';
@@ -26,6 +26,7 @@ const navItems = [
   { to: '/workspace/documents', label: 'Documents', icon: Folder },
   { to: '/workspace/calendar', label: 'Calendar', icon: Calendar },
   { to: '/workspace/colleagues', label: 'Colleagues', icon: Users },
+  { to: '/workspace/device-activity', label: 'Live Device Activity', icon: Activity },
   { to: '/workspace/clients', label: 'Clients', icon: Book },
   { to: '/workspace/knowledge', label: 'Knowledge', icon: Brain },
   { to: '/workspace/follow-ups', label: 'Follow-ups', icon: Clock3 },
