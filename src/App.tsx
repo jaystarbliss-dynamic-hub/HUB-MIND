@@ -83,7 +83,10 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, { error:
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
   const { user, profile, loading, nativeAuthError, authorizationError } = useAuth();
-  const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
+  const androidBridge = (window as any).HubMindAndroid;
+  const isAndroidApp = androidBridge?.isAndroidApp?.() === true ||
+    (typeof androidBridge?.getGoogleIdToken === 'function' &&
+      typeof androidBridge?.startGoogleSignIn === 'function');
 
   // Android has one native Google identity. Never send its embedded WebView to
   // the browser login form or expose a partially authenticated workspace shell.
