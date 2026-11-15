@@ -133,6 +133,18 @@ class HubMindAgentForegroundService : Service() {
         }
 
         val captureRequested = intent?.action == ACTION_START_SCREEN_CAPTURE || screenCaptureManager.isCaptureActive
+        if (
+            intent?.action == ACTION_SET_JESS_MICROPHONE &&
+            !jessMicrophoneActive &&
+            !screenCaptureManager.isCaptureActive &&
+            hubMindActivityVisible
+        ) {
+            jessOrbOverlayManager.hide()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
         startAgentForeground(captureRequested, jessMicrophoneActive)
         // Use the native overlay only while the app itself is in the background.
         // In the foreground, the workspace/Jess-tab React orb is the visible control.
