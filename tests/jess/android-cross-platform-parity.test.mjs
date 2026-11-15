@@ -103,3 +103,33 @@ test('Firestore REST encoder supports nested device-command data', async () => {
   assert.match(rest, /mapValue/);
   assert.match(regression, /round-trips nested Android command payloads/);
 });
+
+test('Android floating orb can be dragged to a temporary hide target and fades while idle', async () => {
+  const [overlay, service] = await Promise.all([
+    read('../../android/app/src/main/java/com/example/hubmind/agent/JessOrbOverlayManager.kt'),
+    read('../../android/app/src/main/java/com/example/hubmind/agent/HubMindAgentForegroundService.kt'),
+  ]);
+  assert.match(overlay, /dismissedUntilNextMinimize/);
+  assert.match(overlay, /isInsideDismissTarget/);
+  assert.match(overlay, /showDismissTarget/);
+  assert.match(overlay, /Hide Jess/);
+  assert.match(overlay, /resetDismissalForNextMinimize/);
+  assert.match(overlay, /IDLE_FADE_DELAY_MS/);
+  assert.match(overlay, /IDLE_ALPHA = 0\.32f/);
+  assert.match(service, /jessOrbOverlayManager\.resetDismissalForNextMinimize\(\)/);
+});
+
+test('Android Workspace auth identifies the native shell and its centered gate cannot stay stuck', async () => {
+  const [gate, app, login, auth] = await Promise.all([
+    read('../../src/components/AndroidGoogleSignInGate.tsx'),
+    read('../../src/App.tsx'),
+    read('../../src/pages/Login.tsx'),
+    read('../../src/lib/auth.tsx'),
+  ]);
+  assert.match(app, /typeof androidBridge\?\.getGoogleIdToken === 'function'/);
+  assert.match(login, /typeof androidBridge\?\.startGoogleSignIn === 'function'/);
+  assert.match(gate, /onTokenReady[\s\S]*?setBusy\(false\)/);
+  assert.match(gate, /25000/);
+  assert.doesNotMatch(gate, /rounded-3xl border border-slate-800 bg-slate-900/);
+  assert.match(auth, /window\.dispatchEvent\(new CustomEvent\('hubmind-native-token-error'/);
+});
