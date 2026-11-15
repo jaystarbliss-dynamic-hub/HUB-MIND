@@ -80,9 +80,30 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, { error:
 }
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, nativeAuthError, retryNativeAuth } = useAuth();
   if (loading) return <LoadingScreen />;
-  if (!user || !profile) return <Navigate to="/login" replace />;
+  if (!user || !profile) {
+    const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
+    if (isAndroidApp && nativeAuthError) {
+      return (
+        <main className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6">
+          <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-7 text-center shadow-2xl">
+            <img src="/hub-mind%20logo.png" alt="Hub-Mind" className="mx-auto mb-5 h-16 w-16 object-contain" />
+            <h1 className="mb-2 text-xl font-bold text-white">Restoring your workspace</h1>
+            <p className="mb-5 text-sm leading-relaxed text-slate-400">{nativeAuthError}</p>
+            <button
+              type="button"
+              onClick={retryNativeAuth}
+              className="rounded-xl bg-teal-500 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-teal-400"
+            >
+              Retry secure session
+            </button>
+          </section>
+        </main>
+      );
+    }
+    return <Navigate to="/login" replace />;
+  }
   if (profile.status !== 'active') return <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6"><div className="max-w-md text-center bg-slate-900 border border-slate-800 rounded-2xl p-8"><h1 className="text-xl font-bold text-white mb-2">Account access unavailable</h1><p className="text-sm text-slate-400">Your Hub-Mind account is not currently active. Please contact an administrator.</p></div></div>;
   if (allowedRoles && !allowedRoles.includes(profile.role)) return <div className="p-8 text-center text-red-400">Access Denied</div>;
   return <>{children}</>;
