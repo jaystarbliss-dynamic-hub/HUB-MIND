@@ -750,7 +750,7 @@ export function PublicHome() {
             </p>
             <a
               className="hm-text-link mt-4 inline-flex items-center justify-center"
-              href={`mailto:jstarblissstudios@gmail.com?subject=${encodeURIComponent('Hub-Mind invitation request')}&body=${encodeURIComponent('Hello Jaystarbliss Studios,\n\nI would like to request an invitation to Hub-Mind.\n\nName:\nGoogle account email:\nReason for requesting access:\n\nThank you.')}`}
+              href={`mailto:jaystarblissstudios@gmail.com?subject=${encodeURIComponent('Hub-Mind invitation request')}&body=${encodeURIComponent('Hello Jaystarbliss Studios,\n\nI would like to request an invitation to Hub-Mind.\n\nName:\nGoogle account email:\nReason for requesting access:\n\nThank you.')}`}
             >
               Need an invitation? Request one by email
             </a>
