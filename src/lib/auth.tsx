@@ -78,12 +78,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // The native Google client can still be completing its silent restore.
         return;
       }
-      if (auth.currentUser) {
+      let nativeUserId = '';
+      try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
+      if (auth.currentUser && (!nativeUserId || auth.currentUser.uid === nativeUserId)) {
         try { bridge.completeGoogleSignIn?.(); } catch {}
         nativeAuthBootstrapPending.current = false;
         return;
       }
 
+      // If the native app restored a different authorized account than the
+      // WebView, exchange the native account's credential and replace the stale
+      // browser identity instead of showing a second login page.
       void signInWithCredential(auth, GoogleAuthProvider.credential(googleIdToken))
         .then(() => {
           // The native token is acknowledged only after Web Firebase accepts it.
@@ -229,6 +234,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // A null initial state is not a sign-out while native Google credentials
       // are still being exchanged for the Web Firebase session.
       if (!firebaseUser && nativeAuthBootstrapPending.current) return;
+      if (firebaseUser && nativeAuthBootstrapPending.current) {
+        let nativeUserId = '';
+        try { nativeUserId = String((window as any).HubMindAndroid?.getNativeUserId?.() || '').trim(); } catch {}
+        if (nativeUserId && firebaseUser.uid !== nativeUserId) return;
+      }
       stopProfile?.();
       stopProfile = null;
       if (disposed) return;
@@ -428,6 +438,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     await signOut(auth);
+    try { (window as any).HubMindAndroid?.signOutNative?.(); } catch {}
     setUser(null);
     setProfile(null);
     setAuthorizationError(null);
