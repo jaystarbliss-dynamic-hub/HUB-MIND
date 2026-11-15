@@ -423,6 +423,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         loading,
         authorizationError,
+        nativeAuthError,
+        retryNativeAuth,
         updatePreferredName,
         updateProfileData,
         logout,
