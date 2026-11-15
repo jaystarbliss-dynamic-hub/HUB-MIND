@@ -15,6 +15,8 @@ type DeviceCommandRecord = {
   resultVerified?: boolean;
   resultSummary?: string;
   resultError?: string;
+  resultScreenshotBase64?: string;
+  resultScreenshotCapturedAt?: number;
   issuedAt?: number;
   completedAt?: number;
   expirationTime?: number;
@@ -50,6 +52,7 @@ export function DeviceActivity() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'android' | 'windows'>('all');
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
+  const [devicePlatforms, setDevicePlatforms] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!user?.uid) {
@@ -60,6 +63,18 @@ export function DeviceActivity() {
 
     setLoading(true);
     setError('');
+    const devicesQuery = query(collection(db, 'users', user.uid, 'devices'), limit(100));
+    const unsubscribeDevices = onSnapshot(devicesQuery, snapshot => {
+      const platforms: Record<string, string> = {};
+      snapshot.docs.forEach(entry => {
+        const data = entry.data() as any;
+        platforms[entry.id] = String(data.platform || data.devicePlatform || '').toLowerCase();
+      });
+      setDevicePlatforms(platforms);
+    }, deviceError => {
+      console.warn('[DeviceActivity] Paired device registry unavailable:', deviceError);
+    });
+
     const commandQuery = query(
       collection(db, 'users', user.uid, 'deviceCommands'),
       orderBy('issuedAt', 'desc'),
@@ -80,17 +95,17 @@ export function DeviceActivity() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => { unsubscribe(); unsubscribeDevices(); };
   }, [user?.uid]);
 
   const filtered = useMemo(() => records.filter(item => {
     if (filter === 'all') return true;
-    const id = String(item.targetDeviceId || '').toLowerCase();
+    const platform = String(devicePlatforms[String(item.targetDeviceId || '')] || '').toLowerCase();
     const action = String(item.actionType || '').toLowerCase();
-    if (filter === 'android') return id.startsWith('android-') || action.includes('android');
-    if (filter === 'windows') return id.startsWith('win-') || action.includes('windows') || action.includes('chrome_');
+    if (filter === 'android') return platform === 'android' || action.includes('android');
+    if (filter === 'windows') return platform === 'windows' || action.includes('windows') || action.includes('chrome_');
     return true;
-  }), [records, filter]);
+  }), [records, filter, devicePlatforms]);
 
   const activeCount = records.filter(item => ['DISPATCHED', 'ACCEPTED', 'EXECUTING'].includes(String(item.lifecycleState || '').toUpperCase())).length;
 
@@ -179,7 +194,7 @@ export function DeviceActivity() {
       ) : (
         <div className="space-y-3">
           {filtered.map(item => {
-            const android = String(item.targetDeviceId || '').startsWith('android-');
+            const android = String(devicePlatforms[String(item.targetDeviceId || '')] || '').toLowerCase() === 'android';
             const done = item.resultSuccess === true;
             return (
               <article key={item.id} className="rounded-2xl border border-slate-800 bg-slate-900 p-4 md:p-5">
@@ -203,6 +218,19 @@ export function DeviceActivity() {
                   <div className={`mt-4 rounded-xl p-3 text-xs leading-relaxed ${item.resultError ? 'bg-rose-500/5 text-rose-200' : 'bg-slate-950/70 text-slate-300'}`}>
                     {item.resultError || item.resultSummary}
                   </div>
+                )}
+                {item.resultScreenshotBase64 && (
+                  <figure className="mt-4 overflow-hidden rounded-xl border border-slate-700 bg-black">
+                    <img
+                      src={item.resultScreenshotBase64.startsWith('data:') ? item.resultScreenshotBase64 : `data:image/jpeg;base64,${item.resultScreenshotBase64}`}
+                      alt={`Screen capture returned by ${item.actionType || 'Android device'} command`}
+                      className="max-h-[520px] w-full object-contain"
+                      loading="lazy"
+                    />
+                    <figcaption className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-500">
+                      Device screen capture{item.resultScreenshotCapturedAt ? ` · ${formatTime(item.resultScreenshotCapturedAt)}` : ''}
+                    </figcaption>
+                  </figure>
                 )}
                 <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-500">
                   <span>Sent: {formatTime(item.issuedAt)}</span>
