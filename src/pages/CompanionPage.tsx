@@ -23,6 +23,7 @@ declare global {
 
 export function CompanionPage() {
   const { profile } = useAuth();
+  const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
   const [owner, setOwner] = useState<JessSessionOwner | null>(null);
   const [requestError, setRequestError] = useState('');
   const [controlActive, setControlActive] = useState(false);
@@ -252,7 +253,7 @@ export function CompanionPage() {
   const localActive = isActive && owner?.client === 'windows-desktop';
 
   return (
-    <main className="jess-orb-window" aria-label="Jess desktop companion">
+    <main className={`jess-orb-window ${isAndroidApp ? 'jess-orb-android-tab' : ''}`} aria-label={isAndroidApp ? "Jess assistant" : "Jess desktop companion"}>
       <div
         className={`jess-orb-drag ${dismissMode ? 'is-dismiss-mode' : ''}`}
         title="Tap to talk · Double-click to open workspace · Drag to move · Click X or drag down to dismiss"
@@ -272,15 +273,17 @@ export function CompanionPage() {
       </div>
 
       {/* Tiny X close button right beside the orb */}
-      <button
-        type="button"
-        title="Close Jess orb"
-        aria-label="Close Jess orb"
-        className="jess-orb-tiny-close"
-        onClick={handleCloseClick}
-      >
-        <X size={11} strokeWidth={2.5} />
-      </button>
+      {!isAndroidApp && (
+        <button
+          type="button"
+          title="Close Jess orb"
+          aria-label="Close Jess orb"
+          className="jess-orb-tiny-close"
+          onClick={handleCloseClick}
+        >
+          <X size={11} strokeWidth={2.5} />
+        </button>
+      )}
 
       {/* Status dot indicator */}
       {isActive && (
