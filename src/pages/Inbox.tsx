@@ -33,6 +33,14 @@ function CapturedInbox() {
   const [clients, setClients] = useState<{id: string, name: string}[]>([]);
   const [viewMode, setViewMode] = useState<'unprocessed' | 'processed'>('unprocessed');
 
+  // Voice commands and deep links can open either Inbox view directly.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tab = (params.get('tab') || params.get('status') || '').toLowerCase();
+    if (['processed', 'archive', 'archived'].includes(tab)) setViewMode('processed');
+    else if (['unprocessed', 'inbox', 'new'].includes(tab)) setViewMode('unprocessed');
+  }, [location.search]);
+
   useEffect(() => {
     if (!profile) return;
     const fetchClients = async () => {
