@@ -58,8 +58,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof bridge?.getGoogleIdToken !== 'function') return;
 
     let disposed = false;
+    let restoreTimeout: number | null = null;
+    const clearRestoreTimeout = () => {
+      if (restoreTimeout !== null) window.clearTimeout(restoreTimeout);
+      restoreTimeout = null;
+    };
     const onTokenReady = () => {
       if (disposed) return;
+      clearRestoreTimeout();
       nativeAuthBootstrapPending.current = true;
       setNativeAuthError(null);
       let googleIdToken = '';
@@ -100,6 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const onTokenError = (event: Event) => {
       if (disposed || auth.currentUser) return;
+      clearRestoreTimeout();
       nativeAuthBootstrapPending.current = false;
       const message = (event as CustomEvent<{ message?: string }>).detail?.message;
       setNativeAuthError(
@@ -130,7 +137,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (typeof bridge.requestGoogleIdToken === 'function') {
         try {
           bridge.requestGoogleIdToken();
+          restoreTimeout = window.setTimeout(() => {
+            restoreTimeout = null;
+            if (disposed || auth.currentUser) return;
+            nativeAuthBootstrapPending.current = false;
+            setNativeAuthError('Hub-Mind is still waiting for Android to restore your saved Google session. Check your connection and retry the secure session handoff.');
+            setLoading(false);
+          }, 25000);
         } catch (error: any) {
+          clearRestoreTimeout();
           nativeAuthBootstrapPending.current = false;
           setNativeAuthError(error?.message || 'Could not restore your existing Google sign-in.');
           setLoading(false);
@@ -144,6 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       disposed = true;
+      clearRestoreTimeout();
       window.removeEventListener('hubmind-native-token-ready', onTokenReady);
       window.removeEventListener('hubmind-native-token-error', onTokenError);
     };
