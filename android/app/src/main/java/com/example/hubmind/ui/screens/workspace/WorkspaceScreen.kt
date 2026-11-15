@@ -1,6 +1,7 @@
 package com.example.hubmind.ui.screens.workspace
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.webkit.JavascriptInterface
@@ -12,13 +13,17 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
+import com.example.hubmind.agent.HubMindAgentForegroundService
+import com.example.hubmind.agent.HubMindJessNativeEvents
 import com.example.hubmind.di.ServiceLocator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,9 +40,13 @@ private const val HUB_MIND_WORKSPACE_HOST = "hub-mind.netlify.app"
  * narrowly scoped JavaScript bridge. No separate web account is created.
  */
 @Composable
-fun WorkspaceScreen(modifier: Modifier = Modifier) {
+fun WorkspaceScreen(
+    currentNativeTab: String = "WORKSPACE",
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
-    val androidDeviceBridge = remember { HubMindNativeDeviceBridge() }
+    val currentNativeTabState = rememberUpdatedState(currentNativeTab)
+    val androidDeviceBridge = remember(context) { HubMindNativeDeviceBridge(context) }
     val webView = remember {
         WebView(context).apply {
             settings.javaScriptEnabled = true
@@ -80,6 +89,14 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
             androidDeviceBridge.attach(this)
 
             webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    // The native Jess tab is a route inside this same React application.
+                    // Re-apply the current tab after each page load so a fast first launch
+                    // cannot lose the native-tab handoff before React mounts its listener.
+                    val tab = currentNativeTabState.value
+                    view?.evaluateJavascript(nativeTabDispatchScript(tab), null)
+                }
+
                 override fun shouldOverrideUrlLoading(
                     view: WebView,
                     request: WebResourceRequest
@@ -110,6 +127,27 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
         }
     }
 
+    LaunchedEffect(webView, currentNativeTab) {
+        // Workspace/Jess navigation is handled by the existing React Router tree,
+        // not by creating a second WebView or a second Firebase/Jess runtime.
+        webView.post {
+            webView.evaluateJavascript(nativeTabDispatchScript(currentNativeTab), null)
+        }
+    }
+
+    LaunchedEffect(webView) {
+        HubMindJessNativeEvents.events.collect { gesture ->
+            val eventName = when (gesture) {
+                "toggle" -> "hubmind-native-jess-toggle"
+                "mute" -> "hubmind-native-jess-mute"
+                "stop" -> "hubmind-native-jess-stop"
+                else -> return@collect
+            }
+            val script = "window.dispatchEvent(new CustomEvent('$eventName'));"
+            webView.post { webView.evaluateJavascript(script, null) }
+        }
+    }
+
     DisposableEffect(webView, androidDeviceBridge) {
         onDispose {
             webView.stopLoading()
@@ -125,6 +163,11 @@ fun WorkspaceScreen(modifier: Modifier = Modifier) {
         factory = { webView },
         update = { }
     )
+}
+
+private fun nativeTabDispatchScript(tab: String): String {
+    val safeTab = tab.takeIf { it in setOf("WORKSPACE", "JESS", "DEVICES", "ACTIVITY", "SETTINGS") } ?: "WORKSPACE"
+    return "try{localStorage.setItem('hubmind.android.nativeTab','$safeTab');window.dispatchEvent(new CustomEvent('hubmind-android-tab-change',{detail:{tab:'$safeTab'}}));}catch(e){}"
 }
 
 private fun isTrustedWorkspaceUrl(uri: Uri): Boolean {
@@ -173,7 +216,9 @@ private class HubMindAndroidAuthBridge(
  * unrelated WEB device and lets the web Jess UI keep native target selection
  * in sync with the Android agent.
  */
-private class HubMindNativeDeviceBridge {
+private class HubMindNativeDeviceBridge(
+    private val context: Context
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var webView: WebView? = null
 
@@ -186,6 +231,29 @@ private class HubMindNativeDeviceBridge {
         if (!isTrustedWorkspaceOrigin()) return ""
         return runCatching { ServiceLocator.deviceRegistryRepository.localDeviceId }
             .getOrDefault("")
+    }
+
+    /** Keep the existing workspace LiveAudioClient visible to Android's foreground-service lifecycle. */
+    @JavascriptInterface
+    fun setJessMicrophoneActive(active: Boolean) {
+        if (!isTrustedWorkspaceOrigin()) return
+        HubMindAgentForegroundService.setJessMicrophoneActive(context, active)
+    }
+
+    /** Mirror actual Live state into the optional native floating orb. */
+    @JavascriptInterface
+    fun setJessVisualState(state: String, inputLevel: Float, outputLevel: Float, connected: Boolean) {
+        if (!isTrustedWorkspaceOrigin()) return
+        val safeState = state.takeIf {
+            it in setOf("idle", "listening", "thinking", "speaking", "interrupted", "muted", "error")
+        } ?: "idle"
+        HubMindAgentForegroundService.updateJessOverlayState(
+            context,
+            safeState,
+            inputLevel.coerceIn(0f, 1f),
+            outputLevel.coerceIn(0f, 1f),
+            connected
+        )
     }
 
     @JavascriptInterface
