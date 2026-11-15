@@ -63,9 +63,7 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(isSessionReady, isSessionValid) {
                     if (!isSessionReady) return@LaunchedEffect
-                    if (isSessionValid && Settings.canDrawOverlays(applicationContext)) {
-                        HubMindAgentForegroundService.refreshJessOverlay(applicationContext)
-                    } else if (!isSessionValid) {
+                    if (!isSessionValid) {
                         HubMindAgentForegroundService.stopService(applicationContext)
                     }
                 }
@@ -179,11 +177,17 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, true)
         ServiceLocator.permissionStatusRepository.refreshFromSystem()
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
         if (ServiceLocator.authRepository.isSessionReady.value &&
             ServiceLocator.authRepository.isSessionValid.value &&
             Settings.canDrawOverlays(this)
         ) {
-            HubMindAgentForegroundService.refreshJessOverlay(this)
+            // Start the visible overlay while the Activity is still foregrounded,
+            // avoiding a restricted background-service start after the app is hidden.
+            HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, false)
         }
     }
 
