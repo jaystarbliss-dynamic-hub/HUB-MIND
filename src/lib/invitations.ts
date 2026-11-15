@@ -35,7 +35,7 @@ export async function createInvitation(input: { username: string; displayName: s
     username,
     displayName: input.displayName.trim(),
     email: normalizedEmail,
-    phone: input.phone?.trim() || undefined,
+    ...(input.phone?.trim() ? { phone: input.phone.trim() } : {}),
     role: 'staff' as const,
     status: 'invited' as const,
     invitedBy: input.invitedBy,
