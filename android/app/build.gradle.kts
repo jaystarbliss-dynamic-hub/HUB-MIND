@@ -79,8 +79,8 @@ android {
         applicationId = "com.aistudio.hubmind.wzyqkp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 253
-        versionName = "2.5.3"
+        versionCode = 254
+        versionName = "2.5.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
