@@ -33,6 +33,20 @@ class HubMindAgentForegroundService : Service() {
         @Volatile
         private var activeInstance: HubMindAgentForegroundService? = null
 
+        @Volatile
+        private var hubMindActivityVisible: Boolean = false
+
+        fun setHubMindActivityVisible(context: Context, visible: Boolean) {
+            hubMindActivityVisible = visible
+            val instance = activeInstance
+            if (instance != null) {
+                if (visible) instance.jessOrbOverlayManager.hide()
+                else if (Settings.canDrawOverlays(context)) instance.jessOrbOverlayManager.show()
+            } else if (!visible && Settings.canDrawOverlays(context)) {
+                startService(context)
+            }
+        }
+
         fun startService(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, HubMindAgentForegroundService::class.java))
         }
@@ -120,9 +134,10 @@ class HubMindAgentForegroundService : Service() {
 
         val captureRequested = intent?.action == ACTION_START_SCREEN_CAPTURE || screenCaptureManager.isCaptureActive
         startAgentForeground(captureRequested, jessMicrophoneActive)
-        // The orb is persistent while this foreground agent is enabled, including
-        // when Jess is idle, so it can be tapped to start the shared Live session.
-        jessOrbOverlayManager.show()
+        // Use the native overlay only while the app itself is in the background.
+        // In the foreground, the workspace/Jess-tab React orb is the visible control.
+        if (hubMindActivityVisible) jessOrbOverlayManager.hide()
+        else jessOrbOverlayManager.show()
 
         when (intent?.action) {
             ACTION_START_SCREEN_CAPTURE -> {
