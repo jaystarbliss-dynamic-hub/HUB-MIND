@@ -378,6 +378,20 @@ export function JessFloatingAssistant() {
   }, [profile?.id]);
   const location = useLocation();
   const navigate = useNavigate();
+  const [androidJessTabOpen, setAndroidJessTabOpen] = useState(false);
+  useEffect(() => {
+    const bridge = (window as any).HubMindAndroid;
+    if (typeof bridge?.isAndroidApp !== 'function' || bridge.isAndroidApp() !== true) return;
+    const sync = (event: Event) => {
+      const open = (event as CustomEvent<{ open?: boolean }>).detail?.open === true;
+      setAndroidJessTabOpen(open);
+    };
+    window.addEventListener('hubmind-android-jess-tab-state', sync);
+    let activeTab = '';
+    try { activeTab = localStorage.getItem('hubmind.android.nativeTab') || ''; } catch {}
+    setAndroidJessTabOpen(activeTab === 'JESS');
+    return () => window.removeEventListener('hubmind-android-jess-tab-state', sync);
+  }, []);
   const locationPathRef = useRef(location.pathname);
   useEffect(() => {
     locationPathRef.current = location.pathname;
@@ -1638,7 +1652,7 @@ export function JessFloatingAssistant() {
 
   if (!profile) return null;
   const active = connection === 'connected' || connection === 'connecting';
-  const isAndroidJessTab = location.pathname === '/orb' &&
+  const isAndroidJessTab = androidJessTabOpen &&
     (window as any).HubMindAndroid?.isAndroidApp?.() === true;
   const size = active ? 76 : 64;
   const renderedPosition = typeof window !== 'undefined' ? clampViewportPosition(position, size) : position;
