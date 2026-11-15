@@ -140,11 +140,6 @@ function WorkspaceRoutes() {
 }
 
 /**
- * The Android bottom bar does not mount another assistant. It changes the route
- * inside the one persistent WebView, preserving the authenticated React tree,
- * the floating Jess instance and its existing Gemini Live session.
- */
-/**
  * The Android Jess tab is a full-screen overlay on the current workspace route.
  * The underlying page stays mounted and remains the context Jess can inspect or
  * operate. CompanionPage and JessFloatingAssistant share one React tree,
