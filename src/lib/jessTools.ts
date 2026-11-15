@@ -1908,7 +1908,7 @@ export async function executeJessTool(
 
       case 'get_predictive_tasking': {
         const horizonDays = Math.max(1, Math.min(30, Number(args.horizonDays) || 14));
-        const resultLimit = safeLimit(args.limit, 10, 20);
+        const resultLimit = Math.max(1, Math.min(20, Number(args.limit) || 10));
         const taskSnap = await getDocs(user.role === 'admin'
           ? query(collection(db, 'tasks'), limit(300))
           : query(collection(db, 'tasks'), where('assignedTo', '==', user.id), limit(300)));
