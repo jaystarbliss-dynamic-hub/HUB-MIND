@@ -13,6 +13,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.hubmind.MainActivity
@@ -28,6 +29,23 @@ class HubMindAgentForegroundService : Service() {
         private const val EXTRA_JESS_MICROPHONE_ACTIVE = "jessMicrophoneActive"
         private const val EXTRA_CAPTURE_RESULT_CODE = "captureResultCode"
         private const val EXTRA_CAPTURE_RESULT_DATA = "captureResultData"
+
+        @Volatile
+        private var activeInstance: HubMindAgentForegroundService? = null
+
+        @Volatile
+        private var hubMindActivityVisible: Boolean = false
+
+        fun setHubMindActivityVisible(context: Context, visible: Boolean) {
+            hubMindActivityVisible = visible
+            val instance = activeInstance
+            if (instance != null) {
+                if (visible) instance.onActivityBecameVisible()
+                else if (Settings.canDrawOverlays(context)) instance.jessOrbOverlayManager.show()
+            } else if (!visible && Settings.canDrawOverlays(context)) {
+                startService(context)
+            }
+        }
 
         fun startService(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, HubMindAgentForegroundService::class.java))
@@ -59,17 +77,36 @@ class HubMindAgentForegroundService : Service() {
                 putExtra(EXTRA_JESS_MICROPHONE_ACTIVE, active)
             }
             if (active) ContextCompat.startForegroundService(context, intent)
-            else context.startService(intent)
+            else if (activeInstance != null) runCatching { context.startService(intent) }
+        }
+
+        /** Update the native overlay from the real workspace Live state without IPC per audio frame. */
+        fun updateJessOverlayState(
+            context: Context,
+            state: String,
+            inputLevel: Float,
+            outputLevel: Float,
+            connected: Boolean
+        ) {
+            activeInstance?.jessOrbOverlayManager?.update(state, inputLevel, outputLevel, connected)
+        }
+
+        fun refreshJessOverlay(context: Context) {
+            if (Settings.canDrawOverlays(context)) startService(context)
         }
     }
 
     private lateinit var screenCaptureManager: AndroidScreenCaptureManager
+    lateinit var jessOrbOverlayManager: JessOrbOverlayManager
+        private set
     private var jessMicrophoneActive = false
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         screenCaptureManager = AndroidScreenCaptureManager(applicationContext)
+        jessOrbOverlayManager = JessOrbOverlayManager(applicationContext)
+        activeInstance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -88,7 +125,23 @@ class HubMindAgentForegroundService : Service() {
         }
 
         val captureRequested = intent?.action == ACTION_START_SCREEN_CAPTURE || screenCaptureManager.isCaptureActive
+        if (
+            intent?.action == ACTION_SET_JESS_MICROPHONE &&
+            !jessMicrophoneActive &&
+            !screenCaptureManager.isCaptureActive &&
+            hubMindActivityVisible
+        ) {
+            jessOrbOverlayManager.hide()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
         startAgentForeground(captureRequested, jessMicrophoneActive)
+        // Use the native overlay only while the app itself is in the background.
+        // In the foreground, the workspace/Jess-tab React orb is the visible control.
+        if (hubMindActivityVisible) jessOrbOverlayManager.hide()
+        else jessOrbOverlayManager.show()
 
         when (intent?.action) {
             ACTION_START_SCREEN_CAPTURE -> {
@@ -109,6 +162,16 @@ class HubMindAgentForegroundService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    private fun onActivityBecameVisible() {
+        jessOrbOverlayManager.hide()
+        // Once the in-app orb is visible again, the background overlay is no
+        // longer needed. Keep the service only for an active mic/screen session.
+        if (!jessMicrophoneActive && !screenCaptureManager.isCaptureActive) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
     }
 
     private fun startAgentForeground(includeMediaProjection: Boolean, includeMicrophone: Boolean) {
@@ -157,7 +220,9 @@ class HubMindAgentForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        jessOrbOverlayManager.close()
         screenCaptureManager.stopCapture()
+        if (activeInstance === this) activeInstance = null
         super.onDestroy()
     }
 

@@ -23,6 +23,7 @@ declare global {
 
 export function CompanionPage() {
   const { profile } = useAuth();
+  const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
   const [owner, setOwner] = useState<JessSessionOwner | null>(null);
   const [requestError, setRequestError] = useState('');
   const [controlActive, setControlActive] = useState(false);
@@ -197,9 +198,14 @@ export function CompanionPage() {
     // Tap / double-tap handling
     const now = Date.now();
     if (now - p.lastTap < 380) {
-      // Double tap: restore full workspace
+      // Double tap restores the Windows workspace, or ends the current Android
+      // Live session when this companion route is being used inside the APK.
       p.lastTap = 0;
-      void window.hubMindDesktop?.showMain();
+      if (window.hubMindDesktop?.showMain) {
+        void window.hubMindDesktop.showMain();
+      } else {
+        bridgeChannelRef.current?.postMessage({ type: 'stop' });
+      }
     } else {
       // Single tap: toggle listening or activate voice
       p.lastTap = now;
@@ -209,7 +215,12 @@ export function CompanionPage() {
 
   const handleOrbTap = useCallback(async () => {
     // Broadcast immediately to main workspace
-    bridgeChannelRef.current?.postMessage({ type: 'toggle-listen' });
+    bridgeChannelRef.current?.postMessage({ type: 'toggle' });
+
+    // Android's /orb route and its authenticated workspace share this same
+    // React tree and LiveAudioClient. The BroadcastChannel message above is
+    // sufficient; do not create a desktop-only Firestore activation request.
+    if ((window as any).HubMindAndroid?.isAndroidApp?.() === true) return;
 
     if (owner && owner.leaseUntil > Date.now()) {
       if (owner.client === 'windows-desktop') {
@@ -242,7 +253,7 @@ export function CompanionPage() {
   const localActive = isActive && owner?.client === 'windows-desktop';
 
   return (
-    <main className="jess-orb-window" aria-label="Jess desktop companion">
+    <main className={`jess-orb-window ${isAndroidApp ? 'jess-orb-android-tab' : ''}`} aria-label={isAndroidApp ? "Jess assistant" : "Jess desktop companion"}>
       <div
         className={`jess-orb-drag ${dismissMode ? 'is-dismiss-mode' : ''}`}
         title="Tap to talk · Double-click to open workspace · Drag to move · Click X or drag down to dismiss"
@@ -262,15 +273,17 @@ export function CompanionPage() {
       </div>
 
       {/* Tiny X close button right beside the orb */}
-      <button
-        type="button"
-        title="Close Jess orb"
-        aria-label="Close Jess orb"
-        className="jess-orb-tiny-close"
-        onClick={handleCloseClick}
-      >
-        <X size={11} strokeWidth={2.5} />
-      </button>
+      {!isAndroidApp && (
+        <button
+          type="button"
+          title="Close Jess orb"
+          aria-label="Close Jess orb"
+          className="jess-orb-tiny-close"
+          onClick={handleCloseClick}
+        >
+          <X size={11} strokeWidth={2.5} />
+        </button>
+      )}
 
       {/* Status dot indicator */}
       {isActive && (

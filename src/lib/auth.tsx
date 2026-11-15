@@ -13,6 +13,8 @@ interface AuthContextType {
   profile: User | null;
   loading: boolean;
   authorizationError: string | null;
+  nativeAuthError: string | null;
+  retryNativeAuth: () => void;
   updatePreferredName: (preferredName: string) => Promise<void>;
   updateProfileData: (data: Partial<User>) => Promise<void>;
   logout: () => Promise<void>;
@@ -23,6 +25,8 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   loading: true,
   authorizationError: null,
+  nativeAuthError: null,
+  retryNativeAuth: () => {},
   updatePreferredName: async () => {},
   updateProfileData: async () => {},
   logout: async () => {},
@@ -31,43 +35,146 @@ const AuthContext = createContext<AuthContextType>({
 const PENDING_INVITE_STORAGE_KEY = 'hubmind_pending_invite';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Hold the first web auth-state callback until the native Firebase credential
-  // has been accepted. This prevents ProtectedRoute from redirecting to /login
-  // in the brief interval between the WebView opening and Google credential sign-in.
   const nativeAuthBootstrapPending = useRef(false);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [profile, setProfile] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [authorizationError, setAuthorizationError] = useState<string | null>(null);
+  const [nativeAuthError, setNativeAuthError] = useState<string | null>(null);
+  const [nativeAuthRetryNonce, setNativeAuthRetryNonce] = useState(0);
 
+  const retryNativeAuth = () => {
+    setNativeAuthError(null);
+    setLoading(true);
+    setNativeAuthRetryNonce(value => value + 1);
+  };
+
+  // Android signs in once natively. If the WebView's Firebase persistence was
+  // lost during a process restart, request the same saved Google account
+  // silently and exchange its ID token with the Web Firebase SDK. Never send
+  // the user to a second interactive login screen during this handoff.
   useEffect(() => {
     const bridge = (window as any).HubMindAndroid;
     if (typeof bridge?.getGoogleIdToken !== 'function') return;
 
-    let googleIdToken = '';
+    let disposed = false;
+    let restoreTimeout: number | null = null;
+    const clearRestoreTimeout = () => {
+      if (restoreTimeout !== null) window.clearTimeout(restoreTimeout);
+      restoreTimeout = null;
+    };
+    const onTokenReady = () => {
+      if (disposed) return;
+      clearRestoreTimeout();
+      nativeAuthBootstrapPending.current = true;
+      setNativeAuthError(null);
+      let googleIdToken = '';
+      try {
+        googleIdToken = String(bridge.getGoogleIdToken() || '').trim();
+      } catch (error) {
+        console.warn('[Hub-Mind Android] Could not read the restored Google token:', error);
+      }
+      if (!googleIdToken) {
+        // The native Google client can still be completing its silent restore.
+        return;
+      }
+      let nativeUserId = '';
+      try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
+      if (auth.currentUser && (!nativeUserId || auth.currentUser.uid === nativeUserId)) {
+        try { bridge.completeGoogleSignIn?.(); } catch {}
+        nativeAuthBootstrapPending.current = false;
+        return;
+      }
+
+      // If the native app restored a different authorized account than the
+      // WebView, exchange the native account's credential and replace the stale
+      // browser identity instead of showing a second login page.
+      void signInWithCredential(auth, GoogleAuthProvider.credential(googleIdToken))
+        .then(() => {
+          // The native token is acknowledged only after Web Firebase accepts it.
+          try { bridge.completeGoogleSignIn?.(); } catch {}
+          if (window.location.pathname === '/' || window.location.pathname === '/login') {
+            window.location.replace('/workspace');
+          }
+        })
+        .catch((error) => {
+          console.error('[Hub-Mind Android] Workspace sign-in handoff failed:', error);
+          if (!disposed && !auth.currentUser) {
+            setNativeAuthError('Your existing Hub-Mind sign-in could not be connected to the workspace. Retry the secure session handoff; you should not need to choose your account again.');
+          }
+        })
+        .finally(() => {
+          nativeAuthBootstrapPending.current = false;
+          if (!disposed && !auth.currentUser) setLoading(false);
+        });
+    };
+
+    const onTokenError = (event: Event) => {
+      if (disposed) return;
+      clearRestoreTimeout();
+      nativeAuthBootstrapPending.current = false;
+      if (auth.currentUser) return;
+      const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+      setNativeAuthError(
+        message || 'Hub-Mind could not automatically restore the Google account already signed in on this phone. Retry the secure session handoff.'
+      );
+      setLoading(false);
+    };
+
+    window.addEventListener('hubmind-native-token-ready', onTokenReady);
+    window.addEventListener('hubmind-native-token-error', onTokenError);
+
+    let existingToken = '';
     try {
-      googleIdToken = String(bridge.getGoogleIdToken() || '').trim();
+      existingToken = String(bridge.getGoogleIdToken() || '').trim();
     } catch (error) {
       console.warn('[Hub-Mind Android] Native sign-in handoff was unavailable:', error);
     }
-    if (!googleIdToken) return;
 
-    nativeAuthBootstrapPending.current = true;
-    let disposed = false;
-    void signInWithCredential(auth, GoogleAuthProvider.credential(googleIdToken))
-      .then(() => {
-        // Only acknowledge/clear the native token after Firebase accepted it.
+    let nativeUserId = '';
+    try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
+    const webUserMatchesNative = !!auth.currentUser &&
+      (!nativeUserId || auth.currentUser.uid === nativeUserId);
+
+    if (webUserMatchesNative) {
+      if (existingToken) {
         try { bridge.completeGoogleSignIn?.(); } catch {}
-        if (window.location.pathname === '/' || window.location.pathname === '/login') {
-          window.location.replace('/workspace');
+      }
+    } else if (existingToken) {
+      onTokenReady();
+    } else {
+      nativeAuthBootstrapPending.current = true;
+      setNativeAuthError(null);
+      if (typeof bridge.requestGoogleIdToken === 'function') {
+        try {
+          bridge.requestGoogleIdToken();
+          restoreTimeout = window.setTimeout(() => {
+            restoreTimeout = null;
+            if (disposed || auth.currentUser?.uid === nativeUserId) return;
+            nativeAuthBootstrapPending.current = false;
+            setNativeAuthError('Hub-Mind is still waiting for Android to restore your saved Google session. Check your connection and retry the secure session handoff.');
+            setLoading(false);
+          }, 25000);
+        } catch (error: any) {
+          clearRestoreTimeout();
+          nativeAuthBootstrapPending.current = false;
+          setNativeAuthError(error?.message || 'Could not restore your existing Google sign-in.');
+          setLoading(false);
         }
-      })
-      .catch((error) => {
-        console.error('[Hub-Mind Android] Workspace sign-in handoff failed:', error);
-      })
-      .finally(() => {
+      } else {
         nativeAuthBootstrapPending.current = false;
-        if (!disposed && !auth.currentUser) setLoading(false);
-      });
+        setNativeAuthError('This installed Hub-Mind version cannot yet restore the shared workspace session. Update the app to remove the second sign-in prompt.');
+        setLoading(false);
+      }
+    }
 
-    return () => { disposed = true; };
-  }, []);
+    return () => {
+      disposed = true;
+      clearRestoreTimeout();
+      window.removeEventListener('hubmind-native-token-ready', onTokenReady);
+      window.removeEventListener('hubmind-native-token-error', onTokenError);
+    };
+  }, [nativeAuthRetryNonce]);
 
   // Keep the Electron background command receiver aligned with Firebase auth.
   // The ID token is held in memory and refreshed automatically by Firebase.
@@ -94,11 +201,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try { void (window as any).hubMindDesktop?.clearDeviceSession?.(); } catch {}
     };
   }, []);
-
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [profile, setProfile] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [authorizationError, setAuthorizationError] = useState<string | null>(null);
 
   useEffect(() => {
     let stopProfile: (() => void) | null = null;
@@ -137,6 +239,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // A null initial state is not a sign-out while native Google credentials
       // are still being exchanged for the Web Firebase session.
       if (!firebaseUser && nativeAuthBootstrapPending.current) return;
+      if (firebaseUser && nativeAuthBootstrapPending.current) {
+        let nativeUserId = '';
+        try { nativeUserId = String((window as any).HubMindAndroid?.getNativeUserId?.() || '').trim(); } catch {}
+        if (nativeUserId && firebaseUser.uid !== nativeUserId) return;
+      }
       stopProfile?.();
       stopProfile = null;
       if (disposed) return;
@@ -145,10 +252,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthorizationError(null);
 
       if (!firebaseUser) {
+        setNativeAuthError(null);
         setLoading(false);
         return;
       }
 
+      setNativeAuthError(null);
       setLoading(true);
       const profileRef = doc(db, 'users', firebaseUser.uid);
 
@@ -334,6 +443,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     await signOut(auth);
+    try { (window as any).HubMindAndroid?.signOutNative?.(); } catch {}
     setUser(null);
     setProfile(null);
     setAuthorizationError(null);
@@ -346,6 +456,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         loading,
         authorizationError,
+        nativeAuthError,
+        retryNativeAuth,
         updatePreferredName,
         updateProfileData,
         logout,

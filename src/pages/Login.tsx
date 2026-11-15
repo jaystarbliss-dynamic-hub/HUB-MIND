@@ -168,12 +168,6 @@ export function Login() {
       {error && <div role="alert" className="p-3 mb-5 bg-rose-950/40 border border-rose-800/60 rounded-xl text-rose-300 text-sm flex items-start gap-2"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span>{error}</span></div>}
       <button type="button" onClick={handleGoogleLogin} disabled={isBusy} className="w-full flex items-center justify-center gap-2 bg-white hover:bg-slate-100 text-slate-900 font-semibold py-3 px-4 rounded-xl disabled:opacity-60 transition-colors cursor-pointer">{isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}{isBusy ? 'Signing in…' : 'Continue with Google'}</button>
 
-      <div className="relative my-5 flex items-center justify-center">
-        <div className="border-t border-slate-800 w-full" />
-        <span className="bg-slate-900 px-3 text-[11px] uppercase tracking-wider text-slate-500">or email</span>
-        <div className="border-t border-slate-800 w-full" />
-      </div>
-
       {invite && (
         <div className="grid grid-cols-2 gap-1.5 mb-3 rounded-xl bg-slate-950 p-1 border border-slate-800">
           <button

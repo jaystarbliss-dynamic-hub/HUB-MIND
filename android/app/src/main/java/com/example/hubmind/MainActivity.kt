@@ -3,6 +3,7 @@ package com.example.hubmind
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -21,9 +22,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
 import com.example.R
 import androidx.compose.ui.Modifier
 import com.example.hubmind.di.ServiceLocator
+import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.ui.components.HubMindBottomBar
 import com.example.hubmind.ui.components.HubMindNavDestination
 import com.example.hubmind.ui.screens.activity.ActivityScreen
@@ -32,8 +35,6 @@ import com.example.hubmind.ui.screens.auth.AuthScreen
 import com.example.hubmind.ui.screens.auth.AuthViewModel
 import com.example.hubmind.ui.screens.devices.DevicesScreen
 import com.example.hubmind.ui.screens.devices.DevicesViewModel
-import com.example.hubmind.ui.screens.home.JessHomeScreen
-import com.example.hubmind.ui.screens.home.JessHomeViewModel
 import com.example.hubmind.ui.screens.settings.SettingsScreen
 import com.example.hubmind.ui.screens.settings.SettingsViewModel
 import com.example.hubmind.ui.screens.workspace.WorkspaceScreen
@@ -59,6 +60,13 @@ class MainActivity : ComponentActivity() {
                 val isSessionValid by ServiceLocator.authRepository.isSessionValid.collectAsState()
                 val isSessionReady by ServiceLocator.authRepository.isSessionReady.collectAsState()
                 var currentTab by remember { mutableStateOf(HubMindNavDestination.WORKSPACE) }
+
+                LaunchedEffect(isSessionReady, isSessionValid) {
+                    if (!isSessionReady) return@LaunchedEffect
+                    if (!isSessionValid) {
+                        HubMindAgentForegroundService.stopService(applicationContext)
+                    }
+                }
 
                 if (!isSessionReady) {
                     Box(
@@ -109,20 +117,23 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxSize()
                                 .padding(innerPadding)
                         ) {
+                            // Keep one authenticated WebView mounted for the lifetime of the
+                            // signed-in shell. Workspace and Jess are two views of the same
+                            // React/Firebase session and the same LiveAudioClient.
+                            WorkspaceScreen(
+                                currentNativeTab = currentTab.name,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .alpha(
+                                        if (currentTab == HubMindNavDestination.WORKSPACE ||
+                                            currentTab == HubMindNavDestination.JESS
+                                        ) 1f else 0f
+                                    )
+                            )
+
                             when (currentTab) {
-                                HubMindNavDestination.JESS -> {
-                                    val jessViewModel = remember {
-                                        JessHomeViewModel(
-                                            jessRepository = ServiceLocator.jessRepository,
-                                            conversationRepository = ServiceLocator.conversationRepository,
-                                            deviceRegistryRepository = ServiceLocator.deviceRegistryRepository
-                                        )
-                                    }
-                                    JessHomeScreen(viewModel = jessViewModel)
-                                }
-                                HubMindNavDestination.WORKSPACE -> {
-                                    WorkspaceScreen(modifier = Modifier.fillMaxSize())
-                                }
+                                HubMindNavDestination.JESS,
+                                HubMindNavDestination.WORKSPACE -> Unit
                                 HubMindNavDestination.DEVICES -> {
                                     val devicesViewModel = remember {
                                         DevicesViewModel(
@@ -164,7 +175,32 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, true)
         ServiceLocator.permissionStatusRepository.refreshFromSystem()
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (ServiceLocator.authRepository.isSessionReady.value &&
+            ServiceLocator.authRepository.isSessionValid.value &&
+            Settings.canDrawOverlays(this)
+        ) {
+            // Start the visible overlay while the Activity is still foregrounded,
+            // avoiding a restricted background-service start after the app is hidden.
+            HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, false)
+        }
+    }
+
+    override fun onStop() {
+        if (ServiceLocator.authRepository.isSessionReady.value &&
+            ServiceLocator.authRepository.isSessionValid.value &&
+            Settings.canDrawOverlays(this)
+        ) {
+            HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, false)
+        } else {
+            HubMindAgentForegroundService.setHubMindActivityVisible(applicationContext, true)
+        }
+        super.onStop()
     }
 
     private fun requestEssentialRuntimePermissions() {

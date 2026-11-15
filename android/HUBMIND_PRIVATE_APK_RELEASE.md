@@ -5,8 +5,8 @@
 - **Distribution**: Direct APK download from the Hub-Mind website (not Google Play).
 - **Website**: https://hub-mind.netlify.app
 - **Application ID**: `com.aistudio.hubmind.wzyqkp` (must remain unchanged).
-- **Current integration version candidate**: `2.5.1` / version code `251`.
-- **Last verified production release**: `2.5.0` / version code `250`; it remains the public update target until the 2.5.1 signed release is published.
+- **Current integration version candidate**: `2.5.2` / version code `252`.
+- **Last verified production release**: `2.5.1` / version code `251`; it remains the public update target until the 2.5.2 signed release is published.
 - **In-app update manifest**: https://hub-mind.netlify.app/api/app-version.json.
 
 The website's Updates panel reads Android APK assets from the public GitHub Releases API. The Android app's update checker reads the static manifest above and verifies the APK SHA-256 before offering installation.
