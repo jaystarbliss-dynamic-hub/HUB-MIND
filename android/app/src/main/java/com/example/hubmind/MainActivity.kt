@@ -61,6 +61,15 @@ class MainActivity : ComponentActivity() {
                 val isSessionReady by ServiceLocator.authRepository.isSessionReady.collectAsState()
                 var currentTab by remember { mutableStateOf(HubMindNavDestination.WORKSPACE) }
 
+                LaunchedEffect(isSessionReady, isSessionValid) {
+                    if (!isSessionReady) return@LaunchedEffect
+                    if (isSessionValid && Settings.canDrawOverlays(applicationContext)) {
+                        HubMindAgentForegroundService.refreshJessOverlay(applicationContext)
+                    } else if (!isSessionValid) {
+                        HubMindAgentForegroundService.stopService(applicationContext)
+                    }
+                }
+
                 if (!isSessionReady) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
@@ -171,7 +180,10 @@ class MainActivity : ComponentActivity() {
         ServiceLocator.permissionStatusRepository.refreshFromSystem()
         // Once the user has explicitly granted Display Over Other Apps, keep
         // the system-wide Jess orb available even after the Activity is minimised.
-        if (Settings.canDrawOverlays(this)) {
+        if (ServiceLocator.authRepository.isSessionReady.value &&
+            ServiceLocator.authRepository.isSessionValid.value &&
+            Settings.canDrawOverlays(this)
+        ) {
             HubMindAgentForegroundService.refreshJessOverlay(this)
         }
     }
