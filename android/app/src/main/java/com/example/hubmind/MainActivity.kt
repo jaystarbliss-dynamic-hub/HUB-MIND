@@ -3,6 +3,7 @@ package com.example.hubmind
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -25,6 +26,7 @@ import androidx.compose.ui.draw.alpha
 import com.example.R
 import androidx.compose.ui.Modifier
 import com.example.hubmind.di.ServiceLocator
+import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.ui.components.HubMindBottomBar
 import com.example.hubmind.ui.components.HubMindNavDestination
 import com.example.hubmind.ui.screens.activity.ActivityScreen
@@ -167,6 +169,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         ServiceLocator.permissionStatusRepository.refreshFromSystem()
+        // Once the user has explicitly granted Display Over Other Apps, keep
+        // the system-wide Jess orb available even after the Activity is minimised.
+        if (Settings.canDrawOverlays(this)) {
+            HubMindAgentForegroundService.refreshJessOverlay(this)
+        }
     }
 
     private fun requestEssentialRuntimePermissions() {
