@@ -14,6 +14,7 @@ const STORAGE_CALENDAR_TOKEN = 'hubmind_gcal_token_v3';
 const STORAGE_CALENDAR_EXP = 'hubmind_gcal_token_exp_v3';
 const STORAGE_CONNECTED = 'hubmind_gcal_connected_v3';
 const STORAGE_EMAIL = 'hubmind_gcal_email_v3';
+const STORAGE_SCOPES = 'hubmind_google_scopes_v1';
 
 function userStorageKey(base: string) {
   return `${base}_${auth.currentUser?.uid || 'anonymous'}`;
@@ -21,24 +22,40 @@ function userStorageKey(base: string) {
 
 let cachedCalendarToken: string | null = null;
 let calendarTokenExpiry = 0;
+let cachedGrantedScopes = '';
 
-export function setCachedCalendarToken(token: string, expiresInSeconds = 3500) {
+function normalizeScopeList(value?: string | string[]): string {
+  return Array.isArray(value) ? value.join(' ') : String(value || '');
+}
+
+function hasRequiredScopes(grantedValue: string, requiredScopes: string[]): boolean {
+  if (!requiredScopes.length) return true;
+  const granted = new Set(String(grantedValue || '').split(/\\s+/).filter(Boolean));
+  return requiredScopes.every(scope => granted.has(scope));
+}
+
+export function setCachedCalendarToken(token: string, expiresInSeconds = 3500, scopes = '') {
   cachedCalendarToken = token;
+  cachedGrantedScopes = normalizeScopeList(scopes);
   calendarTokenExpiry = Date.now() + Math.max(60, expiresInSeconds) * 1000;
   try {
     localStorage.setItem(userStorageKey(STORAGE_CALENDAR_TOKEN), token);
     localStorage.setItem(userStorageKey(STORAGE_CALENDAR_EXP), String(calendarTokenExpiry));
+    localStorage.setItem(userStorageKey(STORAGE_SCOPES), cachedGrantedScopes);
   } catch {}
 }
 
-export function getCachedCalendarToken(): string | null {
+export function getCachedCalendarToken(requiredScopes: string[] = []): string | null {
   if (!auth.currentUser) return null;
-  if (cachedCalendarToken && Date.now() < calendarTokenExpiry - 60000) return cachedCalendarToken;
+  if (cachedCalendarToken && Date.now() < calendarTokenExpiry - 60000 &&
+      hasRequiredScopes(cachedGrantedScopes, requiredScopes)) return cachedCalendarToken;
   try {
     const token = localStorage.getItem(userStorageKey(STORAGE_CALENDAR_TOKEN));
     const exp = Number(localStorage.getItem(userStorageKey(STORAGE_CALENDAR_EXP))) || 0;
-    if (token && Date.now() < exp - 60000) {
+    const scopes = localStorage.getItem(userStorageKey(STORAGE_SCOPES)) || '';
+    if (token && Date.now() < exp - 60000 && hasRequiredScopes(scopes, requiredScopes)) {
       cachedCalendarToken = token;
+      cachedGrantedScopes = scopes;
       calendarTokenExpiry = exp;
       return token;
     }
@@ -59,8 +76,10 @@ function markDisconnected() {
     localStorage.removeItem(userStorageKey(STORAGE_EMAIL));
     localStorage.removeItem(userStorageKey(STORAGE_CALENDAR_TOKEN));
     localStorage.removeItem(userStorageKey(STORAGE_CALENDAR_EXP));
+    localStorage.removeItem(userStorageKey(STORAGE_SCOPES));
   } catch {}
   cachedCalendarToken = null;
+  cachedGrantedScopes = '';
   calendarTokenExpiry = 0;
 }
 
@@ -85,7 +104,7 @@ async function getFirebaseBearer(): Promise<string> {
   return user.getIdToken(true);
 }
 
-async function refreshPersistentGoogleToken(): Promise<string | null> {
+async function refreshPersistentGoogleToken(requiredScopes: string[] = []): Promise<string | null> {
   try {
     const idToken = await getFirebaseBearer();
     const response = await fetch('/api/google-token', {
@@ -101,7 +120,11 @@ async function refreshPersistentGoogleToken(): Promise<string | null> {
     }
     const data = await response.json();
     if (!data?.accessToken) return null;
-    setCachedCalendarToken(data.accessToken, Number(data.expiresIn || 3500));
+    const grantedScopes = String(data.scope || data.scopes || '');
+    // A refresh token can outlive its original consent. Never reuse a Calendar-only
+    // token for Gmail send or another API that requires scopes the user never granted.
+    if (!hasRequiredScopes(grantedScopes, requiredScopes)) return null;
+    setCachedCalendarToken(data.accessToken, Number(data.expiresIn || 3500), grantedScopes);
     markConnected(data.email);
     return data.accessToken;
   } catch (error) {
@@ -185,7 +208,7 @@ async function startPersistentGoogleAuthorization(): Promise<string> {
     connectedAt: new Date().toISOString(),
   }, { merge: true });
 
-  setCachedCalendarToken(data2.accessToken, Number(data2.expiresIn || 3500));
+  setCachedCalendarToken(data2.accessToken, Number(data2.expiresIn || 3500), data2.scopes || [...CALENDAR_SCOPES, ...GMAIL_SCOPES, ...DRIVE_SCOPES].join(' '));
   markConnected(data2.email || auth.currentUser?.email || undefined);
   return data2.accessToken;
 }
@@ -199,10 +222,10 @@ export async function requestGoogleAccessToken(
   scopes: string[] = CALENDAR_SCOPES,
   interactive = true,
 ): Promise<string> {
-  const cached = getCachedCalendarToken();
+  const cached = getCachedCalendarToken(scopes);
   if (cached) return cached;
 
-  const persistent = await refreshPersistentGoogleToken();
+  const persistent = await refreshPersistentGoogleToken(scopes);
   if (persistent) return persistent;
 
   if (!interactive) {
