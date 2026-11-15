@@ -386,6 +386,8 @@ class HubMindControlPlaneTransportImpl(
             "TYPE_TEXT", "INPUT_TEXT", "SEND_TEXT_TO_DEVICE" -> AndroidActionType.TYPE_TEXT
             "CLEAR_TEXT" -> AndroidActionType.CLEAR_TEXT
             "GET_INSTALLED_APPS" -> AndroidActionType.GET_INSTALLED_APPS
+            "GET_APP_USAGE_STATS", "APP_USAGE_STATS" -> AndroidActionType.GET_APP_USAGE_STATS
+            "OPEN_USAGE_ACCESS_SETTINGS" -> AndroidActionType.OPEN_USAGE_ACCESS_SETTINGS
             "GET_SCREEN_HIERARCHY", "DUMP_HIERARCHY", "READ_SCREEN" -> AndroidActionType.GET_SCREEN_HIERARCHY
             "CAPTURE_SCREEN", "TAKE_SCREENSHOT", "GET_DEVICE_SCREEN" -> AndroidActionType.CAPTURE_SCREEN
             "SET_CLIPBOARD", "CLIPBOARD_WRITE" -> AndroidActionType.SET_CLIPBOARD
