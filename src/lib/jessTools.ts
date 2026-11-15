@@ -327,6 +327,12 @@ export const JESS_TOOLS_DECLARATIONS: JessToolDefinition[] = [
     }, ['resourceType', 'resourceId']) 
   },
 
+  // Predictive planning, code assistance, and automated project documentation
+  { name: 'get_local_time_context', description: 'Read the actual local date, time, IANA time zone, UTC offset and locale of the device running Hub-Mind. Use this before interpreting relative dates, deadlines or schedules; never assume UTC when a local device time is available.', parameters: object({}) },
+  { name: 'get_predictive_tasking', description: 'Prioritize the signed-in user’s open tasks using actual deadlines, overdue state, priority and progress. Return a ranked next-action queue with concise reasons and prep suggestions. This is advisory: never create, assign or reschedule tasks without a separate user request.', parameters: object({ horizonDays: { type: 'number', description: 'Look-ahead window in days (1–30, default 14).' }, limit: { type: 'number', description: 'Maximum recommendations (1–20, default 10).' } }) },
+  { name: 'get_code_review_context', description: 'Load code from an accessible Hub-Mind document so Jess can act as an AI pair programmer. Return the source with line numbers, inferred language and review focus. The model should then provide concrete bug, security, performance, readability and test findings; do not claim to have run the code.', parameters: object({ documentId: { type: 'string', description: 'Document ID, or current document when omitted.' }, focus: { type: 'string', description: 'Optional review focus: bugs, security, performance, architecture, tests or general.' }, maxCharacters: { type: 'number', description: 'Maximum source characters (1,000–30,000; default 18,000).' } }) },
+  { name: 'generate_project_documentation', description: 'Generate or refresh a factual project documentation document from the project record and its linked tasks, meetings and accessible documents. Include generation time, sources, current status, completed/open work, deadlines and unresolved gaps. Provide projectId or projectName. Existing generated documentation can be refreshed by documentId. This tool never invents code changes or unrecorded project facts.', parameters: object({ projectId: { type: 'string' }, projectName: { type: 'string' }, documentId: { type: 'string', description: 'Optional existing generated project document to refresh.' }, title: { type: 'string', description: 'Optional documentation title.' } }) },
+
   // Tasks
   { name: 'list_tasks', description: 'List tasks visible to the signed-in user with status or priority filters.', parameters: object({ status: { type: 'string' }, priority: { type: 'string' }, limit: { type: 'number' } }) },
   { name: 'create_task', description: 'Create a new task in Hub-Mind.', parameters: object({ title: { type: 'string' }, description: { type: 'string' }, priority: { type: 'string', enum: ['urgent', 'high', 'medium', 'low'] }, deadline: { type: 'string' }, assignedTo: { type: 'string' } }, ['title']) },
@@ -1858,6 +1864,241 @@ export async function executeJessTool(
             message: `Generated share links for ${resourceType} "${title}". Direct Link: ${fullUrl}`,
           },
         };
+      }
+
+      case 'get_local_time_context': {
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hourCycle: 'h23',
+        }).formatToParts(now);
+        const part = (type: string) => parts.find(p => p.type === type)?.value || '';
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const offsetMinutes = -now.getTimezoneOffset();
+        const offset = (offsetMinutes < 0 ? '-' : '+') +
+          String(Math.floor(Math.abs(offsetMinutes) / 60)).padStart(2, '0') + ':' +
+          String(Math.abs(offsetMinutes) % 60).padStart(2, '0');
+        return { result: {
+          success: true,
+          localDate: `${part('year')}-${part('month')}-${part('day')}`,
+          localTime: `${part('hour')}:${part('minute')}:${part('second')}`,
+          localDateTime: `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${offset}`,
+          timeZone,
+          utcOffset: offset,
+          locale: Intl.DateTimeFormat().resolvedOptions().locale || 'unknown',
+          timestamp: now.toISOString(),
+          source: 'The device running Hub-Mind',
+        } };
+      }
+
+      case 'get_predictive_tasking': {
+        const horizonDays = Math.max(1, Math.min(30, Number(args.horizonDays) || 14));
+        const resultLimit = safeLimit(args.limit, 10, 20);
+        const taskSnap = await getDocs(user.role === 'admin'
+          ? query(collection(db, 'tasks'), limit(300))
+          : query(collection(db, 'tasks'), where('assignedTo', '==', user.id), limit(300)));
+        const now = Date.now();
+        const horizonEnd = now + horizonDays * 24 * 60 * 60 * 1000;
+        const priorityWeight: Record<string, number> = { urgent: 100, high: 65, medium: 35, low: 10 };
+        const ranked = taskSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
+          .filter((task: any) => !['completed', 'cancelled', 'archived'].includes(String(task.status || '').toLowerCase()))
+          .map((task: any) => {
+            const rawDeadline = task.deadline || task.dueDate || task.dueAt || null;
+            const deadlineAt = rawDeadline ? new Date(rawDeadline).getTime() : NaN;
+            const validDeadline = Number.isFinite(deadlineAt);
+            const hoursUntil = validDeadline ? (deadlineAt - now) / 3_600_000 : null;
+            let score = priorityWeight[String(task.priority || 'medium').toLowerCase()] || 35;
+            const reasons: string[] = [];
+            if (validDeadline && deadlineAt < now) { score += 120; reasons.push('overdue'); }
+            else if (validDeadline && hoursUntil !== null && hoursUntil <= 24) { score += 85; reasons.push('due within 24 hours'); }
+            else if (validDeadline && hoursUntil !== null && hoursUntil <= 72) { score += 55; reasons.push('due within 3 days'); }
+            else if (validDeadline && deadlineAt <= horizonEnd) { score += 25; reasons.push('due within look-ahead window'); }
+            if (String(task.priority).toLowerCase() === 'urgent') reasons.push('urgent priority');
+            else if (String(task.priority).toLowerCase() === 'high') reasons.push('high priority');
+            if (String(task.status || '').toLowerCase().includes('progress')) { score += 8; reasons.push('already in progress'); }
+            if (!validDeadline) reasons.push('no deadline set');
+            return {
+              id: task.id,
+              title: String(task.title || 'Untitled task'),
+              status: task.status || 'assigned',
+              priority: task.priority || 'medium',
+              deadline: rawDeadline,
+              assignedTo: task.assignedTo || null,
+              score,
+              reasons,
+              recommendedNextStep: validDeadline && deadlineAt < now
+                ? 'Review the blocker and agree a revised delivery time.'
+                : validDeadline && hoursUntil !== null && hoursUntil <= 24
+                  ? 'Reserve a focused work block and confirm any dependencies.'
+                  : 'Check the next concrete milestone and prepare the required materials.',
+            };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, resultLimit);
+        return { result: {
+          success: true,
+          generatedAt: new Date(now).toISOString(),
+          horizonDays,
+          totalOpenTasks: ranked.length,
+          recommendations: ranked,
+          advisoryOnly: true,
+          message: ranked.length
+            ? 'Ranked open tasks by deadline pressure, priority and progress. These are suggestions only; no tasks were changed.'
+            : 'No open tasks were found in the accessible task list.',
+        } };
+      }
+
+      case 'get_code_review_context': {
+        const docId = String(args.documentId || context?.documentId || '').trim();
+        if (!docId) return { result: { success: false, error: 'Open a code document or provide its document ID first.' } };
+        const item = await readResource('documents', docId, user);
+        if (!item) return { result: { success: false, error: 'Code document not found or you do not have read access.' } };
+        const source = String(item.data.content || '');
+        const plain = source
+          .replace(/<pre[^>]*><code[^>]*>/gi, '\n')
+          .replace(/<\\/code><\\/pre>/gi, '\n')
+          .replace(/<\\/(?:p|div|h[1-6]|li)>/gi, '\n')
+          .replace(/<[^>]+>/g, '')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+          .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+          .trim();
+        if (!plain) return { result: { success: false, error: 'The selected document is empty. Paste or save source code into it before requesting a review.' } };
+        const maxChars = Math.max(1000, Math.min(30000, Number(args.maxCharacters) || 18000));
+        const bounded = plain.slice(0, maxChars);
+        const title = String(item.data.title || 'Untitled code document');
+        const extension = title.includes('.') ? title.split('.').pop()?.toLowerCase() : '';
+        const languageByExt: Record<string, string> = {
+          ts: 'TypeScript', tsx: 'TypeScript React', js: 'JavaScript', jsx: 'JavaScript React',
+          py: 'Python', kt: 'Kotlin', java: 'Java', cs: 'C#', ps1: 'PowerShell',
+          html: 'HTML', css: 'CSS', sql: 'SQL', json: 'JSON', md: 'Markdown',
+        };
+        const lines = bounded.split('\n');
+        const numbered = lines.map((line, index) => `${String(index + 1).padStart(4, ' ')} | ${line}`).join('\n');
+        return { result: {
+          success: true,
+          documentId: item.id,
+          title,
+          language: languageByExt[extension || ''] || 'Unknown (infer from source)',
+          focus: String(args.focus || 'general'),
+          totalLines: plain.split('\n').length,
+          truncated: plain.length > maxChars,
+          sourceCode: numbered,
+          reviewInstructions: 'Review the supplied source. Prioritize reproducible defects and security issues; cite line numbers; distinguish confirmed problems from hypotheses; propose focused patches and tests. Do not claim code was executed.',
+        } };
+      }
+
+      case 'generate_project_documentation': {
+        const projectTerm = String(args.projectId || args.projectName || '').trim();
+        if (!projectTerm) return { result: { success: false, error: 'Provide a project ID or project name.' } };
+        let project = await readResource('projects', projectTerm, user);
+        if (!project) {
+          const projectSnap = await getDocs(query(collection(db, 'projects'), limit(200)));
+          const normalized = projectTerm.toLowerCase();
+          const candidates = projectSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
+            .filter((p: any) => String(p.name || p.title || '').toLowerCase() === normalized ||
+              String(p.name || p.title || '').toLowerCase().includes(normalized));
+          if (candidates.length > 1) return { result: { success: false, needsClarification: true, matches: candidates.slice(0, 8).map(p => ({ id: p.id, name: p.name || p.title })), message: 'Several projects match that name. Choose the correct project before generating documentation.' } };
+          if (candidates[0]) project = { id: candidates[0].id, data: candidates[0] };
+        }
+        if (!project) return { result: { success: false, error: 'Project not found or you do not have access to it.' } };
+
+        const sourceWarnings: string[] = [];
+        const loadLinked = async (collectionName: string) => {
+          try {
+            const snap = await getDocs(query(collection(db, collectionName), where('projectId', '==', project.id), limit(120)));
+            return snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+          } catch (error: any) {
+            sourceWarnings.push(`${collectionName}: ${error?.message || 'not accessible'}`);
+            return [];
+          }
+        };
+        const [tasks, meetings, accessibleDocs] = await Promise.all([
+          loadLinked('tasks'),
+          loadLinked('meetings'),
+          fetchAllDocumentsForUser(user).catch((error: any) => {
+            sourceWarnings.push(`documents: ${error?.message || 'not accessible'}`);
+            return [];
+          }),
+        ]);
+        const linkedDocs = accessibleDocs.filter((d: any) => d.projectId === project.id);
+        const projectData: any = project.data || {};
+        const projectName = String(projectData.name || projectData.title || 'Untitled project');
+        const openTasks = tasks.filter((t: any) => !['completed', 'cancelled'].includes(String(t.status || '').toLowerCase()));
+        const completedTasks = tasks.filter((t: any) => String(t.status || '').toLowerCase() === 'completed');
+        const fmtDate = (value: any) => {
+          if (!value) return 'Not recorded';
+          const date = new Date(value);
+          return Number.isFinite(date.getTime()) ? date.toISOString() : String(value);
+        };
+        const taskLines = tasks.length ? tasks.map((t: any) =>
+          `- [${String(t.status || 'unknown').toUpperCase()}] ${t.title || 'Untitled task'} | Priority: ${t.priority || 'medium'} | Deadline: ${fmtDate(t.deadline)} | Assignee: ${t.assignedTo || 'Unassigned'}`
+        ).join('\n') : '- No linked tasks were found in the accessible project task records.';
+        const meetingLines = meetings.length ? meetings.map((m: any) =>
+          `- ${m.title || m.subject || m.notesRaw?.slice(0, 90) || 'Meeting'} | Date: ${fmtDate(m.date || m.startAt || m.createdAt)} | Status: ${m.status || 'not recorded'}`
+        ).join('\n') : '- No linked meetings were found in the accessible project meeting records.';
+        const docLines = linkedDocs.length ? linkedDocs.map((d: any) =>
+          `- ${d.title || 'Untitled document'} | Category: ${d.category || 'not recorded'} | Updated: ${fmtDate(d.updatedAt)}`
+        ).join('\n') : '- No linked accessible documents were found.';
+        const generatedAt = new Date().toISOString();
+        const title = String(args.title || `${projectName} - Project Documentation`).slice(0, 180);
+        const markdown = [
+          `# ${projectName}`,
+          '',
+          '## Project Overview',
+          String(projectData.description || 'No project description has been recorded.'),
+          '',
+          `- **Project ID:** ${project.id}`,
+          `- **Status:** ${projectData.status || 'Not recorded'}`,
+          `- **Owner:** ${projectData.ownerName || projectData.ownerId || 'Not recorded'}`,
+          `- **Created:** ${fmtDate(projectData.createdAt)}`,
+          `- **Documentation generated:** ${generatedAt}`,
+          '',
+          '## Current Work',
+          `- **Open tasks:** ${openTasks.length}`,
+          `- **Completed tasks:** ${completedTasks.length}`,
+          '',
+          taskLines,
+          '',
+          '## Meetings and Milestones',
+          meetingLines,
+          '',
+          '## Linked Documents',
+          docLines,
+          '',
+          '## Risks and Gaps',
+          openTasks.filter((t: any) => t.deadline && new Date(t.deadline).getTime() < Date.now() && String(t.status || '').toLowerCase() !== 'completed')
+            .map((t: any) => `- Overdue task: ${t.title || t.id} (deadline ${fmtDate(t.deadline)})`).join('\n') || '- No overdue linked tasks were detected from the records that were available.',
+          sourceWarnings.length ? `\n## Source Access Warnings\n${sourceWarnings.map(x => `- ${x}`).join('\n')}` : '',
+          '',
+          '## Source and Accuracy Note',
+          'This document was assembled from records currently stored in Hub-Mind. It does not include unrecorded code changes, conversations or work performed outside the platform. Verify source warnings before treating the document as complete.',
+        ].filter(Boolean).join('\n');
+
+        const existingId = String(args.documentId || '').trim();
+        const saved = existingId
+          ? await executeJessTool('update_document', { documentId: existingId, title, content: markdown, mode: 'replace' }, user, onPreferredName, context)
+          : await executeJessTool('create_document', { title, content: markdown, projectId: project.id, category: 'documentation' }, user, onPreferredName, context);
+        if (!saved.result?.success) return { result: { success: false, error: saved.result?.error || 'Project documentation could not be saved.', details: saved.result } };
+        const documentId = saved.result.documentId;
+        if (documentId && !existingId) {
+          await updateDoc(doc(db, 'documents', documentId), { isAutoGeneratedProjectDoc: true, projectId: project.id });
+        }
+        return { result: {
+          success: true,
+          projectId: project.id,
+          projectName,
+          documentId: documentId || existingId,
+          title,
+          openTasks: openTasks.length,
+          completedTasks: completedTasks.length,
+          meetings: meetings.length,
+          linkedDocuments: linkedDocs.length,
+          sourceWarnings,
+          message: sourceWarnings.length
+            ? 'Project documentation was generated, but some linked sources could not be read. Review the Source Access Warnings section before treating it as complete.'
+            : 'Project documentation was generated from current Hub-Mind project records.',
+        }, actionPayload: saved.actionPayload };
       }
 
       case 'list_tasks': {
