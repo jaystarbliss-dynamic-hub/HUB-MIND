@@ -51,7 +51,7 @@ test('public invitation requests open a prefilled email and the Android sign-in 
     fs.promises.readFile(new URL('../../src/components/AndroidGoogleSignInGate.tsx', import.meta.url), 'utf8'),
     fs.promises.readFile(new URL('../../src/pages/Login.tsx', import.meta.url), 'utf8'),
   ]);
-  assert.match(home, /mailto:jstarblissstudios@gmail\.com/);
+  assert.match(home, /mailto:jaystarblissstudios@gmail\.com/);
   assert.match(home, /Reason for requesting access/);
   assert.match(gate, /items-center justify-center/);
   assert.match(gate, /text-center/);
