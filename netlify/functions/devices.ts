@@ -330,6 +330,12 @@ export const handler = async (event: any) => {
         resultVerified: Boolean(body.resultVerified),
         resultSummary: String(body.resultSummary || '').slice(0, 10000),
         resultError: String(body.resultError || '').slice(0, 5000),
+        ...(typeof body.resultScreenshotBase64 === 'string' && body.resultScreenshotBase64.length <= 850000
+          ? {
+              resultScreenshotBase64: body.resultScreenshotBase64,
+              resultScreenshotCapturedAt: Number(body.resultScreenshotCapturedAt || Date.now()),
+            }
+          : {}),
         completedAt: Date.now(),
       };
 
