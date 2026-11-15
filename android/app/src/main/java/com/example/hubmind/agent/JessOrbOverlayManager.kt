@@ -11,6 +11,8 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import com.example.hubmind.MainActivity
 import android.view.View
 import android.view.WindowManager
@@ -26,19 +28,16 @@ class JessOrbOverlayManager(context: Context) {
     private val appContext = context.applicationContext
     private val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val handler = Handler(Looper.getMainLooper())
-    private val orbView = JessOrbView(appContext) { gesture ->
-        // Bring the existing app/WebView to the foreground; the gesture is
-        // queued in-process and consumed by its single Jess assistant.
-        runCatching {
-            appContext.startActivity(
-                Intent(appContext, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                }
-            )
-        }
-        HubMindJessNativeEvents.dispatch(gesture)
-    }
+    private val orbView = JessOrbView(appContext) { HubMindJessNativeEvents.dispatch(it) }
     private var attached = false
+    private var overlayParams: WindowManager.LayoutParams? = null
+    private var overlaySizePx = dp(82)
+    private var dragStartRawX = 0f
+    private var dragStartRawY = 0f
+    private var dragStartX = 0
+    private var dragStartY = 0
+    private var hasMoved = false
+    private val touchSlop = ViewConfiguration.get(appContext).scaledTouchSlop
 
     val hasPermission: Boolean
         get() = Settings.canDrawOverlays(appContext)
@@ -46,7 +45,7 @@ class JessOrbOverlayManager(context: Context) {
     fun show() {
         handler.post {
             if (attached || !hasPermission) return@post
-            val size = dp(82)
+            val size = overlaySizePx
             val params = WindowManager.LayoutParams(
                 size,
                 size,
@@ -57,15 +56,77 @@ class JessOrbOverlayManager(context: Context) {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                x = dp(10)
-                y = 0
+                x = overlayParams?.x ?: dp(10)
+                y = overlayParams?.y ?: 0
                 title = "Hub-Mind Jess"
             }
+            overlayParams = params
+            installTouchHandler(params, size)
             runCatching {
                 windowManager.addView(orbView, params)
                 attached = true
             }
         }
+    }
+
+    private fun installTouchHandler(params: WindowManager.LayoutParams, size: Int) {
+        orbView.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    dragStartRawX = event.rawX
+                    dragStartRawY = event.rawY
+                    dragStartX = params.x
+                    dragStartY = params.y
+                    hasMoved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val deltaX = event.rawX - dragStartRawX
+                    val deltaY = event.rawY - dragStartRawY
+                    if (!hasMoved && (kotlin.math.abs(deltaX) > touchSlop || kotlin.math.abs(deltaY) > touchSlop)) {
+                        hasMoved = true
+                    }
+                    if (hasMoved) {
+                        val metrics = appContext.resources.displayMetrics
+                        val maxX = (metrics.widthPixels - size).coerceAtLeast(0)
+                        val verticalReach = ((metrics.heightPixels - size) / 2).coerceAtLeast(0)
+                        params.x = (dragStartX - deltaX.toInt()).coerceIn(0, maxX)
+                        params.y = (dragStartY + deltaY.toInt()).coerceIn(-verticalReach, verticalReach)
+                        runCatching { windowManager.updateViewLayout(view, params) }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!hasMoved) {
+                        if (event.eventTime - event.downTime >= LONG_PRESS_MS) {
+                            onOverlayGesture("stop")
+                        } else {
+                            view.performClick()
+                        }
+                    }
+                    hasMoved = false
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    hasMoved = false
+                    true
+                }
+                else -> true
+            }
+        }
+    }
+
+    private fun onOverlayGesture(gesture: String) {
+        // Bring the existing app/WebView to the foreground; the gesture is
+        // queued in-process and consumed by its single Jess assistant.
+        runCatching {
+            appContext.startActivity(
+                Intent(appContext, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                }
+            )
+        }
+        HubMindJessNativeEvents.dispatch(gesture)
     }
 
     fun update(state: String, inputLevel: Float, outputLevel: Float, connected: Boolean) {
@@ -84,6 +145,11 @@ class JessOrbOverlayManager(context: Context) {
             if (!attached) return@post
             runCatching { windowManager.removeView(orbView) }
             attached = false
+            overlayParams = overlayParams?.also {
+                // Retain the user's position across foreground/background transitions.
+                it.x = overlayParams?.x ?: it.x
+                it.y = overlayParams?.y ?: it.y
+            }
         }
     }
 
@@ -124,11 +190,7 @@ class JessOrbOverlayManager(context: Context) {
             isClickable = true
             isFocusable = false
             setOnClickListener { onGesture("toggle") }
-            setOnLongClickListener {
-                onGesture("stop")
-                true
-            }
-            contentDescription = "Jess floating assistant. Tap to activate or mute. Press and hold to stop."
+            contentDescription = "Jess floating assistant. Drag to reposition. Tap to activate or mute. Press and hold to stop."
         }
 
         fun updateVisualState(state: String, inputLevel: Float, outputLevel: Float, isConnected: Boolean) {
@@ -214,6 +276,7 @@ class JessOrbOverlayManager(context: Context) {
     }
 
     companion object {
+        private const val LONG_PRESS_MS = 650L
         private val ALLOWED_STATES = setOf(
             "idle", "listening", "thinking", "speaking", "interrupted", "muted", "error"
         )
