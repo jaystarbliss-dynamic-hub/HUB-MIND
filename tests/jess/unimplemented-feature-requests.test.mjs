@@ -88,6 +88,18 @@ test('Android app usage reporting requires owner-granted Usage Access and is exp
   assert.match(tools, /OPEN_USAGE_ACCESS_SETTINGS/);
 });
 
+test('Gmail send cannot reuse a Google token without the gmail.send consent scope', async () => {
+  const tokenManager = await read('../../src/lib/googleAuthToken.ts');
+  const googleApi = await read('../../src/lib/googleApi.ts');
+
+  assert.match(tokenManager, /getCachedCalendarToken\(requiredScopes: string\[\] = \[\]\)/);
+  assert.match(tokenManager, /hasRequiredScopes\(grantedScopes, requiredScopes\)/);
+  assert.match(tokenManager, /GMAIL_SCOPES/);
+  assert.match(googleApi, /const requiredScopes = \[\.\.\.CALENDAR_SCOPES, \.\.\.GMAIL_SCOPES\]/);
+  assert.match(googleApi, /getCachedCalendarToken\(requiredScopes\)/);
+  assert.doesNotMatch(googleApi, /const cached = getCachedCalendarToken\(\);/);
+});
+
 test('Desktop has a live authenticated device command timeline distinct from visual screen mirroring', async () => {
   const page = await read('../../src/pages/DeviceActivity.tsx');
   const app = await read('../../src/App.tsx');
