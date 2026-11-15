@@ -1261,7 +1261,21 @@ export async function executeJessTool(
         }
         if (!item) return { result: { success: false, error: 'I could not find that document among the documents you can access. Please check the title or your read permission.' } };
         try {
-          const versions = await fetchDocumentVersionHistory(item.id, { throwOnRemoteError: true });
+          let versions = await fetchDocumentVersionHistory(item.id, { throwOnRemoteError: true });
+          // Every document should have a meaningful initial revision, even when its
+          // body is intentionally empty. Preserve the current state as a baseline
+          // instead of reporting a misleading empty history.
+          if (!versions.length) {
+            await createNamedCheckpoint(
+              item.id,
+              'Initial revision baseline',
+              String(item.data.title || 'Untitled Document'),
+              String(item.data.content || ''),
+              String(user.displayName || user.name || user.username || 'Hub-Mind user'),
+              user.email
+            );
+            versions = await fetchDocumentVersionHistory(item.id, { throwOnRemoteError: true });
+          }
           const sorted = [...versions].sort((a: any, b: any) => new Date(b.createdAt || b.savedAt || 0).getTime() - new Date(a.createdAt || a.savedAt || 0).getTime()).slice(0, safeLimit(args.limit, 20));
           return { result: {
             success: true,
@@ -1277,7 +1291,7 @@ export async function executeJessTool(
               changeSummary: v.changeSummary || v.checkpointName || null,
               contentAvailable: typeof v.content === 'string' && v.content.length > 0,
             })),
-            message: sorted.length ? 'Retrieved the document revision history, including locally saved revisions where available.' : 'The history lookup completed successfully but no saved revisions were found. If you expected revisions, check whether this device has local versions or whether the user can read the document versions subcollection.',
+            message: sorted.length ? 'Retrieved the document revision history, including locally saved revisions where available.' : 'An initial revision baseline was created from the current document state because no earlier saved revisions were available.',
           } };
         } catch (error: any) {
           return { result: { success: false, error: 'I found the document but could not retrieve its revision history. This is a history-access or storage issue, not proof that the document has no revisions.', details: error?.message || String(error) } };
@@ -1957,8 +1971,8 @@ export async function executeJessTool(
         const source = String(item.data.content || '');
         const plain = source
           .replace(/<pre[^>]*><code[^>]*>/gi, '\n')
-          .replace(/<\\/code><\\/pre>/gi, '\n')
-          .replace(/<\\/(?:p|div|h[1-6]|li)>/gi, '\n')
+          .replace(/<\/code><\/pre>/gi, '\n')
+          .replace(/<\/(?:p|div|h[1-6]|li)>/gi, '\n')
           .replace(/<[^>]+>/g, '')
           .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
           .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
@@ -2365,6 +2379,15 @@ export async function executeJessTool(
           synced: true,
         };
         setLocalDocsMap(localDocs);
+        // Save version 1 immediately, including for intentionally blank documents.
+        await createNamedCheckpoint(
+          ref.id,
+          'Initial version',
+          rawTitle,
+          data.content,
+          String(user.displayName || user.name || user.username || 'Hub-Mind user'),
+          user.email
+        ).catch(error => console.warn('[Jess] Initial document checkpoint could not be saved:', error));
 
         if (args.content) {
           queueJessDocumentEdit({ documentId: ref.id, content: data.content, mode: 'replace' });
@@ -2411,6 +2434,14 @@ export async function executeJessTool(
         const snap = await getDoc(ref);
         const current: any = snap.exists() ? snap.data() : (getLocalDocsMap()[docId] || {});
         const now = new Date().toISOString();
+        await createNamedCheckpoint(
+          docId,
+          'Before Jess edit',
+          String(current.title || rawTitle || 'Untitled Document'),
+          String(current.content || ''),
+          String(user.displayName || user.name || user.username || 'Hub-Mind user'),
+          user.email
+        ).catch(error => console.warn('[Jess] Pre-edit document checkpoint could not be saved:', error));
         const patch: any = { updatedAt: now, lastEditedAt: now, lastSavedAt: now, version: Number(current.version || 1) + 1 };
         if (rawTitle !== undefined) patch.title = rawTitle;
         
