@@ -44,3 +44,17 @@ test('Windows release is tag/dispatch driven and publishes an installer', () => 
   assert.match(workflow, /electron-builder --win nsis/);
   assert.match(workflow, /contents: write/);
 });
+
+test('public invitation requests open a prefilled email and the Android sign-in presentation is cardless', async () => {
+  const [home, gate, login] = await Promise.all([
+    fs.promises.readFile(new URL('../../src/pages/PublicHome.tsx', import.meta.url), 'utf8'),
+    fs.promises.readFile(new URL('../../src/components/AndroidGoogleSignInGate.tsx', import.meta.url), 'utf8'),
+    fs.promises.readFile(new URL('../../src/pages/Login.tsx', import.meta.url), 'utf8'),
+  ]);
+  assert.match(home, /mailto:jstarblissstudios@gmail\.com/);
+  assert.match(home, /Reason for requesting access/);
+  assert.match(gate, /items-center justify-center/);
+  assert.match(gate, /text-center/);
+  assert.doesNotMatch(gate, /rounded-3xl border border-slate-800 bg-slate-900/);
+  assert.match(login, /items-center justify-center/);
+});
