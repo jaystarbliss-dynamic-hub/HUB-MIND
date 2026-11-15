@@ -200,10 +200,10 @@ private class HubMindAndroidAuthBridge(
     }
 
     /**
-     * Re-acquire the already-authorized Google credential silently when the
-     * Android Firebase session survived a process restart but the in-memory
-     * WebView handoff token did not. This must never show a second account
-     * chooser or another interactive sign-in screen.
+     * Re-acquire the saved Google credential silently when Android restored its
+     * Firebase session but the WebView's in-memory handoff token did not. If
+     * Google cannot silently restore consent, fall back to Android's native
+     * account chooser and exchange that selection into the same Firebase user.
      */
     @JavascriptInterface
     fun requestGoogleIdToken() {
