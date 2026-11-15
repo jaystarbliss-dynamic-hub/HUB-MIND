@@ -40,7 +40,9 @@ class JessOrbOverlayManager(context: Context) {
     private var dragStartY = 0
     private var hasMoved = false
     private var overDismissTarget = false
-    private var dismissedUntilNextMinimize = false
+    // Preserve dismissal if Android recreates the foreground service while the
+    // same minimization cycle is still active.
+    private var dismissedUntilNextMinimize = positionPrefs.getBoolean("dismissed_until_next_minimize", false)
     private var dismissTargetAttached = false
     private val dismissTargetView = DismissTargetView(appContext)
     private val touchSlop = ViewConfiguration.get(appContext).scaledTouchSlop
@@ -202,6 +204,7 @@ class JessOrbOverlayManager(context: Context) {
 
     private fun dismissForCurrentMinimize() {
         dismissedUntilNextMinimize = true
+        positionPrefs.edit().putBoolean("dismissed_until_next_minimize", true).apply()
         hideDismissTarget()
         if (attached) {
             runCatching { windowManager.removeView(orbView) }
@@ -211,7 +214,10 @@ class JessOrbOverlayManager(context: Context) {
 
     /** A foreground return ends the current minimization cycle; the next minimize may show Jess again. */
     fun resetDismissalForNextMinimize() {
-        handler.post { dismissedUntilNextMinimize = false }
+        handler.post {
+            dismissedUntilNextMinimize = false
+            positionPrefs.edit().putBoolean("dismissed_until_next_minimize", false).apply()
+        }
     }
 
     fun hide() {
@@ -270,11 +276,15 @@ class JessOrbOverlayManager(context: Context) {
         }
 
         fun updateVisualState(state: String, inputLevel: Float, outputLevel: Float, isConnected: Boolean) {
+            val wasIdle = orbState == "idle" || orbState == "muted"
             orbState = state
             input = inputLevel
             output = outputLevel
             connected = isConnected
-            if (state == "idle" || state == "muted") scheduleIdleFade() else keepVisible()
+            val isIdle = state == "idle" || state == "muted"
+            // Only start the fade when becoming idle. Frequent meter/state
+            // refreshes must not keep resetting the inactivity timer.
+            if (isIdle && !wasIdle) scheduleIdleFade() else if (!isIdle) keepVisible()
             invalidate()
         }
 
