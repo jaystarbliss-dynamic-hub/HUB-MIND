@@ -553,7 +553,7 @@ function Invoke-Action($q){
    }
    $apps=@(Get-StartApps -ErrorAction SilentlyContinue)
    $app=$null
-   # Resolve common spoken Microsoft Teams names to the installed Start Menu app.
+   # Normalize common spoken Microsoft Teams names to the installed Start Menu app.
    if($name -match '^(?i:teams|microsoft teams|microsoft teams for work|teams work or school)$'){
     $teamMatches=@($apps|Where-Object{([string]$_.Name -match '(?i)teams')-or([string]$_.AppID -match '(?i)teams')})
     $preferred=@($teamMatches|Where-Object{[string]$_.Name -match '^(?i:Microsoft Teams|Teams)$'})
