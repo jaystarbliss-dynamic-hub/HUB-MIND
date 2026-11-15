@@ -74,12 +74,17 @@ test('Android restores the already-authorized Google account silently instead of
 
   assert.match(workspace, /fun requestGoogleIdToken\(\)/);
   assert.match(workspace, /GoogleSignIn\.getClient\(context, options\)\.silentSignIn\(\)/);
+  assert.match(workspace, /fun getNativeUserId\(\): String/);
+  assert.match(workspace, /fun signOutNative\(\)/);
   assert.match(workspace, /NativeWebAuthTokenHolder\.store\(token\)/);
   assert.match(workspace, /hubmind-native-token-ready/);
   assert.match(workspace, /hubmind-native-token-error/);
   assert.match(auth, /bridge\.requestGoogleIdToken\(\)/);
   assert.match(auth, /signInWithCredential\(auth, GoogleAuthProvider\.credential\(googleIdToken\)\)/);
   assert.match(auth, /nativeAuthBootstrapPending\.current = true/);
+  assert.match(auth, /getNativeUserId/);
+  assert.match(auth, /signOutNative/);
+  assert.match(auth, /nativeUserId && firebaseUser\.uid !== nativeUserId/);
   assert.match(auth, /completeGoogleSignIn/);
   assert.match(app, /nativeAuthError/);
   assert.match(app, /Retry secure session/);
