@@ -1638,6 +1638,8 @@ export function JessFloatingAssistant() {
 
   if (!profile) return null;
   const active = connection === 'connected' || connection === 'connecting';
+  const isAndroidJessTab = location.pathname === '/orb' &&
+    (window as any).HubMindAndroid?.isAndroidApp?.() === true;
   const size = active ? 76 : 64;
   const renderedPosition = typeof window !== 'undefined' ? clampViewportPosition(position, size) : position;
 
@@ -1796,7 +1798,7 @@ export function JessFloatingAssistant() {
       )}
 
       {/* Floating Assistant Orb Button (hidden in desktop app because the dedicated companion window is always on screen) */}
-      {!orbDismissed && !isDesktopShell && <button
+      {!orbDismissed && !isDesktopShell && !isAndroidJessTab && <button
         data-jess-orb="true"
         type="button"
         onPointerDown={onPointerDown}
@@ -1827,7 +1829,7 @@ export function JessFloatingAssistant() {
         )}
       </button>}
       {/* Very tiny X by the side of the orb to close/dismiss */}
-      {!orbDismissed && !isDesktopShell && (
+      {!orbDismissed && !isDesktopShell && !isAndroidJessTab && (
         <button
           type="button"
           aria-label="Hide Jess assistant orb"
