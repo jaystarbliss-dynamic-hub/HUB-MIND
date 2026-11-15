@@ -23,6 +23,7 @@ export function AdminUsers() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [inviteLink, setInviteLink] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [templateTitle, setTemplateTitle] = useState('');
@@ -64,6 +65,7 @@ export function AdminUsers() {
     try {
       const result = await createInvitation({ username, displayName: name, email, phone, invitedBy: profile.id });
       setInviteLink(result.link);
+      setInviteCode(result.code);
       setUsername('');
       setName('');
       setEmail('');
@@ -75,8 +77,9 @@ export function AdminUsers() {
     }
   };
 
-  const copy = async () => {
-    await navigator.clipboard.writeText(inviteLink);
+  const copy = async (value = inviteLink) => {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -233,13 +236,25 @@ export function AdminUsers() {
                 Create invitation
               </button>
               {inviteLink && (
-                <div className="md:col-span-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-                  <p className="text-xs text-emerald-300 mb-2">Invitation created successfully:</p>
-                  <div className="flex gap-2">
-                    <input readOnly value={inviteLink} className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300" />
-                    <button type="button" onClick={copy} className="px-3 rounded-lg bg-slate-800 text-slate-200 hover:text-white cursor-pointer">
-                      {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-                    </button>
+                <div className="md:col-span-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+                  <p className="text-xs text-emerald-300">Invitation created successfully. It is restricted to the Google account entered above and expires in seven days.</p>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Invitation code</label>
+                    <div className="flex gap-2">
+                      <input readOnly value={inviteCode} className="min-w-0 flex-1 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm font-bold tracking-wider text-white" />
+                      <button type="button" onClick={() => void copy(inviteCode)} className="rounded-lg bg-slate-800 px-3 text-slate-200 hover:text-white cursor-pointer" aria-label="Copy invitation code">
+                        {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Invitation link</label>
+                    <div className="flex gap-2">
+                      <input readOnly value={inviteLink} className="min-w-0 flex-1 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-300" />
+                      <button type="button" onClick={() => void copy(inviteLink)} className="rounded-lg bg-slate-800 px-3 text-slate-200 hover:text-white cursor-pointer" aria-label="Copy invitation link">
+                        {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
