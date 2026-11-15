@@ -40,7 +40,7 @@ class HubMindAgentForegroundService : Service() {
             hubMindActivityVisible = visible
             val instance = activeInstance
             if (instance != null) {
-                if (visible) instance.jessOrbOverlayManager.hide()
+                if (visible) instance.onActivityBecameVisible()
                 else if (Settings.canDrawOverlays(context)) instance.jessOrbOverlayManager.show()
             } else if (!visible && Settings.canDrawOverlays(context)) {
                 startService(context)
@@ -77,7 +77,7 @@ class HubMindAgentForegroundService : Service() {
                 putExtra(EXTRA_JESS_MICROPHONE_ACTIVE, active)
             }
             if (active) ContextCompat.startForegroundService(context, intent)
-            else runCatching { context.startService(intent) }
+            else if (activeInstance != null) runCatching { context.startService(intent) }
         }
 
         /** Update the native overlay from the real workspace Live state without IPC per audio frame. */
@@ -89,14 +89,6 @@ class HubMindAgentForegroundService : Service() {
             connected: Boolean
         ) {
             activeInstance?.jessOrbOverlayManager?.update(state, inputLevel, outputLevel, connected)
-                ?: run {
-                    if (Settings.canDrawOverlays(context)) {
-                        ContextCompat.startForegroundService(
-                            context,
-                            Intent(context, HubMindAgentForegroundService::class.java)
-                        )
-                    }
-                }
         }
 
         fun refreshJessOverlay(context: Context) {
@@ -170,6 +162,16 @@ class HubMindAgentForegroundService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    private fun onActivityBecameVisible() {
+        jessOrbOverlayManager.hide()
+        // Once the in-app orb is visible again, the background overlay is no
+        // longer needed. Keep the service only for an active mic/screen session.
+        if (!jessMicrophoneActive && !screenCaptureManager.isCaptureActive) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
     }
 
     private fun startAgentForeground(includeMediaProjection: Boolean, includeMicrophone: Boolean) {
