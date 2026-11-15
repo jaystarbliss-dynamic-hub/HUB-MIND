@@ -165,8 +165,8 @@ test('Android updater only offers a published matching app with a valid SHA-256 
   const checker = read('android/app/src/main/java/com/example/hubmind/data/updater/HubMindUpdateChecker.kt');
   const manifest = JSON.parse(read('public/api/app-version.json'));
   const buildGradle = read('android/app/build.gradle.kts');
-  const currentVersionCode = Number(buildGradle.match(/versionCode\\s*=\\s*(\\d+)/)?.[1]);
-  const currentVersionName = buildGradle.match(/versionName\\s*=\\s*"([^"]+)"/)?.[1];
+  const currentVersionCode = Number(buildGradle.match(/versionCode\s*=\s*(\d+)/)?.[1]);
+  const currentVersionName = buildGradle.match(/versionName\s*=\s*"([^"]+)"/)?.[1];
   assert.match(checker, /releaseStatus/);
   assert.match(checker, /applicationId != context\.packageName/);
   assert.match(checker, /verifyApkChecksum/);
@@ -397,8 +397,8 @@ test('Android releases have human-readable version and channel labels on homepag
   const modal = read('src/components/DesktopUpdatesModal.tsx');
   const gradle = read('android/app/build.gradle.kts');
 
-  assert.match(gradle, /versionCode\s*=\s*253/);
-  assert.match(gradle, /versionName\s*=\s*"2\.5\.3"/);
+  assert.match(gradle, /versionCode\s*=\s*254/);
+  assert.match(gradle, /versionName\s*=\s*"2\.5\.4"/);
   assert.match(naming, /OFFICIAL RELEASE/);
   assert.match(naming, /TEST BUILD · DEBUG SIGNED/);
   assert.match(naming, /compareAndroidReleaseVersions/);
@@ -426,3 +426,4 @@ test('Android Workspace WebView grants Jess microphone only to the trusted Hub-M
   assert.match(liveAudio, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(liveAudio, /audioWorklet\.addModule/);
 });
+
