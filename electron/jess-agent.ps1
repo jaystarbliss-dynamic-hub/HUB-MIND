@@ -553,10 +553,20 @@ function Invoke-Action($q){
    }
    $apps=@(Get-StartApps -ErrorAction SilentlyContinue)
    $app=$null
-   # Normalize common Microsoft Teams voice-command names before generic
-   # partial matching. Prefer the exact Teams desktop entry and report genuine
-   # ambiguity rather than silently launching the wrong personal/work client.
-   if($name -match '^(?i:teams|microsoft teams|microsoft teams for work|teams work or school)   if(!$app){
+   # Resolve common spoken Microsoft Teams names to the installed Start Menu app.
+   if($name -match '^(?i:teams|microsoft teams|microsoft teams for work|teams work or school)$'){
+    $teamMatches=@($apps|Where-Object{([string]$_.Name -match '(?i)teams')-or([string]$_.AppID -match '(?i)teams')})
+    $preferred=@($teamMatches|Where-Object{[string]$_.Name -match '^(?i:Microsoft Teams|Teams)$'})
+    if($preferred.Count -eq 1){$app=$preferred[0]}
+    elseif($preferred.Count -gt 1){
+     $workSchool=@($preferred|Where-Object{[string]$_.Name -match '(?i)work or school'})
+     if($workSchool.Count -eq 1){$app=$workSchool[0]}
+    }
+    if(!$app -and $teamMatches.Count -eq 1){$app=$teamMatches[0]}
+    if(!$app -and $teamMatches.Count -gt 1){throw ('More than one Teams app is installed. Choose the exact app name: '+(($teamMatches|ForEach-Object{$_.Name+' ['+$_.AppID+']'}) -join '; '))}
+   }
+   if(!$app){$app=$apps|Where-Object{[string]::Equals($_.Name,$name,[StringComparison]::OrdinalIgnoreCase)-or[string]::Equals($_.AppID,$name,[StringComparison]::OrdinalIgnoreCase)}|Select-Object -First 1}
+   if(!$app){
     $resolvedMatches=@($apps|Where-Object{$_.Name.IndexOf($name,[StringComparison]::OrdinalIgnoreCase)-ge 0-or$_.AppID.IndexOf($name,[StringComparison]::OrdinalIgnoreCase)-ge 0})
     if($resolvedMatches.Count -eq 1){$app=$resolvedMatches[0]}elseif($resolvedMatches.Count -gt 1){throw ('Application name is ambiguous. Use an exact Start Menu name or AppUserModelID. Candidates: '+(($resolvedMatches|Select-Object -First 8|ForEach-Object{$_.Name+' ['+$_.AppID+']'}) -join '; '))}
    }
