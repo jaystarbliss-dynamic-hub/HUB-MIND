@@ -110,6 +110,10 @@ test('Android floating orb can be dragged to a temporary hide target and fades w
     read('../../android/app/src/main/java/com/example/hubmind/agent/HubMindAgentForegroundService.kt'),
   ]);
   assert.match(overlay, /dismissedUntilNextMinimize/);
+  assert.match(overlay, /dismissed_until_next_minimize/);
+  assert.match(overlay, /positionPrefs\.edit\(\)\.putBoolean/);
+  assert.match(overlay, /val wasIdle = orbState === "idle" \|\| orbState === "muted"/);
+  assert.match(overlay, /if \(isIdle && !wasIdle\) scheduleIdleFade\(\)/);
   assert.match(overlay, /isInsideDismissTarget/);
   assert.match(overlay, /showDismissTarget/);
   assert.match(overlay, /Hide Jess/);
