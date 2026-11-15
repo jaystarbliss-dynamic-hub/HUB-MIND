@@ -108,7 +108,10 @@ test('Desktop has a live authenticated device command timeline distinct from vis
   assert.match(page, /onSnapshot/);
   assert.match(page, /users', user\.uid, 'deviceCommands/);
   assert.match(page, /resultVerified/);
-  assert.match(page, /capturePhoneScreen/);\n  assert.match(page, /CAPTURE_SCREEN/);\n  assert.match(page, /Phone screen previews are one-time/);\n  assert.match(page, /continuous screen sharing still requires/);
+  assert.match(page, /capturePhoneScreen/);
+  assert.match(page, /CAPTURE_SCREEN/);
+  assert.match(page, /Phone screen previews are one-time/);
+  assert.match(page, /continuous screen sharing still requires/);
   assert.match(app, /DeviceActivity/);
   assert.match(layout, /Live Device Activity/);
 });
