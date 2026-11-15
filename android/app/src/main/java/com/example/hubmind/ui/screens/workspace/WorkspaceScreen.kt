@@ -137,7 +137,8 @@ fun WorkspaceScreen(
 
     LaunchedEffect(webView) {
         HubMindJessNativeEvents.events.collect { gesture ->
-            val eventName = when (gesture) {
+            if (gesture == null || !HubMindJessNativeEvents.consume(gesture)) return@collect
+            val eventName = when (gesture.gesture) {
                 "toggle" -> "hubmind-native-jess-toggle"
                 "mute" -> "hubmind-native-jess-mute"
                 "stop" -> "hubmind-native-jess-stop"
