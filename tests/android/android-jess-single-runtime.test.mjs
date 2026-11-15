@@ -97,8 +97,8 @@ test('Android restores the already-authorized Google account silently instead of
   assert.match(auth, /signOutNative/);
   assert.match(auth, /nativeUserId && firebaseUser\.uid !== nativeUserId/);
   assert.match(auth, /completeGoogleSignIn/);
-  assert.match(app, /nativeAuthError/);
-  assert.match(app, /Retry secure session/);
+  assert.match(app, /AndroidGoogleSignInGate/);
+  assert.match(app, /checking=\{loading\}/);
 });
 
 test('Hub-Mind uses Google-only authentication and Android launches the native account picker', () => {
