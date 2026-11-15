@@ -3597,7 +3597,7 @@ export async function executeJessTool(
         const actionType = String(args?.actionType || '').trim();
         const androidActions = new Set([
           'TAP','DOUBLE_TAP','LONG_PRESS','SWIPE','SCROLL','TYPE_TEXT','CLEAR_TEXT','OPEN_APP',
-          'GET_INSTALLED_APPS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD',
+          'GET_INSTALLED_APPS','GET_APP_USAGE_STATS','OPEN_USAGE_ACCESS_SETTINGS','GET_SCREEN_HIERARCHY','SET_CLIPBOARD','GET_CLIPBOARD',
           'NAVIGATE_BACK','GO_HOME','OPEN_RECENTS','OPEN_NOTIFICATIONS','OPEN_QUICK_SETTINGS'
         ]);
         const windowsActions = new Set([
