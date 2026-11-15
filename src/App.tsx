@@ -60,6 +60,7 @@ const CompanionPage = safeLazy(() => import('./pages/CompanionPage'), 'Companion
 const JessTranscriptOverlayPage = safeLazy(() => import('./pages/JessTranscriptOverlayPage'), 'JessTranscriptOverlayPage');
 const JessSettings = safeLazy(() => import('./pages/JessSettings'), 'JessSettings');
 const JessOrbPage = safeLazy(() => import('./pages/JessOrbPage'), 'JessOrbPage');
+const DeviceActivity = safeLazy(() => import('./pages/DeviceActivity'), 'DeviceActivity');
 
 const LoadingScreen = () => <div className="h-screen w-full flex items-center justify-center bg-slate-950 text-slate-400"><Loader2 className="w-8 h-8 animate-spin text-accent" /></div>;
 
@@ -228,6 +229,7 @@ export default function App() {
           <Route path="meetings/:id" element={<MeetingDetail />} />
           <Route path="calendar" element={<Calendar />} />
           <Route path="colleagues" element={<Colleagues />} />
+          <Route path="device-activity" element={<DeviceActivity />} />
           <Route path="people" element={<Navigate to="/workspace/colleagues" replace />} />
           <Route path="documents" element={<Documents />} />
           <Route path="documents/:id" element={<DocumentEditor />} />
