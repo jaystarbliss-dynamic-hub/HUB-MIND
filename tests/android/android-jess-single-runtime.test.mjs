@@ -40,6 +40,7 @@ test('Android floating orb is a transparent system overlay that forwards gesture
   const events = read('android/app/src/main/java/com/example/hubmind/agent/HubMindJessNativeEvents.kt');
   const service = read('android/app/src/main/java/com/example/hubmind/agent/HubMindAgentForegroundService.kt');
   const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const activity = read('android/app/src/main/java/com/example/hubmind/MainActivity.kt');
   const manifest = read('android/app/src/main/AndroidManifest.xml');
 
   assert.match(manifest, /android\.permission\.SYSTEM_ALERT_WINDOW/);
@@ -52,6 +53,9 @@ test('Android floating orb is a transparent system overlay that forwards gesture
   assert.match(events, /fun consume\(/);
   assert.match(service, /JessOrbOverlayManager\(applicationContext\)/);
   assert.match(service, /jessOrbOverlayManager\.show\(\)/);
+  assert.match(service, /fun setHubMindActivityVisible\(context: Context, visible: Boolean\)/);
+  assert.match(activity, /setHubMindActivityVisible\(applicationContext, true\)/);
+  assert.match(activity, /setHubMindActivityVisible\(applicationContext, false\)/);
   assert.match(workspace, /hubmind-native-jess-toggle/);
 });
 
