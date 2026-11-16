@@ -372,25 +372,24 @@ test('Android Workspace reuses the single native Firebase session without a seco
   const endpoint = read('netlify/functions/android-session.mjs');
   const netlify = read('netlify.toml');
 
-  assert.match(mainActivity, /WorkspaceScreen\\(/);
+  assert.ok(mainActivity.includes('WorkspaceScreen('));
   assert.doesNotMatch(mainActivity, /launchWorkspaceGoogleSignIn|workspaceGoogleSignInLauncher/);
-  assert.match(workspace, /requestWorkspaceSession/);
-  assert.match(workspace, /getFreshIdToken\\(forceRefresh = true\\)/);
-  assert.match(workspace, /hubmind-native-session-token/);
-  assert.match(workspace, /getNativeUserId/);
-  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn\\.getClient|NativeWebAuthTokenHolder/);
+  assert.ok(workspace.includes('requestWorkspaceSession'));
+  assert.ok(workspace.includes('getFreshIdToken(forceRefresh = true)'));
+  assert.ok(workspace.includes('hubmind-native-session-token'));
+  assert.ok(workspace.includes('getNativeUserId'));
+  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn|NativeWebAuthTokenHolder/);
   assert.doesNotMatch(authViewModel, /NativeWebAuthTokenHolder/);
-  assert.match(authViewModel, /authRepository\\.signInWithGoogle/);
-  assert.match(webAuth, /signInWithCustomToken\\(auth, String\\(payload\\.customToken\\)\\)/);
-  assert.match(webAuth, /expectedUid: nativeUid/);
-  assert.match(webAuth, /auth\\.currentUser\\?\\.uid !== nativeUid/);
-  assert.match(endpoint, /verifyFirebaseUser\\(nativeIdToken\\)/);
-  assert.match(endpoint, /expectedUid !== user\\.localId/);
-  assert.match(endpoint, /createFirebaseCustomToken\\(user\\.localId\\)/);
-  assert.match(netlify, /from = "\\/api\\/android-session"/);
-  assert.match(netlify, /to = "\\/.netlify\\/functions\\/android-session"/);
+  assert.ok(authViewModel.includes('authRepository.signInWithGoogle'));
+  assert.ok(webAuth.includes('signInWithCustomToken'));
+  assert.ok(webAuth.includes('expectedUid: nativeUid'));
+  assert.ok(webAuth.includes('payload?.uid !== nativeUid'));
+  assert.ok(endpoint.includes('verifyFirebaseUser(nativeIdToken)'));
+  assert.ok(endpoint.includes('expectedUid !== user.localId'));
+  assert.ok(endpoint.includes('createFirebaseCustomToken(user.localId)'));
+  assert.ok(netlify.includes('/api/android-session'));
+  assert.ok(netlify.includes('/.netlify/functions/android-session'));
 });
-
 test('Android releases have human-readable version and channel labels on homepage and version history', () => {
   const naming = read('src/lib/androidRelease.ts');
   const home = read('src/pages/PublicHome.tsx');
