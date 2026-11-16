@@ -40,7 +40,7 @@ test('Android native shell uses the exact official workspace logo', () => {
   assert.match(mainActivity, /R\.drawable\.hub_mind_logo/);
 });
 
-test('Android opens the authenticated workspace first and never routes home to the public landing page', () => {
+test('Android opens Workspace inside the authenticated native Firebase session and never routes public home', () => {
   const mainActivity = read('../../android/app/src/main/java/com/example/hubmind/MainActivity.kt');
   const nav = read('../../android/app/src/main/java/com/example/hubmind/ui/components/CommonComponents.kt');
   const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
@@ -49,51 +49,42 @@ test('Android opens the authenticated workspace first and never routes home to t
   const login = read('../../src/pages/Login.tsx');
   const repository = read('../../android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
 
-  assert.match(mainActivity, /mutableStateOf\(HubMindNavDestination\.WORKSPACE\)/);
+  assert.match(mainActivity, /mutableStateOf\\(HubMindNavDestination\\.WORKSPACE\\)/);
   assert.match(mainActivity, /isSessionReady/);
-  assert.match(mainActivity, /isSessionReady\) \{/);
-  assert.match(nav, /WORKSPACE\("Workspace"/);
-  assert.match(nav, /JESS\("Jess"/);
-  assert.match(nav, /DEVICES\("Devices"/);
-  assert.match(nav, /ACTIVITY\("Activity"/);
-  assert.match(nav, /SETTINGS\("Settings"/);
-  assert.match(installed, /androidBridge\?\.isAndroidApp/);
-  assert.match(installed, /return android \|\| native \|\| standalone \|\| desktop/);
-  assert.match(login, /!isJessInstalledApp\(\)/);
-  assert.match(workspace, /getGoogleIdToken/);
-  assert.match(workspace, /completeGoogleSignIn/);
-  assert.match(workspace, /view\.loadUrl\(HUB_MIND_WORKSPACE_URL\)/);
+  assert.match(mainActivity, /isSessionReady\\) \\{/);
+  assert.match(nav, /WORKSPACE\\("Workspace"/);
+  assert.match(nav, /JESS\\("Jess"/);
+  assert.match(nav, /DEVICES\\("Devices"/);
+  assert.match(nav, /ACTIVITY\\("Activity"/);
+  assert.match(nav, /SETTINGS\\("Settings"/);
+  assert.match(installed, /androidBridge\\?\\.isAndroidApp/);
+  assert.match(installed, /return android \\|\\| native \\|\\| standalone \\|\\| desktop/);
+  assert.match(login, /!isJessInstalledApp\\(\\)/);
+  assert.match(workspace, /requestWorkspaceSession/);
+  assert.match(workspace, /hubmind-native-session-token/);
+  assert.match(workspace, /view\\.loadUrl\\(HUB_MIND_WORKSPACE_URL\\)/);
   assert.match(auth, /nativeAuthBootstrapPending/);
-  assert.match(auth, /bridge\.completeGoogleSignIn/);
-  assert.match(auth, /if \(!firebaseUser && nativeAuthBootstrapPending\.current\) return/);
+  assert.match(auth, /signInWithCustomToken/);
+  assert.match(auth, /if \\(!firebaseUser && nativeAuthBootstrapPending\\.current\\) return/);
   assert.match(repository, /isSessionReady/);
 });
-
-
-
-test('Android publishes the native Google token before session validity can open Workspace', () => {
+test('Android exposes the existing native Firebase session to Workspace after native sign-in', () => {
   const viewModel = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
-  const nativeHolder = read('../../android/app/src/main/java/com/example/hubmind/data/remote/NativeWebAuthTokenHolder.kt');
-  const webAuth = read('../../src/lib/auth.tsx');
   const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const webAuth = read('../../src/lib/auth.tsx');
+  const endpoint = read('../../netlify/functions/android-session.mjs');
   const repository = read('../../android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
 
-  const tokenStoreIndex = viewModel.indexOf('NativeWebAuthTokenHolder.store(idToken)');
-  const nativeSignInIndex = viewModel.indexOf('authRepository.signInWithGoogle(idToken)');
-  assert.ok(tokenStoreIndex >= 0 && nativeSignInIndex > tokenStoreIndex,
-    'the WebView token must be available before native sign-in can open Workspace');
-  assert.match(viewModel, /NativeWebAuthTokenHolder\.clear\(\)/);
-  assert.match(nativeHolder, /fun peek\(\): String/);
-  assert.match(nativeHolder, /fun clear\(\)/);
-  assert.match(workspace, /fun getGoogleIdToken\(\)/);
-  assert.match(workspace, /fun completeGoogleSignIn\(\)/);
-  assert.match(webAuth, /bridge\.getGoogleIdToken\(\)/);
-  assert.match(webAuth, /bridge\.completeGoogleSignIn/);
-  assert.match(webAuth, /nativeAuthBootstrapPending\.current\) return/);
+  assert.match(viewModel, /authRepository\\.signInWithGoogle\\(idToken\\)/);
+  assert.doesNotMatch(viewModel, /NativeWebAuthTokenHolder/);
+  assert.match(workspace, /getFreshIdToken\\(forceRefresh = true\\)/);
+  assert.match(workspace, /requestWorkspaceSession/);
+  assert.match(webAuth, /signInWithCustomToken/);
+  assert.match(webAuth, /hubmind-native-session-token/);
+  assert.match(endpoint, /verifyFirebaseUser/);
+  assert.match(endpoint, /createFirebaseCustomToken/);
   assert.match(repository, /override val isSessionReady: StateFlow<Boolean>/);
 });
-
-
 test('Android Workspace shares the native device identity with Jess and avoids duplicate WEB agents', () => {
   const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
   const crossDevice = read('../../src/services/crossDeviceService.ts');
