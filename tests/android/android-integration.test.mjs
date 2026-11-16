@@ -17,11 +17,11 @@ const assertAndroidManifestPublicationState = (manifest) => {
   }
 };
 
-test('Android Gradle configuration enforces canonical applicationId, version 2.5.2 (252), and strict release signing', () => {
+test('Android Gradle configuration enforces canonical applicationId, version 2.5.4 (254), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
-  assert.match(buildGradle, /versionCode\s*=\s*253/);
-  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.3"/);
+  assert.match(buildGradle, /versionCode\s*=\s*254/);
+  assert.match(buildGradle, /versionName\s*=\s*"2\.5\.4"/);
   assert.match(buildGradle, /if\s*\(hasDedicatedReleaseKeystore\)\s*\{\s*signingConfig\s*=\s*signingConfigs\.getByName\("release"\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.auth\)/);
   assert.match(buildGradle, /implementation\(libs\.firebase\.firestore\)/);
@@ -164,13 +164,21 @@ test('Android profile bootstrap follows the canonical invitation/admin access po
 test('Android updater only offers a published matching app with a valid SHA-256 checksum', () => {
   const checker = read('android/app/src/main/java/com/example/hubmind/data/updater/HubMindUpdateChecker.kt');
   const manifest = JSON.parse(read('public/api/app-version.json'));
+  const buildGradle = read('android/app/build.gradle.kts');
+  const currentVersionCode = Number(buildGradle.match(/versionCode\s*=\s*(\d+)/)?.[1]);
+  const currentVersionName = buildGradle.match(/versionName\s*=\s*"([^"]+)"/)?.[1];
   assert.match(checker, /releaseStatus/);
   assert.match(checker, /applicationId != context\.packageName/);
   assert.match(checker, /verifyApkChecksum/);
   assertAndroidManifestPublicationState(manifest);
   assert.equal(manifest.applicationId, 'com.aistudio.hubmind.wzyqkp');
-  assert.equal(manifest.versionCode, 252);
-  assert.equal(manifest.versionName, '2.5.2');
+  // The published manifest may lag the source during a pull request, but may
+  // never advertise a build newer than the checked-out app source.
+  assert.ok(Number.isInteger(currentVersionCode) && currentVersionCode >= manifest.versionCode);
+  assert.ok(currentVersionName);
+  if (manifest.versionCode === currentVersionCode) {
+    assert.equal(manifest.versionName, currentVersionName);
+  }
 });
 
 test('Android CI fixes Metaspace and fingerprints the built APK instead of assuming a runner debug keystore', () => {
@@ -389,8 +397,8 @@ test('Android releases have human-readable version and channel labels on homepag
   const modal = read('src/components/DesktopUpdatesModal.tsx');
   const gradle = read('android/app/build.gradle.kts');
 
-  assert.match(gradle, /versionCode\s*=\s*253/);
-  assert.match(gradle, /versionName\s*=\s*"2\.5\.3"/);
+  assert.match(gradle, /versionCode\s*=\s*254/);
+  assert.match(gradle, /versionName\s*=\s*"2\.5\.4"/);
   assert.match(naming, /OFFICIAL RELEASE/);
   assert.match(naming, /TEST BUILD · DEBUG SIGNED/);
   assert.match(naming, /compareAndroidReleaseVersions/);
@@ -418,3 +426,4 @@ test('Android Workspace WebView grants Jess microphone only to the trusted Hub-M
   assert.match(liveAudio, /navigator\.mediaDevices\.getUserMedia/);
   assert.match(liveAudio, /audioWorklet\.addModule/);
 });
+

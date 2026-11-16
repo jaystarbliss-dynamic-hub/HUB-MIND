@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RadialGradient
 import android.graphics.Shader
+import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -38,6 +39,12 @@ class JessOrbOverlayManager(context: Context) {
     private var dragStartX = 0
     private var dragStartY = 0
     private var hasMoved = false
+    private var overDismissTarget = false
+    // Preserve dismissal if Android recreates the foreground service while the
+    // same minimization cycle is still active.
+    private var dismissedUntilNextMinimize = positionPrefs.getBoolean("dismissed_until_next_minimize", false)
+    private var dismissTargetAttached = false
+    private val dismissTargetView = DismissTargetView(appContext)
     private val touchSlop = ViewConfiguration.get(appContext).scaledTouchSlop
 
     val hasPermission: Boolean
@@ -45,7 +52,7 @@ class JessOrbOverlayManager(context: Context) {
 
     fun show() {
         handler.post {
-            if (attached || !hasPermission) return@post
+            if (attached || !hasPermission || dismissedUntilNextMinimize) return@post
             val size = overlaySizePx
             val params = WindowManager.LayoutParams(
                 size,
@@ -63,6 +70,7 @@ class JessOrbOverlayManager(context: Context) {
             }
             overlayParams = params
             installTouchHandler(params, size)
+            orbView.keepVisible()
             runCatching {
                 windowManager.addView(orbView, params)
                 attached = true
@@ -79,6 +87,8 @@ class JessOrbOverlayManager(context: Context) {
                     dragStartX = params.x
                     dragStartY = params.y
                     hasMoved = false
+                    overDismissTarget = false
+                    orbView.keepVisible()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -94,11 +104,16 @@ class JessOrbOverlayManager(context: Context) {
                         params.x = (dragStartX - deltaX.toInt()).coerceIn(0, maxX)
                         params.y = (dragStartY + deltaY.toInt()).coerceIn(-verticalReach, verticalReach)
                         runCatching { windowManager.updateViewLayout(view, params) }
+                        overDismissTarget = isInsideDismissTarget(event.rawX, event.rawY)
+                        showDismissTarget(overDismissTarget)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (hasMoved) {
+                    val shouldDismiss = hasMoved && isInsideDismissTarget(event.rawX, event.rawY)
+                    if (shouldDismiss) {
+                        dismissForCurrentMinimize()
+                    } else if (hasMoved) {
                         positionPrefs.edit()
                             .putInt("x", params.x)
                             .putInt("y", params.y)
@@ -108,11 +123,17 @@ class JessOrbOverlayManager(context: Context) {
                     } else {
                         view.performClick()
                     }
+                    hideDismissTarget()
                     hasMoved = false
+                    overDismissTarget = false
+                    if (!shouldDismiss) orbView.scheduleIdleFade()
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     hasMoved = false
+                    overDismissTarget = false
+                    hideDismissTarget()
+                    orbView.scheduleIdleFade()
                     true
                 }
                 else -> true
@@ -144,8 +165,64 @@ class JessOrbOverlayManager(context: Context) {
         }
     }
 
+    private fun isInsideDismissTarget(rawX: Float, rawY: Float): Boolean {
+        val metrics = appContext.resources.displayMetrics
+        val targetHalfWidth = dp(112)
+        return rawX >= metrics.widthPixels / 2f - targetHalfWidth &&
+            rawX <= metrics.widthPixels / 2f + targetHalfWidth &&
+            rawY >= metrics.heightPixels - dp(176)
+    }
+
+    private fun showDismissTarget(highlighted: Boolean) {
+        dismissTargetView.setHighlighted(highlighted)
+        if (dismissTargetAttached) return
+        val size = dp(104)
+        val params = WindowManager.LayoutParams(
+            size,
+            size,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = dp(22)
+            title = "Hide Jess orb"
+        }
+        runCatching {
+            windowManager.addView(dismissTargetView, params)
+            dismissTargetAttached = true
+        }
+    }
+
+    private fun hideDismissTarget() {
+        if (!dismissTargetAttached) return
+        runCatching { windowManager.removeView(dismissTargetView) }
+        dismissTargetAttached = false
+    }
+
+    private fun dismissForCurrentMinimize() {
+        dismissedUntilNextMinimize = true
+        positionPrefs.edit().putBoolean("dismissed_until_next_minimize", true).apply()
+        hideDismissTarget()
+        if (attached) {
+            runCatching { windowManager.removeView(orbView) }
+            attached = false
+        }
+    }
+
+    /** A foreground return ends the current minimization cycle; the next minimize may show Jess again. */
+    fun resetDismissalForNextMinimize() {
+        handler.post {
+            dismissedUntilNextMinimize = false
+            positionPrefs.edit().putBoolean("dismissed_until_next_minimize", false).apply()
+        }
+    }
+
     fun hide() {
         handler.post {
+            hideDismissTarget()
             if (!attached) return@post
             runCatching { windowManager.removeView(orbView) }
             attached = false
@@ -177,6 +254,11 @@ class JessOrbOverlayManager(context: Context) {
         private var output = 0f
         private var connected = false
         private var phase = 0f
+        private val idleFade = object : Runnable {
+            override fun run() {
+                if (orbState == "idle" || orbState == "muted") alpha = IDLE_ALPHA
+            }
+        }
 
         private val renderFrame = object : Runnable {
             override fun run() {
@@ -194,21 +276,41 @@ class JessOrbOverlayManager(context: Context) {
         }
 
         fun updateVisualState(state: String, inputLevel: Float, outputLevel: Float, isConnected: Boolean) {
+            val wasIdle = orbState == "idle" || orbState == "muted"
             orbState = state
             input = inputLevel
             output = outputLevel
             connected = isConnected
+            val isIdle = state == "idle" || state == "muted"
+            // Only start the fade when becoming idle. Frequent meter/state
+            // refreshes must not keep resetting the inactivity timer.
+            if (isIdle && !wasIdle) scheduleIdleFade() else if (!isIdle) keepVisible()
             invalidate()
+        }
+
+        fun keepVisible() {
+            frameHandler.removeCallbacks(idleFade)
+            alpha = 1f
+        }
+
+        fun scheduleIdleFade() {
+            frameHandler.removeCallbacks(idleFade)
+            if (orbState == "idle" || orbState == "muted") {
+                alpha = 1f
+                frameHandler.postDelayed(idleFade, IDLE_FADE_DELAY_MS)
+            }
         }
 
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()
             frameHandler.removeCallbacks(renderFrame)
             frameHandler.post(renderFrame)
+            scheduleIdleFade()
         }
 
         override fun onDetachedFromWindow() {
             frameHandler.removeCallbacks(renderFrame)
+            frameHandler.removeCallbacks(idleFade)
             super.onDetachedFromWindow()
         }
 
@@ -275,8 +377,39 @@ class JessOrbOverlayManager(context: Context) {
         private fun dp(value: Float): Float = value * resources.displayMetrics.density
     }
 
+    private class DismissTargetView(context: Context) : View(context) {
+        private val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xffffffff.toInt()
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        private var highlighted = false
+
+        fun setHighlighted(value: Boolean) {
+            highlighted = value
+            invalidate()
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val centerX = width / 2f
+            val centerY = height / 2f - dp(5f)
+            circlePaint.color = if (highlighted) 0xffe11d48.toInt() else 0xdd334155.toInt()
+            canvas.drawCircle(centerX, centerY, dp(29f), circlePaint)
+            textPaint.textSize = dp(34f)
+            canvas.drawText("×", centerX, centerY + dp(11f), textPaint)
+            textPaint.textSize = dp(11f)
+            canvas.drawText("Hide Jess", centerX, height - dp(2f), textPaint)
+        }
+
+        private fun dp(value: Float): Float = value * resources.displayMetrics.density
+    }
+
     companion object {
         private const val LONG_PRESS_MS = 650L
+        private const val IDLE_FADE_DELAY_MS = 1800L
+        private const val IDLE_ALPHA = 0.32f
         private val ALLOWED_STATES = setOf(
             "idle", "listening", "thinking", "speaking", "interrupted", "muted", "error"
         )

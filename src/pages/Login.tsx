@@ -47,7 +47,10 @@ export function Login() {
     nativeAuthError,
   } = useAuth();
   const invite = new URLSearchParams(location.search).get('invite');
-  const isAndroidApp = (window as any).HubMindAndroid?.isAndroidApp?.() === true;
+  const androidBridge = (window as any).HubMindAndroid;
+  const isAndroidApp = androidBridge?.isAndroidApp?.() === true ||
+    (typeof androidBridge?.getGoogleIdToken === 'function' &&
+      typeof androidBridge?.startGoogleSignIn === 'function');
 
   useEffect(() => {
     if (invite && typeof window !== 'undefined') {
@@ -123,12 +126,12 @@ export function Login() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-      <section className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-8 text-slate-100 shadow-2xl">
+      <section className="flex w-full max-w-sm flex-col items-center text-center text-slate-100">
         {!isJessInstalledApp() && (
           <button
             type="button"
             onClick={() => navigate('/')}
-            className="mb-7 inline-flex items-center gap-2 text-xs text-slate-400 hover:text-teal-300"
+            className="mb-7 inline-flex items-center justify-center gap-2 text-xs text-slate-400 hover:text-teal-300"
           >
             <ArrowLeft size={14} /> Back to Hub-Mind
           </button>

@@ -165,6 +165,7 @@ class HubMindAgentForegroundService : Service() {
     }
 
     private fun onActivityBecameVisible() {
+        jessOrbOverlayManager.resetDismissalForNextMinimize()
         jessOrbOverlayManager.hide()
         // Once the in-app orb is visible again, the background overlay is no
         // longer needed. Keep the service only for an active mic/screen session.

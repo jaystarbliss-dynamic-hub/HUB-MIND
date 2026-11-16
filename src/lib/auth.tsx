@@ -75,7 +75,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('[Hub-Mind Android] Could not read the restored Google token:', error);
       }
       if (!googleIdToken) {
-        // The native Google client can still be completing its silent restore.
+        // Never leave the workspace behind an indefinite restore screen if the
+        // native bridge announces readiness before the token is actually available.
+        nativeAuthBootstrapPending.current = false;
+        const message = 'Android could not provide the saved Google credential. Your account remains signed in on this device; tap Continue with Google to retry.';
+        setUser(null);
+        setProfile(null);
+        setNativeAuthError(message);
+        setLoading(false);
+        window.dispatchEvent(new CustomEvent('hubmind-native-token-error', { detail: { message } }));
         return;
       }
       let nativeUserId = '';
@@ -99,13 +107,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
         .catch((error) => {
           console.error('[Hub-Mind Android] Workspace sign-in handoff failed:', error);
-          if (!disposed && !auth.currentUser) {
-            setNativeAuthError('Your existing Hub-Mind sign-in could not be connected to the workspace. Retry the secure session handoff; you should not need to choose your account again.');
+          if (!disposed) {
+            const message = 'Your existing Hub-Mind sign-in could not be connected to the workspace. Retry the secure session handoff; you should not need to choose your account again.';
+            // A stale WebView Firebase user can exist even when it does not match
+            // the native Android identity. Do not mistake that cached session for
+            // a successful handoff or leave the user on an endless restore screen.
+            setUser(null);
+            setProfile(null);
+            setNativeAuthError(message);
+            window.dispatchEvent(new CustomEvent('hubmind-native-token-error', { detail: { message } }));
+            setLoading(false);
           }
         })
         .finally(() => {
           nativeAuthBootstrapPending.current = false;
-          if (!disposed && !auth.currentUser) setLoading(false);
+          if (!disposed) setLoading(false);
         });
     };
 
@@ -113,8 +129,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (disposed) return;
       clearRestoreTimeout();
       nativeAuthBootstrapPending.current = false;
-      if (auth.currentUser) return;
+      let nativeUserId = '';
+      try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
+      if (auth.currentUser && nativeUserId && auth.currentUser.uid === nativeUserId) return;
       const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+      setUser(null);
+      setProfile(null);
       setNativeAuthError(
         message || 'Hub-Mind could not automatically restore the Google account already signed in on this phone. Retry the secure session handoff.'
       );
@@ -152,17 +172,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             restoreTimeout = null;
             if (disposed || auth.currentUser?.uid === nativeUserId) return;
             nativeAuthBootstrapPending.current = false;
+            setUser(null);
+            setProfile(null);
             setNativeAuthError('Hub-Mind is still waiting for Android to restore your saved Google session. Check your connection and retry the secure session handoff.');
             setLoading(false);
           }, 25000);
         } catch (error: any) {
           clearRestoreTimeout();
           nativeAuthBootstrapPending.current = false;
+          setUser(null);
+          setProfile(null);
           setNativeAuthError(error?.message || 'Could not restore your existing Google sign-in.');
           setLoading(false);
         }
       } else {
         nativeAuthBootstrapPending.current = false;
+        setUser(null);
+        setProfile(null);
         setNativeAuthError('This installed Hub-Mind version cannot yet restore the shared workspace session. Update the app to remove the second sign-in prompt.');
         setLoading(false);
       }
