@@ -94,7 +94,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode,
       <AndroidGoogleSignInGate
         checking={loading}
         message={nativeAuthError || authorizationError}
-        title="Connect your Google account"
+        title="Connecting to Workspace"
         subtitle="Your Android sign-in is complete. Hub-Mind is connecting that same account to Workspace."
         onRetry={retryNativeAuth}
       />
