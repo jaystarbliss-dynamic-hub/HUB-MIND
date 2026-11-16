@@ -137,11 +137,11 @@ test('Android Workspace silently joins the authenticated native Firebase user an
   assert.match(auth, /signInWithCustomToken/);
   assert.match(auth, /hubmind-native-session-token/);
   assert.match(auth, /expectedUid: nativeUid/);
-  assert.match(auth, /payload\\.uid !== nativeUid/);
-  assert.match(workspace, /getFreshIdToken\\(forceRefresh = true\\)/);
+  assert.ok(auth.includes('payload?.uid !== nativeUid'));
+  assert.ok(workspace.includes('getFreshIdToken(forceRefresh = true)'));
   assert.match(workspace, /requestWorkspaceSession/);
   assert.match(workspace, /hubmind-native-session-token/);
-  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn\\.getClient|NativeWebAuthTokenHolder/);
+  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn|NativeWebAuthTokenHolder/);
   assert.doesNotMatch(gate, /startGoogleSignIn|Continue with Google|25000/);
   assert.match(gate, /Retry Workspace Connection/);
   assert.match(gate, /same account/);
