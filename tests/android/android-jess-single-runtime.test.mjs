@@ -84,20 +84,46 @@ test('Android silently connects Workspace to the already-authenticated native Fi
   const app = read('src/App.tsx');
   const endpoint = read('netlify/functions/android-session.mjs');
 
-  assert.match(workspace, /fun requestWorkspaceSession\\(\\)/);
-  assert.match(workspace, /getFreshIdToken\\(forceRefresh = true\\)/);
-  assert.match(workspace, /fun getNativeUserId\\(\\): String/);
-  assert.match(workspace, /fun signOutNative\\(\\)/);
-  assert.match(workspace, /hubmind-native-session-token/);
+  assert.ok(workspace.includes('fun requestWorkspaceSession()'));
+  assert.ok(workspace.includes('getFreshIdToken(forceRefresh = true)'));
+  assert.ok(workspace.includes('fun getNativeUserId(): String'));
+  assert.ok(workspace.includes('fun signOutNative()'));
+  assert.ok(workspace.includes('hubmind-native-session-token'));
   assert.doesNotMatch(workspace, /startGoogleSignIn|requestGoogleIdToken|GoogleSignIn|NativeWebAuthTokenHolder/);
-  assert.match(auth, /bridge\\.requestWorkspaceSession\\(\\)/);
-  assert.match(auth, /signInWithCustomToken/);
-  assert.match(auth, /expectedUid: nativeUid/);
-  assert.match(auth, /payload\\?\\.uid !== nativeUid/);
-  assert.match(auth, /nativeAuthBootstrapPending\\.current = true/);
-  assert.match(endpoint, /verifyFirebaseUser/);
-  assert.match(endpoint, /expectedUid !== user\\.localId/);
-  assert.match(app, /AndroidGoogleSignInGate/);
+  assert.ok(auth.includes('bridge.requestWorkspaceSession()'));
+  assert.ok(auth.includes('signInWithCustomToken'));
+  assert.ok(auth.includes('expectedUid: nativeUid'));
+  assert.ok(auth.includes('payload?.uid !== nativeUid'));
+  assert.ok(auth.includes('nativeAuthBootstrapPending.current = true'));
+  assert.ok(endpoint.includes('verifyFirebaseUser'));
+  assert.ok(endpoint.includes('expectedUid !== user.localId'));
+  assert.ok(app.includes('AndroidGoogleSignInGate'));
+});
+
+test('Hub-Mind uses one native Google picker and never prompts again inside Workspace', () => {
+  const login = read('src/pages/Login.tsx');
+  const gate = read('src/components/AndroidGoogleSignInGate.tsx');
+  const app = read('src/App.tsx');
+  const nativeLogin = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthScreen.kt');
+  const nativeActivity = read('android/app/src/main/java/com/example/hubmind/MainActivity.kt');
+  const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const viewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
+
+  assert.ok(login.includes('Continue with Google'));
+  assert.doesNotMatch(login, /signInWithEmailAndPassword|createUserWithEmailAndPassword|sendPasswordResetEmail/);
+  assert.doesNotMatch(login, /Studio email|type="password"|Forgot password/);
+  assert.ok(login.includes('AndroidGoogleSignInGate'));
+  assert.ok(gate.includes('Retry Workspace Connection'));
+  assert.doesNotMatch(gate, /startGoogleSignIn|Google account chooser|Continue with Google/);
+  assert.ok(app.includes('AndroidGoogleSignInGate'));
+  assert.ok(app.includes('loading || !user || !profile'));
+  assert.ok(nativeLogin.includes('LaunchedEffect(Unit)'));
+  assert.ok(nativeLogin.includes('launchGoogleAccountPicker()'));
+  assert.ok(viewModel.includes('fun beginGoogleSignIn()'));
+  assert.ok(viewModel.includes('authRepository.signInWithGoogle'));
+  assert.ok(workspace.includes('requestWorkspaceSession'));
+  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn|onRequestInteractiveGoogleSignIn/);
+  assert.doesNotMatch(nativeActivity, /workspaceGoogleSignInLauncher|launchWorkspaceGoogleSignIn/);
 });
 test('Hub-Mind uses one native Google picker and never prompts again inside Workspace', () => {
   const login = read('src/pages/Login.tsx');
