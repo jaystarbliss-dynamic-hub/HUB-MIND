@@ -235,15 +235,6 @@ private class HubMindAndroidAuthBridge(
         }
     }
 
-    @JavascriptInterface
-    fun completeGoogleSignIn() {
-        if (isWorkspaceAuthRoute()) NativeWebAuthTokenHolder.clear()
-    }
-
-    // Compatibility for a previously bundled v2.5.0 WebView client.
-    @JavascriptInterface
-    fun consumeGoogleIdToken(): String = getGoogleIdToken()
-
     private fun dispatchWorkspaceSessionToken(firebaseIdToken: String) {
         val detail = "{detail:{firebaseIdToken:" + JSONObject.quote(firebaseIdToken) + "}}"
         val script = "window.dispatchEvent(new CustomEvent('hubmind-native-session-token',$detail));"
