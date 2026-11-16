@@ -123,21 +123,31 @@ test('Android floating orb can be dragged to a temporary hide target and fades w
   assert.match(service, /jessOrbOverlayManager\.resetDismissalForNextMinimize\(\)/);
 });
 
-test('Android Workspace auth identifies the native shell and its centered gate cannot stay stuck', async () => {
-  const [gate, app, login, auth] = await Promise.all([
+test('Android Workspace silently joins the authenticated native Firebase user and never opens a second Google picker', async () => {
+  const [gate, app, login, auth, workspace] = await Promise.all([
     read('../../src/components/AndroidGoogleSignInGate.tsx'),
     read('../../src/App.tsx'),
     read('../../src/pages/Login.tsx'),
     read('../../src/lib/auth.tsx'),
+    read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt'),
   ]);
-  assert.match(app, /typeof androidBridge\?\.getGoogleIdToken === 'function'/);
-  assert.match(login, /typeof androidBridge\?\.startGoogleSignIn === 'function'/);
-  assert.match(gate, /onTokenReady[\s\S]*?setBusy\(false\)/);
-  assert.match(gate, /25000/);
-  assert.doesNotMatch(gate, /rounded-3xl border border-slate-800 bg-slate-900/);
-  assert.match(auth, /window\.dispatchEvent\(new CustomEvent\('hubmind-native-token-error'/);
-});
 
+  assert.match(app, /requestWorkspaceSession/);
+  assert.match(login, /requestWorkspaceSession/);
+  assert.match(auth, /signInWithCustomToken/);
+  assert.match(auth, /hubmind-native-session-token/);
+  assert.match(auth, /expectedUid: nativeUid/);
+  assert.match(auth, /payload\\.uid !== nativeUid/);
+  assert.match(workspace, /getFreshIdToken\\(forceRefresh = true\\)/);
+  assert.match(workspace, /requestWorkspaceSession/);
+  assert.match(workspace, /hubmind-native-session-token/);
+  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn\\.getClient|NativeWebAuthTokenHolder/);
+  assert.doesNotMatch(gate, /startGoogleSignIn|Continue with Google|25000/);
+  assert.match(gate, /Retry Workspace Connection/);
+  assert.match(gate, /same account/);
+  assert.doesNotMatch(app, /getGoogleIdToken|startGoogleSignIn/);
+  assert.doesNotMatch(login, /getGoogleIdToken|startGoogleSignIn/);
+});
 
 test('Android WebView auth failures with a stale cached user always release the gate for recovery', async () => {
   const auth = await read('../../src/lib/auth.tsx');
