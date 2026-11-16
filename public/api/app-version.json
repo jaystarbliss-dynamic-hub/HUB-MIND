@@ -1,10 +1,10 @@
 {
   "releaseStatus": "PUBLISHED",
-  "versionCode": 253,
-  "versionName": "2.5.3",
+  "versionCode": 254,
+  "versionName": "2.5.4",
   "applicationId": "com.aistudio.hubmind.wzyqkp",
-  "apkUrl": "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.5.3/Hub-Mind-Android-v2.5.3.apk",
-  "sha256": "b196f8be6abd4ca9a576ae336a6b84f041b4d87dc7337fcd76659b16d7af7990",
-  "releaseNotes": "Hub-Mind Android v2.5.3 is an official production-signed release.",
-  "minSupportedVersionCode": 253
+  "apkUrl": "https://github.com/jaystarbliss-dynamic-hub/HUB-MIND/releases/download/android-v2.5.4/Hub-Mind-Android-v2.5.4.apk",
+  "sha256": "ba69a184f8f1b8becce3bf6666296a13592cfcde96296a5ad7b13c832924974b",
+  "releaseNotes": "Hub-Mind Android v2.5.4 is an official production-signed release.",
+  "minSupportedVersionCode": 254
 }
