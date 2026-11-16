@@ -114,7 +114,7 @@ export function Login() {
       <AndroidGoogleSignInGate
         checking={authLoading}
         message={nativeAuthError || authorizationError}
-        title="Sign in to Hub-Mind"
+        title="Connecting to Hub-Mind Workspace"
         subtitle={invite
           ? 'Your Android sign-in is complete. Hub-Mind is connecting the invited account to Workspace.'
           : 'Your Android account is already signed in. Hub-Mind is opening Workspace with that same account.'}
