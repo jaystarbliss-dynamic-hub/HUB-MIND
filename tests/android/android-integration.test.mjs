@@ -17,7 +17,7 @@ const assertAndroidManifestPublicationState = (manifest) => {
   }
 };
 
-test('Android Gradle configuration enforces canonical applicationId, version 2.5.4 (254), and strict release signing', () => {
+test('Android Gradle configuration enforces canonical applicationId, version 2.5.5 (255), and strict release signing', () => {
   const buildGradle = read('android/app/build.gradle.kts');
   assert.match(buildGradle, /applicationId\s*=\s*"com\.aistudio\.hubmind\.wzyqkp"/);
   assert.match(buildGradle, /versionCode\s*=\s*254/);
@@ -364,31 +364,31 @@ test('Checked-in google-services.json registers both debug and production signin
 });
 
 
-test('Android app opens the canonical workspace with a one-time native Google sign-in handoff', () => {
+test('Android Workspace reuses the single native Firebase session without a second Google sign-in', () => {
   const mainActivity = read('android/app/src/main/java/com/example/hubmind/MainActivity.kt');
-  const nav = read('android/app/src/main/java/com/example/hubmind/ui/components/CommonComponents.kt');
   const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
-  const tokenHolder = read('android/app/src/main/java/com/example/hubmind/data/remote/NativeWebAuthTokenHolder.kt');
   const authViewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
   const webAuth = read('src/lib/auth.tsx');
+  const endpoint = read('netlify/functions/android-session.mjs');
+  const netlify = read('netlify.toml');
 
-  assert.match(nav, /WORKSPACE\("Workspace"/);
-  assert.match(mainActivity, /HubMindNavDestination\.WORKSPACE ->/);
-  assert.match(mainActivity, /WorkspaceScreen\(/);
-  assert.match(workspace, /https:\/\/hub-mind\.netlify\.app\/workspace/);
-  assert.match(workspace, /isTrustedWorkspaceUrl/);
-  assert.match(workspace, /removeJavascriptInterface/);
-  assert.match(workspace, /handler\.cancel\(\)/);
-  assert.match(workspace, /consumeGoogleIdToken/);
-  assert.match(tokenHolder, /pendingGoogleIdToken = null/);
-  assert.match(tokenHolder, /MAX_TOKEN_AGE_MS/);
-  assert.match(authViewModel, /NativeWebAuthTokenHolder\.store\(idToken\)/);
-  assert.match(webAuth, /signInWithCredential\(auth, GoogleAuthProvider\.credential\(googleIdToken\)\)/);
-  const settingsScreen = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsScreen.kt');
-  const settingsViewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/settings/SettingsViewModel.kt');
-  assert.match(settingsScreen, /PackageInfoCompat\.getLongVersionCode/);
-  assert.match(settingsScreen, /v\$installedVersionName \(Build \$installedVersionCode\)/);
-  assert.doesNotMatch(settingsViewModel, /Current installed build: 240/);
+  assert.match(mainActivity, /WorkspaceScreen\\(/);
+  assert.doesNotMatch(mainActivity, /launchWorkspaceGoogleSignIn|workspaceGoogleSignInLauncher/);
+  assert.match(workspace, /requestWorkspaceSession/);
+  assert.match(workspace, /getFreshIdToken\\(forceRefresh = true\\)/);
+  assert.match(workspace, /hubmind-native-session-token/);
+  assert.match(workspace, /getNativeUserId/);
+  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn\\.getClient|NativeWebAuthTokenHolder/);
+  assert.doesNotMatch(authViewModel, /NativeWebAuthTokenHolder/);
+  assert.match(authViewModel, /authRepository\\.signInWithGoogle/);
+  assert.match(webAuth, /signInWithCustomToken\\(auth, String\\(payload\\.customToken\\)\\)/);
+  assert.match(webAuth, /expectedUid: nativeUid/);
+  assert.match(webAuth, /auth\\.currentUser\\?\\.uid !== nativeUid/);
+  assert.match(endpoint, /verifyFirebaseUser\\(nativeIdToken\\)/);
+  assert.match(endpoint, /expectedUid !== user\\.localId/);
+  assert.match(endpoint, /createFirebaseCustomToken\\(user\\.localId\\)/);
+  assert.match(netlify, /from = "\\/api\\/android-session"/);
+  assert.match(netlify, /to = "\\/.netlify\\/functions\\/android-session"/);
 });
 
 test('Android releases have human-readable version and channel labels on homepage and version history', () => {
