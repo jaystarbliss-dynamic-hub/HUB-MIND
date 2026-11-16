@@ -132,3 +132,45 @@ export function encodeFirestoreFields(value: Record<string, any>) {
   }
   return fields;
 }
+
+
+const FIREBASE_CUSTOM_TOKEN_AUDIENCE =
+  'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit';
+
+/** Signs a short-lived Firebase custom token for an already verified Firebase UID. */
+export function signFirebaseCustomToken(
+  uid: string,
+  account: ServiceAccount,
+  nowSeconds = Math.floor(Date.now() / 1000)
+): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) {
+    throw new Error('A valid Firebase UID is required to create a Workspace session.');
+  }
+  if (!account?.client_email || !account?.private_key) {
+    throw new Error('Firebase service-account signing credentials are incomplete.');
+  }
+  const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+  const claims = base64url(JSON.stringify({
+    iss: account.client_email,
+    sub: account.client_email,
+    aud: FIREBASE_CUSTOM_TOKEN_AUDIENCE,
+    iat: nowSeconds,
+    exp: nowSeconds + 55 * 60,
+    uid,
+  }));
+  const unsigned = header + '.' + claims;
+  const signer = createSign('RSA-SHA256');
+  signer.update(unsigned);
+  signer.end();
+  return unsigned + '.' + signer.sign(account.private_key).toString('base64url');
+}
+
+/** Create a custom token only on the server, using the private service-account key. */
+export function createFirebaseCustomToken(uid: string): string {
+  const account = readServiceAccount();
+  const configuredProject = process.env.FIREBASE_PROJECT_ID || account.project_id;
+  if (configuredProject !== account.project_id || account.project_id !== 'gen-lang-client-0197530608') {
+    throw new Error('Firebase service-account project does not match the canonical Hub-Mind project.');
+  }
+  return signFirebaseCustomToken(uid, account);
+}
