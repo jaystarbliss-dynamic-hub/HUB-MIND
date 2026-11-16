@@ -49,24 +49,41 @@ test('Android opens Workspace inside the authenticated native Firebase session a
   const login = read('../../src/pages/Login.tsx');
   const repository = read('../../android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
 
-  assert.match(mainActivity, /mutableStateOf\\(HubMindNavDestination\\.WORKSPACE\\)/);
-  assert.match(mainActivity, /isSessionReady/);
-  assert.match(mainActivity, /isSessionReady\\) \\{/);
-  assert.match(nav, /WORKSPACE\\("Workspace"/);
-  assert.match(nav, /JESS\\("Jess"/);
-  assert.match(nav, /DEVICES\\("Devices"/);
-  assert.match(nav, /ACTIVITY\\("Activity"/);
-  assert.match(nav, /SETTINGS\\("Settings"/);
-  assert.match(installed, /androidBridge\\?\\.isAndroidApp/);
-  assert.match(installed, /return android \\|\\| native \\|\\| standalone \\|\\| desktop/);
-  assert.match(login, /!isJessInstalledApp\\(\\)/);
-  assert.match(workspace, /requestWorkspaceSession/);
-  assert.match(workspace, /hubmind-native-session-token/);
-  assert.match(workspace, /view\\.loadUrl\\(HUB_MIND_WORKSPACE_URL\\)/);
-  assert.match(auth, /nativeAuthBootstrapPending/);
-  assert.match(auth, /signInWithCustomToken/);
-  assert.match(auth, /if \\(!firebaseUser && nativeAuthBootstrapPending\\.current\\) return/);
-  assert.match(repository, /isSessionReady/);
+  assert.ok(mainActivity.includes('mutableStateOf(HubMindNavDestination.WORKSPACE)'));
+  assert.ok(mainActivity.includes('isSessionReady'));
+  assert.ok(nav.includes('WORKSPACE("Workspace"'));
+  assert.ok(nav.includes('JESS("Jess"'));
+  assert.ok(nav.includes('DEVICES("Devices"'));
+  assert.ok(nav.includes('ACTIVITY("Activity"'));
+  assert.ok(nav.includes('SETTINGS("Settings"'));
+  assert.ok(installed.includes('androidBridge?.isAndroidApp'));
+  assert.ok(installed.includes('return android || native || standalone || desktop'));
+  assert.ok(login.includes('!isJessInstalledApp()'));
+  assert.ok(workspace.includes('requestWorkspaceSession'));
+  assert.ok(workspace.includes('hubmind-native-session-token'));
+  assert.ok(workspace.includes('view.loadUrl(HUB_MIND_WORKSPACE_URL)'));
+  assert.ok(auth.includes('nativeAuthBootstrapPending'));
+  assert.ok(auth.includes('signInWithCustomToken'));
+  assert.ok(auth.includes('if (!firebaseUser && nativeAuthBootstrapPending.current) return'));
+  assert.ok(repository.includes('isSessionReady'));
+});
+
+test('Android exposes the existing native Firebase session to Workspace after native sign-in', () => {
+  const viewModel = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
+  const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
+  const webAuth = read('../../src/lib/auth.tsx');
+  const endpoint = read('../../netlify/functions/android-session.mjs');
+  const repository = read('../../android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
+
+  assert.ok(viewModel.includes('authRepository.signInWithGoogle(idToken)'));
+  assert.doesNotMatch(viewModel, /NativeWebAuthTokenHolder/);
+  assert.ok(workspace.includes('getFreshIdToken(forceRefresh = true)'));
+  assert.ok(workspace.includes('requestWorkspaceSession'));
+  assert.ok(webAuth.includes('signInWithCustomToken'));
+  assert.ok(webAuth.includes('hubmind-native-session-token'));
+  assert.ok(endpoint.includes('verifyFirebaseUser'));
+  assert.ok(endpoint.includes('createFirebaseCustomToken'));
+  assert.ok(repository.includes('override val isSessionReady: StateFlow<Boolean>'));
 });
 test('Android exposes the existing native Firebase session to Workspace after native sign-in', () => {
   const viewModel = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
