@@ -85,23 +85,6 @@ test('Android exposes the existing native Firebase session to Workspace after na
   assert.ok(endpoint.includes('createFirebaseCustomToken'));
   assert.ok(repository.includes('override val isSessionReady: StateFlow<Boolean>'));
 });
-test('Android exposes the existing native Firebase session to Workspace after native sign-in', () => {
-  const viewModel = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
-  const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
-  const webAuth = read('../../src/lib/auth.tsx');
-  const endpoint = read('../../netlify/functions/android-session.mjs');
-  const repository = read('../../android/app/src/main/java/com/example/hubmind/data/repository/RepositoryImpls.kt');
-
-  assert.match(viewModel, /authRepository\\.signInWithGoogle\\(idToken\\)/);
-  assert.doesNotMatch(viewModel, /NativeWebAuthTokenHolder/);
-  assert.match(workspace, /getFreshIdToken\\(forceRefresh = true\\)/);
-  assert.match(workspace, /requestWorkspaceSession/);
-  assert.match(webAuth, /signInWithCustomToken/);
-  assert.match(webAuth, /hubmind-native-session-token/);
-  assert.match(endpoint, /verifyFirebaseUser/);
-  assert.match(endpoint, /createFirebaseCustomToken/);
-  assert.match(repository, /override val isSessionReady: StateFlow<Boolean>/);
-});
 test('Android Workspace shares the native device identity with Jess and avoids duplicate WEB agents', () => {
   const workspace = read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
   const crossDevice = read('../../src/services/crossDeviceService.ts');
@@ -120,3 +103,4 @@ test('Android Workspace shares the native device identity with Jess and avoids d
   assert.match(jess, /persistActiveDeviceTarget\(nativeId\)/);
   assert.match(nativeRepo, /val localDeviceId: String by lazy/);
 });
+
