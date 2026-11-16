@@ -22,12 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
 import com.example.hubmind.agent.HubMindAgentForegroundService
 import com.example.hubmind.agent.HubMindJessNativeEvents
 import com.example.hubmind.di.ServiceLocator
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,13 +36,12 @@ private const val HUB_MIND_WORKSPACE_HOST = "hub-mind.netlify.app"
 
 /**
  * Opens the existing, canonical Hub-Mind workspace inside the Android app.
- * Native Google Sign-In is handed to the Web Firebase client once, through a
- * narrowly scoped JavaScript bridge. No separate web account is created.
+ * The native Firebase session is the single sign-in authority. The WebView
+ * receives a fresh Firebase ID token and silently exchanges it for the same UID.
  */
 @Composable
 fun WorkspaceScreen(
     currentNativeTab: String = "WORKSPACE",
-    onRequestGoogleSignIn: (WebView) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -89,7 +85,7 @@ fun WorkspaceScreen(
             }
 
             addJavascriptInterface(
-                HubMindAndroidAuthBridge(context, this, onRequestGoogleSignIn),
+                HubMindAndroidAuthBridge(context, this),
                 "HubMindAndroid"
             )
             addJavascriptInterface(androidDeviceBridge, "HubMindNative")
@@ -185,85 +181,43 @@ private fun isTrustedWorkspaceUrl(uri: Uri): Boolean {
 
 private class HubMindAndroidAuthBridge(
     private val context: Context,
-    private val webView: WebView,
-    private val onRequestInteractiveGoogleSignIn: (WebView) -> Unit
+    private val webView: WebView
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    @Volatile private var sessionRequestInProgress = false
 
     @JavascriptInterface
     fun isAndroidApp(): Boolean = isTrustedWorkspaceOrigin()
 
-    @JavascriptInterface
-    fun getGoogleIdToken(): String {
-        if (!isWorkspaceAuthRoute()) return ""
-        return NativeWebAuthTokenHolder.peek()
-    }
-
     /**
-     * Re-acquire the saved Google credential silently when Android restored its
-     * Firebase session but the WebView's in-memory handoff token did not. If
-     * Google cannot silently restore consent, fall back to Android's native
-     * account chooser and exchange that selection into the same Firebase user.
+     * Requests a fresh Firebase ID token from the already signed-in native app.
+     * No Google account chooser or second sign-in is involved.
      */
     @JavascriptInterface
-    fun requestGoogleIdToken() {
-        if (!isWorkspaceAuthRoute()) return
+    fun requestWorkspaceSession() {
+        if (!isWorkspaceAuthRoute() || sessionRequestInProgress) return
+        sessionRequestInProgress = true
         scope.launch {
-            val config = ServiceLocator.backendClient.fetchAndValidateRuntimeConfig().getOrElse {
-                dispatchAuthBridgeEvent("hubmind-native-token-error", it.message ?: "Could not load Hub-Mind sign-in configuration.")
-                return@launch
-            }
-            val clientId = config.firebaseGoogleClientId.trim()
-            if (clientId.isBlank()) {
-                dispatchAuthBridgeEvent("hubmind-native-token-error", "Hub-Mind Google sign-in configuration is unavailable.")
-                return@launch
-            }
-
-            val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestEmail()
-                .requestIdToken(clientId)
-                .build()
-            runCatching {
-                GoogleSignIn.getClient(context, options).silentSignIn()
-                    .addOnSuccessListener { account ->
-                        val token = account?.idToken.orEmpty()
-                        if (token.isBlank()) {
-                            launchInteractiveGoogleSignIn()
-                        } else {
-                            NativeWebAuthTokenHolder.store(token)
-                            dispatchAuthBridgeEvent("hubmind-native-token-ready")
-                        }
-                    }
-                    .addOnFailureListener {
-                        // The cached Google consent may be missing even while the
-                        // native Firebase session is valid. Fall back to the actual
-                        // Android account picker instead of leaving Workspace stuck.
-                        launchInteractiveGoogleSignIn()
-                    }
-            }.onFailure {
-                launchInteractiveGoogleSignIn()
-            }
-        }
-    }
-
-    /** Open the Android-native Google account chooser from a WebView recovery screen. */
-    @JavascriptInterface
-    fun startGoogleSignIn() {
-        if (!isWorkspaceAuthRoute()) return
-        launchInteractiveGoogleSignIn()
-    }
-
-    private fun launchInteractiveGoogleSignIn() {
-        webView.post {
-            runCatching {
-                onRequestInteractiveGoogleSignIn(webView)
-            }.onFailure { error ->
+            try {
+                val firebaseIdToken = ServiceLocator.backendClient
+                    .getFreshIdToken(forceRefresh = true)
+                    .getOrThrow()
+                dispatchWorkspaceSessionToken(firebaseIdToken)
+            } catch (error: Throwable) {
                 dispatchAuthBridgeEvent(
-                    "hubmind-native-token-error",
-                    error.message ?: "Could not open the Google account chooser."
+                    "hubmind-native-session-error",
+                    error.message ?: "Could not read the signed-in Android Firebase session."
                 )
+            } finally {
+                sessionRequestInProgress = false
             }
         }
+    }
+
+    /** Acknowledges that the WebView has joined the same Firebase UID. */
+    @JavascriptInterface
+    fun completeWorkspaceSession() {
+        // Nothing to persist or clear: the native Firebase session remains authoritative.
     }
 
     @JavascriptInterface
@@ -290,8 +244,14 @@ private class HubMindAndroidAuthBridge(
     @JavascriptInterface
     fun consumeGoogleIdToken(): String = getGoogleIdToken()
 
+    private fun dispatchWorkspaceSessionToken(firebaseIdToken: String) {
+        val detail = "{detail:{firebaseIdToken:" + JSONObject.quote(firebaseIdToken) + "}}"
+        val script = "window.dispatchEvent(new CustomEvent('hubmind-native-session-token',$detail));"
+        webView.post { webView.evaluateJavascript(script, null) }
+    }
+
     private fun dispatchAuthBridgeEvent(name: String, message: String? = null) {
-        if (name !in setOf("hubmind-native-token-ready", "hubmind-native-token-error")) return
+        if (name != "hubmind-native-session-error") return
         val init = if (message != null) "{detail:{message:" + JSONObject.quote(message.take(500)) + "}}" else "{}"
         val script = "window.dispatchEvent(new CustomEvent('$name',$init));"
         webView.post { webView.evaluateJavascript(script, null) }
