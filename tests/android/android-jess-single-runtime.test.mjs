@@ -124,30 +124,3 @@ test('Hub-Mind uses one native Google picker and never prompts again inside Work
   assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn|onRequestInteractiveGoogleSignIn/);
   assert.doesNotMatch(nativeActivity, /workspaceGoogleSignInLauncher|launchWorkspaceGoogleSignIn/);
 });
-test('Hub-Mind uses Google-only authentication and Android launches the native account picker', () => {
-  const login = read('src/pages/Login.tsx');
-  const gate = read('src/components/AndroidGoogleSignInGate.tsx');
-  const app = read('src/App.tsx');
-  const nativeLogin = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthScreen.kt');
-  const nativeActivity = read('android/app/src/main/java/com/example/hubmind/MainActivity.kt');
-  const workspace = read('android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt');
-  const viewModel = read('android/app/src/main/java/com/example/hubmind/ui/screens/auth/AuthViewModel.kt');
-
-  assert.match(login, /Continue with Google/);
-  assert.doesNotMatch(login, /signInWithEmailAndPassword|createUserWithEmailAndPassword|sendPasswordResetEmail/);
-  assert.doesNotMatch(login, /Studio email|type="password"|Forgot password/);
-  assert.match(login, /AndroidGoogleSignInGate/);
-  assert.match(gate, /HubMindAndroid/);
-  assert.match(gate, /startGoogleSignIn/);
-  assert.match(app, /AndroidGoogleSignInGate/);
-  assert.match(app, /loading \|\| !user \|\| !profile/);
-  assert.match(nativeLogin, /LaunchedEffect\(Unit\)/);
-  assert.match(nativeLogin, /launchGoogleAccountPicker\(\)/);
-  assert.match(viewModel, /fun beginGoogleSignIn\(\)/);
-  assert.match(workspace, /fun startGoogleSignIn\(\)/);
-  assert.match(workspace, /onRequestInteractiveGoogleSignIn/);
-  assert.match(workspace, /launchInteractiveGoogleSignIn\(\)/);
-  assert.match(nativeActivity, /workspaceGoogleSignInLauncher/);
-  assert.match(nativeActivity, /ServiceLocator\.authRepository\.signInWithGoogle\(idToken\)/);
-  assert.match(nativeActivity, /onRequestGoogleSignIn = ::launchWorkspaceGoogleSignIn/);
-});
