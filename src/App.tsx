@@ -82,11 +82,10 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, { error:
 }
 
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
-  const { user, profile, loading, nativeAuthError, authorizationError } = useAuth();
+  const { user, profile, loading, nativeAuthError, authorizationError, retryNativeAuth } = useAuth();
   const androidBridge = (window as any).HubMindAndroid;
   const isAndroidApp = androidBridge?.isAndroidApp?.() === true ||
-    (typeof androidBridge?.getGoogleIdToken === 'function' &&
-      typeof androidBridge?.startGoogleSignIn === 'function');
+    typeof androidBridge?.requestWorkspaceSession === 'function';
 
   // Android has one native Google identity. Never send its embedded WebView to
   // the browser login form or expose a partially authenticated workspace shell.
@@ -95,8 +94,9 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode,
       <AndroidGoogleSignInGate
         checking={loading}
         message={nativeAuthError || authorizationError}
-        title="Connect your Google account"
-        subtitle="Hub-Mind is checking the Google account already registered on this device."
+        title="Connecting to Workspace"
+        subtitle="Your Android sign-in is complete. Hub-Mind is connecting that same account to Workspace."
+        onRetry={retryNativeAuth}
       />
     );
   }

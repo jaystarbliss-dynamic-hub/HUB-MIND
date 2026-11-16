@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.hubmind.data.model.User
 import com.example.hubmind.data.repository.AuthRepository
-import com.example.hubmind.data.remote.NativeWebAuthTokenHolder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,17 +43,15 @@ class AuthViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
 
-            // Publish the WebView handoff token before AuthRepository marks the
-            // native session valid. MainActivity can open Workspace immediately
-            // after that state change, so storing it only in onSuccess is too late.
-            NativeWebAuthTokenHolder.store(idToken)
-
+            // Native Firebase Auth is the single sign-in authority. Workspace
+            // receives a fresh Firebase ID token from that authenticated session
+            // after the native shell opens; Google credentials are not handed
+            // through a second sign-in flow.
             authRepository.signInWithGoogle(idToken).fold(
                 onSuccess = { user ->
                     _uiState.value = _uiState.value.copy(isLoading = false, user = user)
                 },
                 onFailure = { error ->
-                    NativeWebAuthTokenHolder.clear()
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
                         errorMessage = error.message ?: "Google sign-in failed."

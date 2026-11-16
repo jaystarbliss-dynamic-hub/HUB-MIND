@@ -123,49 +123,29 @@ test('Android floating orb can be dragged to a temporary hide target and fades w
   assert.match(service, /jessOrbOverlayManager\.resetDismissalForNextMinimize\(\)/);
 });
 
-test('Android Workspace auth identifies the native shell and its centered gate cannot stay stuck', async () => {
-  const [gate, app, login, auth] = await Promise.all([
+test('Android Workspace silently joins the authenticated native Firebase user and never opens a second Google picker', async () => {
+  const [gate, app, login, auth, workspace] = await Promise.all([
     read('../../src/components/AndroidGoogleSignInGate.tsx'),
     read('../../src/App.tsx'),
     read('../../src/pages/Login.tsx'),
     read('../../src/lib/auth.tsx'),
+    read('../../android/app/src/main/java/com/example/hubmind/ui/screens/workspace/WorkspaceScreen.kt'),
   ]);
-  assert.match(app, /typeof androidBridge\?\.getGoogleIdToken === 'function'/);
-  assert.match(login, /typeof androidBridge\?\.startGoogleSignIn === 'function'/);
-  assert.match(gate, /onTokenReady[\s\S]*?setBusy\(false\)/);
-  assert.match(gate, /25000/);
-  assert.doesNotMatch(gate, /rounded-3xl border border-slate-800 bg-slate-900/);
-  assert.match(auth, /window\.dispatchEvent\(new CustomEvent\('hubmind-native-token-error'/);
+
+  assert.match(app, /requestWorkspaceSession/);
+  assert.match(login, /requestWorkspaceSession/);
+  assert.match(auth, /signInWithCustomToken/);
+  assert.match(auth, /hubmind-native-session-token/);
+  assert.match(auth, /expectedUid: nativeUid/);
+  assert.ok(auth.includes('payload?.uid !== nativeUid'));
+  assert.ok(workspace.includes('getFreshIdToken(forceRefresh = true)'));
+  assert.match(workspace, /requestWorkspaceSession/);
+  assert.match(workspace, /hubmind-native-session-token/);
+  assert.doesNotMatch(workspace, /startGoogleSignIn|GoogleSignIn|NativeWebAuthTokenHolder/);
+  assert.doesNotMatch(gate, /startGoogleSignIn|Continue with Google|25000/);
+  assert.match(gate, /Retry Workspace Connection/);
+  assert.match(gate, /same account/);
+  assert.doesNotMatch(app, /getGoogleIdToken|startGoogleSignIn/);
+  assert.doesNotMatch(login, /getGoogleIdToken|startGoogleSignIn/);
 });
 
-
-test('Android WebView auth failures with a stale cached user always release the gate for recovery', async () => {
-  const auth = await read('../../src/lib/auth.tsx');
-  const signInStart = auth.indexOf('void signInWithCredential(');
-  const catchStart = auth.indexOf('.catch((error) => {', signInStart);
-  const finallyStart = auth.indexOf('.finally(() => {', catchStart);
-  const catchBlock = auth.slice(catchStart, finallyStart);
-  const emptyTokenStart = auth.indexOf('if (!googleIdToken) {');
-  const emptyTokenEnd = auth.indexOf('\n      }', emptyTokenStart);
-  const emptyTokenBlock = auth.slice(emptyTokenStart, emptyTokenEnd);
-
-  assert.notEqual(signInStart, -1, 'native Google credential exchange must be present');
-  assert.match(catchBlock, /if \(!disposed\)/);
-  assert.match(catchBlock, /setUser\(null\)/);
-  assert.match(catchBlock, /setProfile\(null\)/);
-  assert.match(catchBlock, /hubmind-native-token-error/);
-  assert.match(catchBlock, /setLoading\(false\)/);
-  assert.doesNotMatch(catchBlock, /if \(!disposed && !auth\.currentUser\)/);
-  assert.match(emptyTokenBlock, /nativeAuthBootstrapPending\.current = false/);
-  assert.match(emptyTokenBlock, /setLoading\(false\)/);
-  assert.match(emptyTokenBlock, /hubmind-native-token-error/);
-
-  const tokenErrorStart = auth.indexOf('const onTokenError = (event: Event) => {');
-  const tokenErrorEnd = auth.indexOf('\n    };', tokenErrorStart);
-  const tokenErrorBlock = auth.slice(tokenErrorStart, tokenErrorEnd);
-  assert.match(tokenErrorBlock, /bridge\.getNativeUserId/);
-  assert.match(tokenErrorBlock, /auth\.currentUser\.uid === nativeUserId/);
-  assert.match(tokenErrorBlock, /setUser\(null\)/);
-  assert.match(tokenErrorBlock, /setProfile\(null\)/);
-  assert.match(tokenErrorBlock, /setLoading\(false\)/);
-});

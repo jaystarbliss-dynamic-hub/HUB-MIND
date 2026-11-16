@@ -17,6 +17,11 @@
   node_bundler = "esbuild"
 
 [[redirects]]
+  from = "/api/android-session"
+  to = "/.netlify/functions/android-session"
+  status = 200
+
+[[redirects]]
   from = "/api/config"
   to = "/.netlify/functions/config"
   status = 200

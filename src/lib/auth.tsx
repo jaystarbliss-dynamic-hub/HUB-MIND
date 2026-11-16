@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { onAuthStateChanged, onIdTokenChanged, GoogleAuthProvider, signInWithCredential, User as FirebaseUser, signOut } from 'firebase/auth';
+import { onAuthStateChanged, onIdTokenChanged, signInWithCustomToken, User as FirebaseUser, signOut } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, limit, query, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebaseConfig';
 import { User } from '../types';
@@ -49,156 +49,126 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setNativeAuthRetryNonce(value => value + 1);
   };
 
-  // Android signs in once natively. If the WebView's Firebase persistence was
-  // lost during a process restart, request the same saved Google account
-  // silently and exchange its ID token with the Web Firebase SDK. Never send
-  // the user to a second interactive login screen during this handoff.
+  // Android Firebase Auth is the single sign-in authority. The embedded
+  // Workspace exchanges that already-authenticated native session for a short-
+  // lived Firebase custom token belonging to the same UID. It never opens a
+  // second Google account chooser.
   useEffect(() => {
     const bridge = (window as any).HubMindAndroid;
-    if (typeof bridge?.getGoogleIdToken !== 'function') return;
+    if (bridge?.isAndroidApp?.() !== true || typeof bridge?.requestWorkspaceSession !== 'function') return;
 
     let disposed = false;
-    let restoreTimeout: number | null = null;
-    const clearRestoreTimeout = () => {
-      if (restoreTimeout !== null) window.clearTimeout(restoreTimeout);
-      restoreTimeout = null;
-    };
-    const onTokenReady = () => {
-      if (disposed) return;
-      clearRestoreTimeout();
-      nativeAuthBootstrapPending.current = true;
-      setNativeAuthError(null);
-      let googleIdToken = '';
-      try {
-        googleIdToken = String(bridge.getGoogleIdToken() || '').trim();
-      } catch (error) {
-        console.warn('[Hub-Mind Android] Could not read the restored Google token:', error);
-      }
-      if (!googleIdToken) {
-        // Never leave the workspace behind an indefinite restore screen if the
-        // native bridge announces readiness before the token is actually available.
-        nativeAuthBootstrapPending.current = false;
-        const message = 'Android could not provide the saved Google credential. Your account remains signed in on this device; tap Continue with Google to retry.';
-        setUser(null);
-        setProfile(null);
-        setNativeAuthError(message);
-        setLoading(false);
-        window.dispatchEvent(new CustomEvent('hubmind-native-token-error', { detail: { message } }));
-        return;
-      }
-      let nativeUserId = '';
-      try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
-      if (auth.currentUser && (!nativeUserId || auth.currentUser.uid === nativeUserId)) {
-        try { bridge.completeGoogleSignIn?.(); } catch {}
-        nativeAuthBootstrapPending.current = false;
-        return;
-      }
-
-      // If the native app restored a different authorized account than the
-      // WebView, exchange the native account's credential and replace the stale
-      // browser identity instead of showing a second login page.
-      void signInWithCredential(auth, GoogleAuthProvider.credential(googleIdToken))
-        .then(() => {
-          // The native token is acknowledged only after Web Firebase accepts it.
-          try { bridge.completeGoogleSignIn?.(); } catch {}
-          if (window.location.pathname === '/' || window.location.pathname === '/login') {
-            window.location.replace('/workspace');
-          }
-        })
-        .catch((error) => {
-          console.error('[Hub-Mind Android] Workspace sign-in handoff failed:', error);
-          if (!disposed) {
-            const message = 'Your existing Hub-Mind sign-in could not be connected to the workspace. Retry the secure session handoff; you should not need to choose your account again.';
-            // A stale WebView Firebase user can exist even when it does not match
-            // the native Android identity. Do not mistake that cached session for
-            // a successful handoff or leave the user on an endless restore screen.
-            setUser(null);
-            setProfile(null);
-            setNativeAuthError(message);
-            window.dispatchEvent(new CustomEvent('hubmind-native-token-error', { detail: { message } }));
-            setLoading(false);
-          }
-        })
-        .finally(() => {
-          nativeAuthBootstrapPending.current = false;
-          if (!disposed) setLoading(false);
-        });
+    let requestTimeout: number | null = null;
+    let exchangeInFlight = false;
+    const clearRequestTimeout = () => {
+      if (requestTimeout !== null) window.clearTimeout(requestTimeout);
+      requestTimeout = null;
     };
 
-    const onTokenError = (event: Event) => {
-      if (disposed) return;
-      clearRestoreTimeout();
+    const showSessionError = (message: string) => {
       nativeAuthBootstrapPending.current = false;
-      let nativeUserId = '';
-      try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
-      if (auth.currentUser && nativeUserId && auth.currentUser.uid === nativeUserId) return;
-      const message = (event as CustomEvent<{ message?: string }>).detail?.message;
       setUser(null);
       setProfile(null);
-      setNativeAuthError(
-        message || 'Hub-Mind could not automatically restore the Google account already signed in on this phone. Retry the secure session handoff.'
-      );
+      setNativeAuthError(message);
       setLoading(false);
     };
 
-    window.addEventListener('hubmind-native-token-ready', onTokenReady);
-    window.addEventListener('hubmind-native-token-error', onTokenError);
+    const onNativeSessionError = (event: Event) => {
+      if (disposed) return;
+      clearRequestTimeout();
+      const nativeUid = String(bridge.getNativeUserId?.() || '').trim();
+      if (nativeUid && auth.currentUser?.uid === nativeUid) return;
+      const message = (event as CustomEvent<{ message?: string }>).detail?.message;
+      showSessionError(message || 'Hub-Mind could not connect the signed-in Android account to Workspace. Retry the connection.');
+    };
 
-    let existingToken = '';
-    try {
-      existingToken = String(bridge.getGoogleIdToken() || '').trim();
-    } catch (error) {
-      console.warn('[Hub-Mind Android] Native sign-in handoff was unavailable:', error);
-    }
+    const onNativeSessionToken = async (event: Event) => {
+      if (disposed || exchangeInFlight) return;
+      clearRequestTimeout();
+      exchangeInFlight = true;
+      nativeAuthBootstrapPending.current = true;
+      setNativeAuthError(null);
 
-    let nativeUserId = '';
-    try { nativeUserId = String(bridge.getNativeUserId?.() || '').trim(); } catch {}
-    const webUserMatchesNative = !!auth.currentUser &&
-      (!nativeUserId || auth.currentUser.uid === nativeUserId);
+      try {
+        const detail = (event as CustomEvent<{ firebaseIdToken?: string }>).detail;
+        const nativeIdToken = String(detail?.firebaseIdToken || '').trim();
+        const nativeUid = String(bridge.getNativeUserId?.() || '').trim();
+        if (!nativeIdToken || !nativeUid) {
+          throw new Error('Android did not provide its authenticated Hub-Mind session. Please retry the Workspace connection.');
+        }
 
-    if (webUserMatchesNative) {
-      if (existingToken) {
-        try { bridge.completeGoogleSignIn?.(); } catch {}
+        // A persisted WebView Firebase session for the same UID is already the
+        // same account. A mismatch is replaced by the verified native session.
+        if (auth.currentUser?.uid !== nativeUid) {
+          const response = await fetch('/api/android-session', {
+            method: 'POST',
+            cache: 'no-store',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + nativeIdToken,
+            },
+            body: JSON.stringify({ expectedUid: nativeUid }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload?.customToken || payload?.uid !== nativeUid) {
+            throw new Error(payload?.error || 'The signed-in Android account could not be connected to Workspace.');
+          }
+
+          await signInWithCustomToken(auth, String(payload.customToken));
+          if (auth.currentUser?.uid !== nativeUid) {
+            throw new Error('Workspace connected to a different account. The Android session was not changed.');
+          }
+        }
+
+        try { bridge.completeWorkspaceSession?.(); } catch {}
+        setNativeAuthError(null);
+        if (window.location.pathname === '/' || window.location.pathname === '/login') {
+          window.location.replace('/workspace');
+        }
+      } catch (error: any) {
+        console.error('[Hub-Mind Android] Native Workspace session exchange failed:', error);
+        if (!disposed) {
+          showSessionError(error?.message || 'Could not connect your Android account to Workspace. Please retry.');
+        }
+      } finally {
+        exchangeInFlight = false;
+        nativeAuthBootstrapPending.current = false;
+        if (!disposed) setLoading(false);
       }
-    } else if (existingToken) {
-      onTokenReady();
+    };
+
+    window.addEventListener('hubmind-native-session-token', onNativeSessionToken);
+    window.addEventListener('hubmind-native-session-error', onNativeSessionError);
+
+    const nativeUid = String(bridge.getNativeUserId?.() || '').trim();
+    if (nativeUid && auth.currentUser?.uid === nativeUid) {
+      // Both native and Web Firebase already hold the same persisted account.
+      nativeAuthBootstrapPending.current = false;
+      setNativeAuthError(null);
     } else {
       nativeAuthBootstrapPending.current = true;
       setNativeAuthError(null);
-      if (typeof bridge.requestGoogleIdToken === 'function') {
-        try {
-          bridge.requestGoogleIdToken();
-          restoreTimeout = window.setTimeout(() => {
-            restoreTimeout = null;
-            if (disposed || auth.currentUser?.uid === nativeUserId) return;
-            nativeAuthBootstrapPending.current = false;
-            setUser(null);
-            setProfile(null);
-            setNativeAuthError('Hub-Mind is still waiting for Android to restore your saved Google session. Check your connection and retry the secure session handoff.');
-            setLoading(false);
-          }, 25000);
-        } catch (error: any) {
-          clearRestoreTimeout();
-          nativeAuthBootstrapPending.current = false;
-          setUser(null);
-          setProfile(null);
-          setNativeAuthError(error?.message || 'Could not restore your existing Google sign-in.');
-          setLoading(false);
-        }
-      } else {
-        nativeAuthBootstrapPending.current = false;
-        setUser(null);
-        setProfile(null);
-        setNativeAuthError('This installed Hub-Mind version cannot yet restore the shared workspace session. Update the app to remove the second sign-in prompt.');
-        setLoading(false);
+      setLoading(true);
+      try {
+        // Android returns a fresh Firebase ID token from its existing native
+        // session. This is silent; it must never launch Google Sign-In again.
+        bridge.requestWorkspaceSession();
+        requestTimeout = window.setTimeout(() => {
+          requestTimeout = null;
+          if (disposed || auth.currentUser?.uid === nativeUid) return;
+          showSessionError('Workspace is taking too long to connect to your signed-in Android account. Retry the Workspace connection; you do not need to sign in again.');
+        }, 30000);
+      } catch (error: any) {
+        showSessionError(error?.message || 'Could not request the signed-in Android session.');
       }
     }
 
     return () => {
       disposed = true;
-      clearRestoreTimeout();
-      window.removeEventListener('hubmind-native-token-ready', onTokenReady);
-      window.removeEventListener('hubmind-native-token-error', onTokenError);
+      clearRequestTimeout();
+      window.removeEventListener('hubmind-native-session-token', onNativeSessionToken);
+      window.removeEventListener('hubmind-native-session-error', onNativeSessionError);
     };
   }, [nativeAuthRetryNonce]);
 

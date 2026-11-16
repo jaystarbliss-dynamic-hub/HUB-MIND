@@ -45,12 +45,12 @@ export function Login() {
     loading: authLoading,
     authorizationError,
     nativeAuthError,
+    retryNativeAuth,
   } = useAuth();
   const invite = new URLSearchParams(location.search).get('invite');
   const androidBridge = (window as any).HubMindAndroid;
   const isAndroidApp = androidBridge?.isAndroidApp?.() === true ||
-    (typeof androidBridge?.getGoogleIdToken === 'function' &&
-      typeof androidBridge?.startGoogleSignIn === 'function');
+    typeof androidBridge?.requestWorkspaceSession === 'function';
 
   useEffect(() => {
     if (invite && typeof window !== 'undefined') {
@@ -114,10 +114,11 @@ export function Login() {
       <AndroidGoogleSignInGate
         checking={authLoading}
         message={nativeAuthError || authorizationError}
-        title="Sign in to Hub-Mind"
+        title="Connecting to Hub-Mind Workspace"
         subtitle={invite
-          ? 'Choose the Google account associated with your Hub-Mind invitation.'
-          : 'Choose a Google account registered on this device to continue.'}
+          ? 'Your Android sign-in is complete. Hub-Mind is connecting the invited account to Workspace.'
+          : 'Your Android account is already signed in. Hub-Mind is opening Workspace with that same account.'}
+        onRetry={retryNativeAuth}
       />
     );
   }
